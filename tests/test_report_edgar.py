@@ -530,3 +530,109 @@ def test_match_concept_falls_back_to_priority_order_when_no_quarterly_anywhere()
     assert out is not None
     assert any(f["val"] == 1_000_000_000 for f in out), \
         "first-priority concept wins when neither has quarterly survivors"
+
+
+# --- fetch_recent_filings ----------------------------------------------------
+
+from datetime import date as _date  # noqa: E402
+
+
+def _submissions_payload() -> dict:
+    return {
+        "cik": 1051627,
+        "filings": {
+            "recent": {
+                "form": ["4", "4", "144", "10-Q", "8-K", "SC 13G/A", "8-K", "4"],
+                "filingDate": [
+                    "2026-08-19", "2026-08-19", "2026-08-17", "2026-08-13",
+                    "2026-07-30", "2026-08-12", "2026-05-01", "2026-05-02",
+                ],
+                "items": ["", "", "", "", "2.02,9.01", "", "5.02", ""],
+                "primaryDocDescription": ["FORM 4", "FORM 4", "", "FORM 10-Q", "8-K", "", "8-K", "FORM 4"],
+                "accessionNumber": [
+                    "0001051627-26-000010", "0001051627-26-000011", "0001051627-26-000012",
+                    "0001051627-26-000013", "0001051627-26-000009", "0001051627-26-000014",
+                    "0001051627-26-000005", "0001051627-26-000006",
+                ],
+                "primaryDocument": [
+                    "f4.xml", "f4.xml", "f144.pdf", "axti-10q.htm",
+                    "axti-8k.htm", "sc13g.htm", "axti-8k-may.htm", "f4.xml",
+                ],
+            }
+        },
+    }
+
+
+def test_fetch_recent_filings_filters_forms_window_and_counts_form4(tmp_path, monkeypatch):
+    monkeypatch.setattr(edgar, "CACHE_DIR", tmp_path)
+    monkeypatch.setattr(edgar, "_get_cik", lambda t: "0001051627")
+    monkeypatch.setattr(edgar, "_http_get_json", lambda url: _submissions_payload())
+
+    result = edgar.fetch_recent_filings(
+        "AXTI", days=60, max_items=8, as_of=_date(2026, 9, 9)
+    )
+    assert result is not None
+    filings, form4_count = result
+    # Window = 2026-07-11..2026-09-09: drops the two May filings.
+    forms = [f["form"] for f in filings]
+    assert forms == ["10-Q", "SC 13G/A", "8-K"]          # newest first, Form 4 / 144 excluded
+    assert form4_count == 2                              # only the two August Form 4s
+    eightk = filings[-1]
+    assert eightk["date"] == "2026-07-30"
+    assert eightk["items"] == "2.02,9.01"
+    assert eightk["description"] == "8-K"
+    assert eightk["url"] == (
+        "https://www.sec.gov/Archives/edgar/data/1051627/000105162726000009/axti-8k.htm"
+    )
+    # Cache written for reuse.
+    assert (tmp_path / "submissions_CIK0001051627.json").is_file()
+
+
+def test_fetch_recent_filings_respects_max_items(tmp_path, monkeypatch):
+    monkeypatch.setattr(edgar, "CACHE_DIR", tmp_path)
+    monkeypatch.setattr(edgar, "_get_cik", lambda t: "0001051627")
+    monkeypatch.setattr(edgar, "_http_get_json", lambda url: _submissions_payload())
+    filings, _ = edgar.fetch_recent_filings("AXTI", days=60, max_items=2, as_of=_date(2026, 9, 9))
+    assert [f["form"] for f in filings] == ["10-Q", "SC 13G/A"]
+
+
+def test_fetch_recent_filings_uses_fresh_cache_without_network(tmp_path, monkeypatch):
+    monkeypatch.setattr(edgar, "CACHE_DIR", tmp_path)
+    monkeypatch.setattr(edgar, "_get_cik", lambda t: "0001051627")
+    edgar._save_json_cache(tmp_path / "submissions_CIK0001051627.json", _submissions_payload())
+    calls = []
+    monkeypatch.setattr(edgar, "_http_get_json", lambda url: calls.append(url) or None)
+    result = edgar.fetch_recent_filings("AXTI", days=60, max_items=8, as_of=_date(2026, 9, 9))
+    assert result is not None and calls == []
+
+
+def test_fetch_recent_filings_returns_none_when_cik_unknown(tmp_path, monkeypatch):
+    monkeypatch.setattr(edgar, "CACHE_DIR", tmp_path)
+    monkeypatch.setattr(edgar, "_get_cik", lambda t: None)
+    assert edgar.fetch_recent_filings("ZZZZ", days=60, max_items=8) is None
+
+
+def test_fetch_recent_filings_returns_none_when_network_and_cache_fail(tmp_path, monkeypatch):
+    monkeypatch.setattr(edgar, "CACHE_DIR", tmp_path)
+    monkeypatch.setattr(edgar, "_get_cik", lambda t: "0001051627")
+    monkeypatch.setattr(edgar, "_http_get_json", lambda url: None)
+    assert edgar.fetch_recent_filings("AXTI", days=60, max_items=8) is None
+
+
+def test_fetch_recent_filings_tolerates_ragged_arrays(tmp_path, monkeypatch):
+    """SEC occasionally ships arrays of unequal length; zip must not blow up
+    and missing `items` must render as empty string."""
+    monkeypatch.setattr(edgar, "CACHE_DIR", tmp_path)
+    monkeypatch.setattr(edgar, "_get_cik", lambda t: "0000000001")
+    payload = {"filings": {"recent": {
+        "form": ["8-K", "10-K"], "filingDate": ["2026-09-01", "2026-08-01"],
+        "accessionNumber": ["0000000001-26-000001", "0000000001-26-000002"],
+        "primaryDocument": ["a.htm", "b.htm"],
+        # no `items`, and description shorter than the others
+        "primaryDocDescription": ["8-K"],
+    }}}
+    monkeypatch.setattr(edgar, "_http_get_json", lambda url: payload)
+    filings, form4 = edgar.fetch_recent_filings("X", days=60, max_items=8, as_of=_date(2026, 9, 9))
+    assert [f["form"] for f in filings] == ["8-K", "10-K"]
+    assert filings[0]["items"] == "" and filings[1]["description"] == ""
+    assert form4 == 0

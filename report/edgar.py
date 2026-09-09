@@ -509,3 +509,98 @@ def fetch_edgar_fundamentals(ticker: str) -> dict | None:
         "quarterly_revenue_yoy_4q": rev_q_yoy,
         "quarterly_revenue_yoy_4q_labels": rev_labels,
     }
+
+
+# --- Recent filings (evidence bundle) ---------------------------------------
+
+SUBMISSIONS_URL = "https://data.sec.gov/submissions/CIK{cik}.json"
+SUBMISSIONS_TTL = 86_400  # 1 day; the pre-market path (phase 2) passes 6h
+
+# Material-event / periodic / offering / ownership forms. Form 4 and 144
+# (insider trades) are counted, not listed — too noisy for the LLM.
+FILING_FORMS_OF_INTEREST: frozenset[str] = frozenset({
+    "8-K", "8-K/A", "6-K", "10-Q", "10-Q/A", "10-K", "10-K/A",
+    "S-1", "S-1/A", "S-3", "S-3/A",
+})
+_FILING_FORM_PREFIXES = ("424B", "SC 13D", "SC 13G")
+ARCHIVE_URL = "https://www.sec.gov/Archives/edgar/data/{cik_int}/{acc_nodash}/{doc}"
+
+
+def _form_of_interest(form: str) -> bool:
+    return form in FILING_FORMS_OF_INTEREST or form.startswith(_FILING_FORM_PREFIXES)
+
+
+def _fetch_submissions(cik: str, ttl_seconds: int) -> dict | None:
+    cache_path = CACHE_DIR / f"submissions_CIK{cik}.json"
+    if _is_fresh(cache_path, ttl_seconds):
+        cached = _load_json_cache(cache_path)
+        if cached:
+            return cached
+    fresh = _http_get_json(SUBMISSIONS_URL.format(cik=cik))
+    if fresh:
+        _save_json_cache(cache_path, fresh)
+        return fresh
+    cached = _load_json_cache(cache_path)
+    if cached:
+        logger.info(f"[edgar] using stale submissions cache for CIK{cik} (network failed)")
+        return cached
+    return None
+
+
+def fetch_recent_filings(
+    ticker: str,
+    *,
+    days: int,
+    max_items: int,
+    as_of: _date | None = None,
+    ttl_seconds: int = SUBMISSIONS_TTL,
+) -> tuple[list[dict], int] | None:
+    """Recent filings of interest for `ticker` within the last `days` days
+    (newest first, at most `max_items`) plus the count of Form 4 filings in
+    the same window. Returns None when the ticker has no CIK or the
+    submissions feed is unavailable. Never raises."""
+    cik = _get_cik(ticker)
+    if not cik:
+        return None
+    raw = _fetch_submissions(cik, ttl_seconds)
+    if not raw:
+        return None
+    recent = ((raw.get("filings") or {}).get("recent")) or {}
+    forms = recent.get("form") or []
+    dates = recent.get("filingDate") or []
+    items = recent.get("items") or []
+    descs = recent.get("primaryDocDescription") or []
+    accs = recent.get("accessionNumber") or []
+    docs = recent.get("primaryDocument") or []
+
+    today = as_of or _date.today()
+    cutoff = today.fromordinal(today.toordinal() - days)
+    cik_int = int(cik)
+
+    def at(seq: list, i: int) -> str:
+        return str(seq[i]) if i < len(seq) and seq[i] is not None else ""
+
+    filings: list[dict] = []
+    form4_count = 0
+    for i in range(min(len(forms), len(dates))):
+        form = at(forms, i).strip()
+        filed = _parse_iso_date(at(dates, i))
+        if filed is None or filed < cutoff or filed > today:
+            continue
+        if form == "4":
+            form4_count += 1
+            continue
+        if not _form_of_interest(form):
+            continue
+        acc = at(accs, i).replace("-", "")
+        doc = at(docs, i)
+        url = ARCHIVE_URL.format(cik_int=cik_int, acc_nodash=acc, doc=doc) if acc and doc else ""
+        filings.append({
+            "form": form,
+            "date": filed.isoformat(),
+            "items": at(items, i),
+            "description": at(descs, i),
+            "url": url,
+        })
+    filings.sort(key=lambda f: f["date"], reverse=True)
+    return filings[:max_items], form4_count
