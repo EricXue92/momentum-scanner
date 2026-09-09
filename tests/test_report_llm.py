@@ -219,6 +219,57 @@ async def test_toolloop_explicit_budget_overrides_constructor_default(monkeypatc
     assert backend._tavily.search.await_count == 1
 
 
+async def test_toolloop_disables_thinking_by_default(monkeypatch):
+    """v4-pro has thinking mode on by default on the Anthropic-compat endpoint,
+    and reasoning tokens eat into max_tokens — leaving little/no room for the
+    actual report text. Disable it unless a vendor config opts in."""
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "dsk")
+    monkeypatch.setenv("TAVILY_API_KEY", "tvly")
+    backend = llm.build_backend({"backend": "deepseek"})
+    backend._client.messages.create = AsyncMock(
+        return_value=_final_text_response("### 公司速览\n\nx")
+    )
+    await backend.analyze("<sys>", "<user>", max_search_calls=0)
+    kwargs = backend._client.messages.create.await_args.kwargs
+    assert kwargs["thinking"] == {"type": "disabled"}
+
+
+async def test_toolloop_thinking_true_omits_param(monkeypatch):
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "dsk")
+    monkeypatch.setenv("TAVILY_API_KEY", "tvly")
+    backend = llm.build_backend({"backend": "deepseek", "deepseek": {"thinking": True}})
+    backend._client.messages.create = AsyncMock(
+        return_value=_final_text_response("### 公司速览\n\nx")
+    )
+    await backend.analyze("<sys>", "<user>", max_search_calls=0)
+    kwargs = backend._client.messages.create.await_args.kwargs
+    assert "thinking" not in kwargs
+
+
+async def test_toolloop_thinking_disabled_on_forced_final_turn(monkeypatch):
+    """Every messages.create call the loop makes — including the tool-use
+    iterations and the forced final no-tool turn — must carry the disabled
+    thinking param, not just the simple no-search path."""
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "dsk")
+    monkeypatch.setenv("TAVILY_API_KEY", "tvly")
+    backend = llm.build_backend({"backend": "deepseek", "deepseek": {"max_search_calls": 1}})
+
+    backend._client.messages.create = AsyncMock(
+        side_effect=[
+            _tool_use_response("q1"),
+            _tool_use_response("q2"),
+            _final_text_response("### 公司速览\n\nfinal"),
+        ]
+    )
+    backend._tavily.search = AsyncMock(return_value="ctx")
+    backend._tavily.__aenter__ = AsyncMock(return_value=backend._tavily)
+    backend._tavily.__aexit__ = AsyncMock(return_value=None)
+
+    await backend.analyze("<sys>", "<user>")
+    for call in backend._client.messages.create.await_args_list:
+        assert call.kwargs["thinking"] == {"type": "disabled"}
+
+
 async def test_toolloop_none_budget_uses_constructor_default(monkeypatch):
     monkeypatch.setenv("DEEPSEEK_API_KEY", "dsk")
     monkeypatch.setenv("TAVILY_API_KEY", "tvly")

@@ -443,8 +443,9 @@ web_search_max_uses = 2
 [report.deepseek]
 model = "deepseek-v4-pro"
 base_url = "https://api.deepseek.com/anthropic"
-max_tokens = 3500
+max_tokens = 4000
 max_search_calls = 2   # 仅在 [report.evidence].enabled = false 或盘前 catalyst 路径时生效
+thinking = false   # v4-pro 默认开 thinking(effort high),推理 token 计入 max_tokens,会把正文挤空;报告写作不需要
 
 [report.evidence]
 # 证据包预取(spec: docs/superpowers/specs/2026-09-09-report-evidence-prefetch-design.md)。

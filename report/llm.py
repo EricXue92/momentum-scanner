@@ -30,6 +30,11 @@ from report.search import TavilyClient
 logger = logging.getLogger(__name__)
 
 # Output budget — 8 sections × ~250 Chinese tokens each + headings ~ 3000 out.
+# Compat vendors (DeepSeek et al.) default `thinking` OFF (see ToolLoopBackend):
+# v4-pro has thinking mode on by default at effort=high on the Anthropic-compat
+# endpoint, and reasoning tokens count against max_tokens — on a report-writing
+# task that reasoning can consume the whole budget and leave no room (or an
+# empty response) for the actual Markdown.
 DEFAULT_MAX_TOKENS = 3500
 
 
@@ -180,6 +185,7 @@ class ToolLoopBackend:
         base_url: str = "https://api.deepseek.com/anthropic",
         name: str = "deepseek",
         vendor: str = "DeepSeek",
+        thinking: bool = False,
     ) -> None:
         self._client = anthropic.AsyncAnthropic(api_key=api_key, base_url=base_url)
         self._tavily = TavilyClient(tavily_api_key)
@@ -189,6 +195,7 @@ class ToolLoopBackend:
         self._max_search_calls = max_search_calls
         self.name = name
         self._vendor = vendor
+        self._thinking = thinking
 
     async def aclose(self) -> None:
         await self._client.close()
@@ -203,6 +210,13 @@ class ToolLoopBackend:
         if not self._tavily_ctx_open:
             await self._tavily.__aenter__()
             self._tavily_ctx_open = True
+
+    def _thinking_kwargs(self) -> dict[str, Any]:
+        """`thinking={"type": "disabled"}` unless the vendor config opts in —
+        see the DEFAULT_MAX_TOKENS comment for why this defaults off."""
+        if self._thinking:
+            return {}
+        return {"thinking": {"type": "disabled"}}
 
     async def analyze(
         self, system_prompt: str, user_message: str, *, max_search_calls: int | None = None
@@ -221,7 +235,11 @@ class ToolLoopBackend:
         if budget <= 0:
             # Evidence-sufficient path: one no-tool round trip.
             response = await self._client.messages.create(
-                model=self._model, max_tokens=self._max_tokens, system=system, messages=messages,
+                model=self._model,
+                max_tokens=self._max_tokens,
+                system=system,
+                messages=messages,
+                **self._thinking_kwargs(),
             )
             _log_usage(self._model, response)
             return _extract_text(response)
@@ -236,6 +254,7 @@ class ToolLoopBackend:
                 system=system,
                 tools=[_TAVILY_SEARCH_TOOL],
                 messages=messages,
+                **self._thinking_kwargs(),
             )
             _log_usage(self._model, response)
             if getattr(response, "stop_reason", None) != "tool_use":
@@ -265,7 +284,11 @@ class ToolLoopBackend:
         # text. `messages` always ends with a user turn here (we break before
         # appending the over-budget tool_use), so the sequence stays valid.
         final = await self._client.messages.create(
-            model=self._model, max_tokens=self._max_tokens, system=system, messages=messages,
+            model=self._model,
+            max_tokens=self._max_tokens,
+            system=system,
+            messages=messages,
+            **self._thinking_kwargs(),
         )
         _log_usage(self._model, final)
         return _extract_text(final)
@@ -344,6 +367,7 @@ def build_backend(report_cfg: dict[str, Any] | None) -> LLMBackend:
             base_url=sub.get("base_url", spec["base_url"]),
             name=backend_name,
             vendor=spec["vendor"],
+            thinking=bool(sub.get("thinking", False)),
         )
 
     known = "', '".join(["anthropic", *_COMPAT_PROVIDERS])
