@@ -217,7 +217,7 @@ Requires FutuOpenD online with US Lv1 BBO real-time quote entitlement; otherwise
 
 ## Daily CANSLIM report
 
-After the US EOD run, `--mode report --market us` reads the day's dated long-side `.txt` files, orders them by group priority with a per-market cap of 30 names, then calls the configured LLM backend to generate a CANSLIM-style fundamentals-plus-outlook briefing per ticker. Output: a self-contained `output/Reports/PostMarket/<date>_{us,hk}.html` (inline CSS, zero external dependencies — double-click to open in any browser); no Markdown twin. Only the US report is scheduled (`run_eod.sh`); `run_hk_eod.sh` skips the report step, so `--market hk` is manual-only.
+After the US EOD run, `--mode report --market us` reads the day's dated long-side `.txt` files, orders them by group priority with a per-market cap of 30 names, then calls the configured LLM backend to generate a CANSLIM-style fundamentals-plus-outlook briefing per ticker. Before that call, `report/evidence.py` pre-fetches yfinance news / analyst consensus / earnings calendar plus recent EDGAR filings per ticker for a single no-tool LLM call, falling back to the Tavily tool-loop only when that evidence is thin (`[report.evidence]`; EOD only — the pre-market catalyst path below still always searches). Output: a self-contained `output/Reports/PostMarket/<date>_{us,hk}.html` (inline CSS, zero external dependencies — double-click to open in any browser); no Markdown twin. Only the US report is scheduled (`run_eod.sh`); `run_hk_eod.sh` skips the report step, so `--market hk` is manual-only.
 
 **Backends (`[report] backend`, case-insensitive; all go through the Anthropic Python SDK):**
 

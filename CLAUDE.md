@@ -87,6 +87,14 @@ mirrored to `output/Webull/{US,HK}/` (newline-sep), then Futu sync.
   HK Shorts / Morning Gap are excluded from it. **US only** — `run_hk_eod.sh`
   no longer runs the report step (HK code path kept for manual use). Output is
   **HTML only**: `output/Reports/PostMarket/<date>_us.html` (no `.md`).
+  **Evidence prefetch** (`report/evidence.py`, `[report.evidence]`): the EOD
+  report pre-fetches yfinance news / analyst consensus / earnings calendar +
+  EDGAR recent filings per ticker and makes ONE no-tool LLM call; Tavily is
+  only offered when `news + filings < min_items_for_no_search`. Each source
+  soft-fails independently; prefetch has a hard timeout (empty bundle →
+  fallback search). `enabled = false` restores the tool-loop behavior. The
+  pre-market catalyst path is NOT on this yet (phase 2 — spec
+  `docs/superpowers/specs/2026-09-09-report-evidence-prefetch-design.md`).
 - **Catalyst report (pre-market)** is a **detached subprocess** spawned
   from the morning-gap path; it MUST NOT block the morning-gap process.
   Always uses DeepSeek + Tavily regardless of `[report] backend`. Reads
