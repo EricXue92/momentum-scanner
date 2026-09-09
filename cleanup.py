@@ -34,8 +34,10 @@ _RETENTION_RULES: tuple[_Rule, ...] = (
     _Rule("TV/HK",     re.compile(rf"^{_DATE_U}_.+\.txt$"),  "%Y_%m_%d", 5),
     _Rule("Webull/US", re.compile(rf"^{_DATE_U}_.+\.txt$"),  "%Y_%m_%d", 5),
     _Rule("Webull/HK", re.compile(rf"^{_DATE_U}_.+\.txt$"),  "%Y_%m_%d", 5),
-    # CANSLIM reports (report/) — 7-day retention (today + 6 prior days).
-    _Rule("Reports",   re.compile(rf"^{_DATE_U}_(us|hk)\.(md|html)$"), "%Y_%m_%d", 7),
+    # CANSLIM reports (report/) and the pre-market catalyst report
+    # (<date>_us_premarket.*) — 7-day retention (today + 6 prior days).
+    _Rule("Reports",   re.compile(rf"^{_DATE_U}_(us|hk|us_premarket)\.(md|html)$"),
+          "%Y_%m_%d", 7),
     # Per-day state caches — 2-day retention.
     _Rule("state", re.compile(rf"^morning_gap_seen_(?:pre|post)_{_DATE_U}\.txt$"),
           "%Y_%m_%d", 2),

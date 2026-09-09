@@ -70,6 +70,23 @@ def test_canslim_reports_use_seven_day_window(output_tree: Path) -> None:
         assert not (output_tree / f"Reports/{d}_hk.html").exists()
 
 
+def test_premarket_catalyst_reports_use_seven_day_window(output_tree: Path) -> None:
+    # <date>_us_premarket.{md,html} (morning-gap catalyst report) shares the
+    # 7-day CANSLIM window. Today = 05_15, cutoff = 05_09.
+    for d in ("2026_05_15", "2026_05_09", "2026_05_08", "2026_04_01"):
+        _touch(output_tree / f"Reports/{d}_us_premarket.md")
+        _touch(output_tree / f"Reports/{d}_us_premarket.html")
+
+    cleanup_old_outputs(output_tree, date(2026, 5, 15))
+
+    for d in ("2026_05_15", "2026_05_09"):
+        assert (output_tree / f"Reports/{d}_us_premarket.md").exists()
+        assert (output_tree / f"Reports/{d}_us_premarket.html").exists()
+    for d in ("2026_05_08", "2026_04_01"):
+        assert not (output_tree / f"Reports/{d}_us_premarket.md").exists()
+        assert not (output_tree / f"Reports/{d}_us_premarket.html").exists()
+
+
 def test_rs_rating_uses_four_day_window(output_tree: Path) -> None:
     # rs_rating_*.csv survives for 4 days; today is 2026-05-15, cutoff =
     # 2026-05-12, so 05_12..05_15 survive, 05_11 and earlier go.
