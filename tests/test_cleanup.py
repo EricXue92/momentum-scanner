@@ -41,8 +41,6 @@ def test_files_older_than_five_days_deleted(output_tree: Path) -> None:
     _touch(output_tree / "TV/HK/2026_05_10_Shorts.txt")
     _touch(output_tree / "Webull/US/2026_05_09_GapUp.txt")
     _touch(output_tree / "Webull/HK/2026_05_09_RS.txt")
-    _touch(output_tree / "Reports/2026_05_10_us.md")
-    _touch(output_tree / "Reports/2026_05_10_hk.html")
 
     cleanup_old_outputs(output_tree, date(2026, 5, 15))
 
@@ -53,8 +51,23 @@ def test_files_older_than_five_days_deleted(output_tree: Path) -> None:
     assert not (output_tree / "TV/HK/2026_05_10_Shorts.txt").exists()
     assert not (output_tree / "Webull/US/2026_05_09_GapUp.txt").exists()
     assert not (output_tree / "Webull/HK/2026_05_09_RS.txt").exists()
-    assert not (output_tree / "Reports/2026_05_10_us.md").exists()
-    assert not (output_tree / "Reports/2026_05_10_hk.html").exists()
+
+
+def test_canslim_reports_use_seven_day_window(output_tree: Path) -> None:
+    # CANSLIM reports keep 7 days (today + 6 prior). Today = 05_15, cutoff =
+    # 05_09: 05_09..05_15 survive, 05_08 and earlier are pruned.
+    for d in ("2026_05_15", "2026_05_10", "2026_05_09", "2026_05_08", "2026_05_01"):
+        _touch(output_tree / f"Reports/{d}_us.md")
+        _touch(output_tree / f"Reports/{d}_hk.html")
+
+    cleanup_old_outputs(output_tree, date(2026, 5, 15))
+
+    for d in ("2026_05_15", "2026_05_10", "2026_05_09"):
+        assert (output_tree / f"Reports/{d}_us.md").exists()
+        assert (output_tree / f"Reports/{d}_hk.html").exists()
+    for d in ("2026_05_08", "2026_05_01"):
+        assert not (output_tree / f"Reports/{d}_us.md").exists()
+        assert not (output_tree / f"Reports/{d}_hk.html").exists()
 
 
 def test_rs_rating_uses_four_day_window(output_tree: Path) -> None:
