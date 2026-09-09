@@ -271,7 +271,7 @@ timeout_seconds = 20
 | 预取超时 | 空 evidence,WARNING,按空证据算预算 |
 | EDGAR 找不到 CIK | filings null,不算错误 |
 | 预算 0 但模型仍输出 tool_use | 无 tools 时 API 不会返回 tool_use;若返回,`_extract_text` 已会丢弃 tool_use 块 |
-| `enabled = false` | 与改动前逐字节一致的请求(旧 prompt 提示语、indent JSON 除外——紧凑 JSON 对两种模式都生效) |
+| `enabled = false` | 不预取、不加 evidence 块、预算为 None(后端默认),提示语用旧文案;唯一差异是 JSON 改为紧凑序列化(两种模式统一) |
 
 ## 测试
 
