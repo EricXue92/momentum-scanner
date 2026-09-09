@@ -138,7 +138,18 @@ async def _prefetch_evidence(
 ) -> dict:
     """Run the sync yfinance/EDGAR fetch off-loop with a hard timeout. A
     timeout is treated as all-sources-failed so the search fallback can
-    kick in; it must never abort the report."""
+    kick in; it must never abort the report.
+
+    Orphan-thread note: `asyncio.wait_for` cancels *our* await on timeout,
+    but `asyncio.to_thread` runs on the default executor, which does not
+    support cancellation — the worker thread keeps running `fetch_evidence`
+    to completion in the background even after we've moved on. This is
+    tolerable because yfinance/httpx calls inside it carry their own ~10s
+    timeouts, so the orphan does eventually finish; `asyncio.run` (the
+    process's outermost loop) waits for all executor threads to drain at
+    shutdown, so the process won't exit until it does. A dedicated bounded
+    executor (so a stuck orphan can't pile up and block shutdown) is
+    deferred to phase 2."""
     try:
         return await asyncio.wait_for(
             asyncio.to_thread(evidence.fetch_evidence, yf_sym, market, cfg, as_of=as_of),
@@ -146,10 +157,16 @@ async def _prefetch_evidence(
         )
     except asyncio.TimeoutError:
         logger.warning(f"[evidence] {yf_sym}: prefetch timed out after {cfg.timeout_seconds}s")
-        return evidence.empty_evidence(as_of, errors=["timeout"])
+        ev = evidence.empty_evidence(as_of, errors=["timeout"])
+        if market.lower() != "us":
+            ev["filings"] = None
+        return ev
     except Exception as e:  # fetch_evidence never raises, but to_thread plumbing might
         logger.warning(f"[evidence] {yf_sym}: prefetch failed: {type(e).__name__}: {e}")
-        return evidence.empty_evidence(as_of, errors=[f"prefetch: {type(e).__name__}"])
+        ev = evidence.empty_evidence(as_of, errors=[f"prefetch: {type(e).__name__}"])
+        if market.lower() != "us":
+            ev["filings"] = None
+        return ev
 
 
 async def _run_async(market: str, date_stem: str, date_iso: str) -> int:

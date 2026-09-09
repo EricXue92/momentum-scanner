@@ -157,6 +157,22 @@ import os
 import sys
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from report.morning import _build_deepseek_backend
+
+
+def test_build_deepseek_backend_thinking_defaults_false(monkeypatch) -> None:
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "dsk-test")
+    monkeypatch.setenv("TAVILY_API_KEY", "tvly-test")
+    backend = _build_deepseek_backend({})
+    assert backend._thinking is False
+
+
+def test_build_deepseek_backend_thinking_true_from_config(monkeypatch) -> None:
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "dsk-test")
+    monkeypatch.setenv("TAVILY_API_KEY", "tvly-test")
+    backend = _build_deepseek_backend({"thinking": True})
+    assert backend._thinking is True
+
 
 async def test_run_async_writes_report_and_pushes_notification(
     tmp_path: Path, monkeypatch

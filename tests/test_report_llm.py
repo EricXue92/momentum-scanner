@@ -152,16 +152,16 @@ async def test_deepseek_runs_tool_loop_and_returns_final_text(monkeypatch):
 async def test_deepseek_caps_tool_calls_then_forces_final_turn(monkeypatch):
     """Once the search budget (max_search_calls) is exhausted, the loop must
     issue one final no-tool messages.create so the model is forced to emit
-    text instead of looping forever."""
+    text instead of looping forever. With budget=1, only 2 calls are made
+    total (no discarded round trip)."""
     monkeypatch.setenv("DEEPSEEK_API_KEY", "dsk")
     monkeypatch.setenv("TAVILY_API_KEY", "tvly")
     backend = llm.build_backend({"backend": "deepseek", "deepseek": {"max_search_calls": 1}})
 
     backend._client.messages.create = AsyncMock(
         side_effect=[
-            _tool_use_response("q1"),       # iter 0 — search budget=1, used 1
-            _tool_use_response("q2"),       # iter 1 — would use 2 but loop hits cap
-            _final_text_response("### 公司速览\n\nfinal"),  # forced no-tool turn
+            _tool_use_response("q1"),
+            _final_text_response("### 公司速览\n\nfinal"),
         ]
     )
     backend._tavily.search = AsyncMock(return_value="ctx")
@@ -170,7 +170,35 @@ async def test_deepseek_caps_tool_calls_then_forces_final_turn(monkeypatch):
 
     out = await backend.analyze("<sys>", "<user>")
     assert out.startswith("### 公司速览")
-    # Third (forced) call must NOT include a `tools` kwarg.
+    assert backend._client.messages.create.await_count == 2
+    # Second (forced final) call must NOT include a `tools` kwarg.
+    second_call_kwargs = backend._client.messages.create.await_args_list[1].kwargs
+    assert "tools" not in second_call_kwargs
+    backend._tavily.search.assert_awaited_once_with("q1")
+
+
+async def test_toolloop_budget_two_allows_two_searches(monkeypatch):
+    """budget=2: the model may search twice before being forced to a final
+    no-tool turn. Net calls = budget + 1 at most, no discarded turn."""
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "dsk")
+    monkeypatch.setenv("TAVILY_API_KEY", "tvly")
+    backend = llm.build_backend({"backend": "deepseek", "deepseek": {"max_search_calls": 2}})
+
+    backend._client.messages.create = AsyncMock(
+        side_effect=[
+            _tool_use_response("q1"),
+            _tool_use_response("q2"),
+            _final_text_response("### 公司速览\n\nfinal"),
+        ]
+    )
+    backend._tavily.search = AsyncMock(return_value="ctx")
+    backend._tavily.__aenter__ = AsyncMock(return_value=backend._tavily)
+    backend._tavily.__aexit__ = AsyncMock(return_value=None)
+
+    out = await backend.analyze("<sys>", "<user>")
+    assert out.startswith("### 公司速览")
+    assert backend._client.messages.create.await_count == 3
+    assert backend._tavily.search.await_count == 2
     third_call_kwargs = backend._client.messages.create.await_args_list[2].kwargs
     assert "tools" not in third_call_kwargs
 
@@ -196,14 +224,14 @@ async def test_toolloop_budget_zero_makes_single_call_without_tools(monkeypatch)
 
 
 async def test_toolloop_explicit_budget_overrides_constructor_default(monkeypatch):
-    """Constructor default is 2; passing 1 must cap the loop at 1 search."""
+    """Constructor default is 2; passing 1 must cap the loop at 1 search,
+    with no discarded round trip (net calls = budget + 1 = 2)."""
     monkeypatch.setenv("DEEPSEEK_API_KEY", "dsk")
     monkeypatch.setenv("TAVILY_API_KEY", "tvly")
     backend = llm.build_backend({"backend": "deepseek", "deepseek": {"max_search_calls": 2}})
     backend._client.messages.create = AsyncMock(
         side_effect=[
             _tool_use_response("q1"),
-            _tool_use_response("q2"),
             _final_text_response("### 公司速览\n\nfinal"),
         ]
     )
@@ -213,8 +241,8 @@ async def test_toolloop_explicit_budget_overrides_constructor_default(monkeypatc
 
     out = await backend.analyze("<sys>", "<user>", max_search_calls=1)
     assert out.startswith("### 公司速览")
-    assert backend._client.messages.create.await_count == 3
-    assert "tools" not in backend._client.messages.create.await_args_list[2].kwargs
+    assert backend._client.messages.create.await_count == 2
+    assert "tools" not in backend._client.messages.create.await_args_list[1].kwargs
     # Only the first tool_use was actually searched (budget 1).
     assert backend._tavily.search.await_count == 1
 

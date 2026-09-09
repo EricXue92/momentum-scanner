@@ -95,6 +95,8 @@ mirrored to `output/Webull/{US,HK}/` (newline-sep), then Futu sync.
   fallback search). `enabled = false` restores the tool-loop behavior. The
   pre-market catalyst path is NOT on this yet (phase 2 — spec
   `docs/superpowers/specs/2026-09-09-report-evidence-prefetch-design.md`).
+  `max_search_calls` is now an exact cap on Tavily searches (the old loop
+  could run one extra).
 - **Catalyst report (pre-market)** is a **detached subprocess** spawned
   from the morning-gap path; it MUST NOT block the morning-gap process.
   Always uses DeepSeek + Tavily regardless of `[report] backend`. Reads

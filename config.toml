@@ -444,7 +444,7 @@ web_search_max_uses = 2
 model = "deepseek-v4-pro"
 base_url = "https://api.deepseek.com/anthropic"
 max_tokens = 4000
-max_search_calls = 2   # 仅在 [report.evidence].enabled = false 或盘前 catalyst 路径时生效
+max_search_calls = 2   # 仅在 [report.evidence].enabled = false 时生效
 thinking = false   # v4-pro 默认开 thinking(effort high),推理 token 计入 max_tokens,会把正文挤空;报告写作不需要
 
 [report.evidence]
@@ -466,10 +466,13 @@ timeout_seconds = 20
 
 # [report.kimi]
 # model = "kimi-k2-turbo-preview"           # base_url 缺省 https://api.moonshot.cn/anthropic
+# thinking = true   # 若该厂商拒绝 thinking={"type":"disabled"}(HTTP 400),打开此项
 # [report.glm]
 # model = "glm-4.6"                         # base_url 缺省 https://open.bigmodel.cn/api/anthropic
+# thinking = true   # 若该厂商拒绝 thinking={"type":"disabled"}(HTTP 400),打开此项
 # [report.minimax]
 # model = "MiniMax-M2"                      # base_url 缺省 https://api.minimax.io/anthropic
+# thinking = true   # 若该厂商拒绝 thinking={"type":"disabled"}(HTTP 400),打开此项
 
 [morning_gap_catalyst]
 # Pre-market catalyst report. Runs as detached subprocess after the
@@ -480,3 +483,4 @@ max_tickers_per_run = 10
 concurrency = 3
 max_search_calls = 3
 deepseek_model = "deepseek-v4-pro"
+thinking = false   # 同 [report.deepseek].thinking；盘前 catalyst 子进程也关闭 DeepSeek thinking

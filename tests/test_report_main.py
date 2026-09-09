@@ -155,3 +155,68 @@ async def test_prefetch_evidence_returns_bundle(monkeypatch):
     monkeypatch.setattr(evidence, "fetch_evidence", lambda sym, market, cfg, *, as_of=None: bundle)
     ev = await report_main._prefetch_evidence("AXTI", "us", evidence.EvidenceConfig(), date(2026, 9, 9))
     assert ev["news_count"] == 7
+
+
+async def test_run_async_skips_prefetch_when_evidence_disabled(monkeypatch):
+    """When [report.evidence].enabled = false, the enrich loop must not call
+    _prefetch_evidence at all — evidence stays None/budget None end to end,
+    and the backend is asked for its own default search budget."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    async def _boom(*a, **k):
+        raise AssertionError("_prefetch_evidence should not be called")
+
+    monkeypatch.setattr(report_main, "_prefetch_evidence", _boom)
+    monkeypatch.setattr(
+        report_main, "_load_evidence_config", lambda cfg: evidence.EvidenceConfig(enabled=False)
+    )
+    monkeypatch.setattr(
+        report_main.ranker, "collect_market_groups",
+        lambda input_dir, date_stem, market: {"Longs": ["NASDAQ:FAKE"]},
+    )
+    monkeypatch.setattr(
+        report_main.ranker, "rank_and_cap",
+        lambda groups, cap: ([("NASDAQ:FAKE", "Longs")], []),
+    )
+    monkeypatch.setattr(
+        report_main.enrich, "fetch_ticker_data",
+        lambda yf_sym, group, exchange, rs_lookup, as_of_date=None: {
+            "ticker": yf_sym, "group": group, "exchange": exchange,
+        },
+    )
+
+    fake_backend = MagicMock()
+    fake_backend.name = "fake"
+    fake_backend.analyze = AsyncMock(return_value="### 公司速览\n\nx")
+    fake_backend.aclose = AsyncMock()
+    fake_backend.model_label = MagicMock(return_value="fake-model (Fake)")
+    monkeypatch.setattr(report_main, "build_backend", lambda cfg: fake_backend)
+
+    captured: dict = {}
+
+    def fake_write_report_files(**kwargs):
+        captured.update(kwargs)
+        return Path("/tmp/fake_report.html")
+
+    monkeypatch.setattr(report_main.renderer, "write_report_files", fake_write_report_files)
+
+    rc = await report_main._run_async("us", "2026_09_09", "2026-09-09")
+
+    assert rc == 0
+    assert captured["evidence_meta"] == [None]
+    fake_backend.analyze.assert_awaited_once()
+    assert fake_backend.analyze.await_args.kwargs["max_search_calls"] is None
+
+
+async def test_prefetch_evidence_timeout_hk_sets_filings_none(monkeypatch):
+    """HK has no filings source; a timeout bundle must still render 'filings:
+    None' (like a normal HK fetch) instead of the US-shaped empty list."""
+    def slow(sym, market, cfg, *, as_of=None):
+        import time
+        time.sleep(0.5)
+        return {"never": True}
+    monkeypatch.setattr(evidence, "fetch_evidence", slow)
+    cfg = evidence.EvidenceConfig(timeout_seconds=0.05)
+    ev = await report_main._prefetch_evidence("0700.HK", "hk", cfg, date(2026, 9, 9))
+    assert ev["errors"] == ["timeout"]
+    assert ev["filings"] is None

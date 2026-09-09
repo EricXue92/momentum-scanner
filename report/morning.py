@@ -236,6 +236,7 @@ def _build_deepseek_backend(cfg: dict[str, Any]) -> DeepSeekBackend:
         tavily_api_key=tavily_key,  # type: ignore[arg-type]
         model=cfg.get("deepseek_model", DEFAULT_MODEL),
         max_search_calls=int(cfg.get("max_search_calls", DEFAULT_MAX_SEARCH_CALLS)),
+        thinking=bool(cfg.get("thinking", False)),
     )
 
 

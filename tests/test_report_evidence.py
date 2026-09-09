@@ -185,6 +185,19 @@ def test_extract_calendar():
     assert evidence._extract_calendar(_ticker_mock(calendar={})) is None
 
 
+def test_extract_calendar_datetime_value_truncates_to_date():
+    """Some yfinance responses give `Earnings Date` as `datetime` (a `date`
+    subclass) rather than a plain `date` — must not blow up isoformat() by
+    including a time component."""
+    cal = {
+        "Earnings Date": [datetime(2026, 10, 30, 12, 0)],
+        "Earnings Average": 0.308,
+        "Revenue Average": 66004800,
+    }
+    out = evidence._extract_calendar(_ticker_mock(calendar=cal))
+    assert out["next_earnings_date"] == "2026-10-30"
+
+
 def test_fetch_evidence_us_assembles_all_sources(monkeypatch):
     t = _ticker_mock()
     t.news = [_news_item("n1", "2026-09-08T10:00:00Z"), _news_item("n2", "2026-09-07T10:00:00Z")]

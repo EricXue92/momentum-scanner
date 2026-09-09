@@ -245,9 +245,11 @@ class ToolLoopBackend:
             return _extract_text(response)
 
         await self._ensure_tavily()
-        # Cap iterations at search budget + 1 (the +1 lets the model emit the
-        # final assistant turn after its last search).
-        for iteration in range(budget + 1):
+        # Exactly `budget` iterations, each WITH the search tool attached —
+        # no call is ever discarded. If the model stops asking for search
+        # before the budget runs out, we return immediately from inside the
+        # loop; otherwise we fall through to one forced no-tool call.
+        for _ in range(budget):
             response = await self._client.messages.create(
                 model=self._model,
                 max_tokens=self._max_tokens,
@@ -259,10 +261,6 @@ class ToolLoopBackend:
             _log_usage(self._model, response)
             if getattr(response, "stop_reason", None) != "tool_use":
                 return _extract_text(response)
-            if iteration >= budget:
-                # Model wants another search but the budget is spent — fall
-                # through to the forced no-tool turn without searching.
-                break
             messages.append({"role": "assistant", "content": response.content})
             tool_results: list[dict[str, Any]] = []
             for block in response.content or []:
@@ -281,8 +279,9 @@ class ToolLoopBackend:
                 return _extract_text(response)
             messages.append({"role": "user", "content": tool_results})
         # Budget exhausted — force one final no-tool turn so the model emits
-        # text. `messages` always ends with a user turn here (we break before
-        # appending the over-budget tool_use), so the sequence stays valid.
+        # text. `messages` always ends with a user turn here (the loop only
+        # falls through after appending a tool_result), so the sequence
+        # stays valid.
         final = await self._client.messages.create(
             model=self._model,
             max_tokens=self._max_tokens,

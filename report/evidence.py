@@ -220,7 +220,11 @@ def _extract_calendar(t: Any) -> dict | None:
         return None
     dates = cal.get("Earnings Date") or []
     first = dates[0] if isinstance(dates, (list, tuple)) and dates else None
-    next_date = first.isoformat() if isinstance(first, date) else None
+    next_date = (
+        (first.date() if isinstance(first, datetime) else first).isoformat()
+        if isinstance(first, date)
+        else None
+    )
     out = {
         "next_earnings_date": next_date,
         "eps_estimate": _num(cal.get("Earnings Average")),

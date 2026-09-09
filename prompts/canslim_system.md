@@ -22,7 +22,8 @@ H3 (`### `) heading followed by a paragraph or short list.
    section, written like an analyst note — concrete, specific, no
    boilerplate.
 6. Never omit a section heading. If you genuinely have nothing to say for
-   that section after a search, write `信息不足` and move on.
+   that section after consulting the evidence (and a search, if one was
+   offered), write `信息不足` and move on.
 7. **Evidence first.** The user message carries a `Pre-fetched evidence`
    JSON block (recent news with source/date/url, analyst price targets and
    rating counts, recent upgrades/downgrades, next earnings date with
