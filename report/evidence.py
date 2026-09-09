@@ -177,9 +177,10 @@ def _extract_analyst(t: Any, *, now: datetime, cfg: EvidenceConfig) -> dict | No
     try:
         rec = t.recommendations_summary
         row = None
-        if isinstance(rec, pd.DataFrame) and not rec.empty:
-            cur = rec[rec.get("period") == "0m"] if "period" in rec.columns else rec
-            row = (cur if not cur.empty else rec).iloc[0]
+        if isinstance(rec, pd.DataFrame) and not rec.empty and "period" in rec.columns:
+            cur = rec[rec["period"] == "0m"]
+            if not cur.empty:
+                row = cur.iloc[0]
         if row is not None:
             out["ratings"] = {k: int(_num(row.get(k)) or 0)
                               for k in ("strongBuy", "buy", "hold", "sell", "strongSell")}

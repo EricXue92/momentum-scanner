@@ -170,6 +170,15 @@ def test_extract_analyst_all_fail_returns_none():
     assert evidence._extract_analyst(t, now=NOW, cfg=evidence.EvidenceConfig()) is None
 
 
+def test_extract_analyst_no_current_period_row_gives_none_ratings():
+    rec = pd.DataFrame(
+        [{"period": "-1m", "strongBuy": 1, "buy": 3, "hold": 1, "sell": 0, "strongSell": 0},
+         {"period": "-2m", "strongBuy": 1, "buy": 2, "hold": 2, "sell": 0, "strongSell": 0}])
+    out = evidence._extract_analyst(_ticker_mock(rec=rec), now=NOW, cfg=evidence.EvidenceConfig())
+    assert out["ratings"] is None
+    assert out["price_target"]["mean"] == 91.6
+
+
 def test_extract_calendar():
     out = evidence._extract_calendar(_ticker_mock())
     assert out == {"next_earnings_date": "2026-10-30", "eps_estimate": 0.308, "revenue_estimate": 66004800}
