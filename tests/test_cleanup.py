@@ -15,7 +15,8 @@ def _touch(path: Path) -> None:
 def output_tree(tmp_path: Path) -> Path:
     """Build a synthetic output/ tree spanning 2026-05-09..2026-05-15."""
     out = tmp_path / "output"
-    for d in ("TV/US", "TV/HK", "Webull/US", "Webull/HK", "Reports", "state"):
+    for d in ("TV/US", "TV/HK", "Webull/US", "Webull/HK", "Reports",
+              "Reports/PostMarket", "Reports/PreMarket", "state"):
         (out / d).mkdir(parents=True)
     return out
 
@@ -262,3 +263,43 @@ def test_cleanup_removes_old_hk_metrics_state_cache(tmp_path: Path) -> None:
     assert (state / "hk_metrics_2026-05-26.csv").exists()      # today kept
     assert (state / "hk_metrics_2026-05-25.csv").exists()      # yesterday kept (2-day window)
     assert not (state / "hk_metrics_2026-05-20.csv").exists()  # 6-day pruned
+
+
+def test_postmarket_html_uses_seven_day_window(output_tree: Path) -> None:
+    # Reports/PostMarket/<date>_{us,hk}.html — 7 days. Today = 05_15, cutoff = 05_09.
+    for d in ("2026_05_15", "2026_05_09", "2026_05_08"):
+        _touch(output_tree / f"Reports/PostMarket/{d}_us.html")
+        _touch(output_tree / f"Reports/PostMarket/{d}_hk.html")
+
+    cleanup_old_outputs(output_tree, date(2026, 5, 15))
+
+    for d in ("2026_05_15", "2026_05_09"):
+        assert (output_tree / f"Reports/PostMarket/{d}_us.html").exists()
+        assert (output_tree / f"Reports/PostMarket/{d}_hk.html").exists()
+    assert not (output_tree / "Reports/PostMarket/2026_05_08_us.html").exists()
+    assert not (output_tree / "Reports/PostMarket/2026_05_08_hk.html").exists()
+
+
+def test_premarket_html_uses_seven_day_window(output_tree: Path) -> None:
+    # Reports/PreMarket/<date>_us_premarket.html — 7 days.
+    for d in ("2026_05_15", "2026_05_09", "2026_05_08"):
+        _touch(output_tree / f"Reports/PreMarket/{d}_us_premarket.html")
+
+    cleanup_old_outputs(output_tree, date(2026, 5, 15))
+
+    assert (output_tree / "Reports/PreMarket/2026_05_15_us_premarket.html").exists()
+    assert (output_tree / "Reports/PreMarket/2026_05_09_us_premarket.html").exists()
+    assert not (output_tree / "Reports/PreMarket/2026_05_08_us_premarket.html").exists()
+
+
+def test_premarket_markdown_state_uses_two_day_window(output_tree: Path) -> None:
+    # state/premarket_catalyst_<date>.md is the append-across-scans
+    # accumulator; only today's is ever appended to. Today = 15, cutoff = 14.
+    for d in ("2026_05_15", "2026_05_14", "2026_05_13"):
+        _touch(output_tree / f"state/premarket_catalyst_{d}.md")
+
+    cleanup_old_outputs(output_tree, date(2026, 5, 15))
+
+    assert (output_tree / "state/premarket_catalyst_2026_05_15.md").exists()
+    assert (output_tree / "state/premarket_catalyst_2026_05_14.md").exists()
+    assert not (output_tree / "state/premarket_catalyst_2026_05_13.md").exists()

@@ -46,7 +46,8 @@ mirrored to `output/Webull/{US,HK}/` (newline-sep), then Futu sync.
   from the morning-gap path; it MUST NOT block the morning-gap process.
   Always uses DeepSeek + Tavily regardless of `[report] backend`. Reads
   only the JSON snapshot sidecar — MUST NOT call Futu / yfinance. Output:
-  `output/Reports/<date>_us_premarket.md`, appended across -20 / -10.
+  `output/Reports/PreMarket/<date>_us_premarket.html` (HTML only), re-rendered
+  across -20 / -10 / -5 from the markdown accumulator in `output/state/`.
 
 ## RS gating
 

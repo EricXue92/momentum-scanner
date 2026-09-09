@@ -11,6 +11,12 @@ logger = logging.getLogger(__name__)
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 OUTPUT_REPORTS_DIR = PROJECT_ROOT / "output" / "Reports"
+# HTML deliverables only. EOD CANSLIM reports land in PostMarket/, the
+# morning-gap catalyst report in PreMarket/. The catalyst report's markdown
+# accumulator (append-across-scans source) is internal state, not a deliverable.
+POSTMARKET_DIR = OUTPUT_REPORTS_DIR / "PostMarket"
+PREMARKET_DIR = OUTPUT_REPORTS_DIR / "PreMarket"
+OUTPUT_STATE_DIR = PROJECT_ROOT / "output" / "state"
 CONFIG_PATH = PROJECT_ROOT / "config.toml"
 
 PRIORITY_ORDER: list[str] = [

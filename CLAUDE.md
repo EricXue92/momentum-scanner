@@ -11,7 +11,7 @@ uv run main.py --mode us-eod         # US EOD (Longs/Leaders/Shorts/RS/IPO) — 
 uv run main.py --mode hk-eod         # HK EOD (Shorts + Longs/Leaders/RS)   — 20:00 HKT
 uv run main.py --mode morning-gap    # US intraday gap scan; clean-exits outside ET window
 uv run main.py --mode hk-morning-gap # HK intraday gap scan (post-open only)
-uv run main.py --mode report --market {us,hk}  # CANSLIM report from today's .txt files
+uv run main.py --mode report --market {us,hk}  # CANSLIM report (HTML) from today's .txt files; only US is scheduled
 uv run pytest tests/ -v             # `uv run python -m pytest` works too
 ```
 
@@ -84,13 +84,18 @@ mirrored to `output/Webull/{US,HK}/` (newline-sep), then Futu sync.
   gate (`morning_gap_seen_{pre,post}_<date>.txt`), not what's written. Spec:
   `docs/superpowers/specs/2026-08-13-morning-gap-live-price-trend-gate-design.md`.
 - **Report** is soft-fail (wrapper exit code reflects only the EOD step). Shorts /
-  HK Shorts / Morning Gap are excluded from it.
+  HK Shorts / Morning Gap are excluded from it. **US only** — `run_hk_eod.sh`
+  no longer runs the report step (HK code path kept for manual use). Output is
+  **HTML only**: `output/Reports/PostMarket/<date>_us.html` (no `.md`).
 - **Catalyst report (pre-market)** is a **detached subprocess** spawned
   from the morning-gap path; it MUST NOT block the morning-gap process.
   Always uses DeepSeek + Tavily regardless of `[report] backend`. Reads
   only the JSON snapshot sidecar — MUST NOT call Futu / yfinance. Output:
-  `output/Reports/<date>_us_premarket.md`, appended across the pre-market
-  scans (-20/-10/-5) whenever one finds fresh tickers.
+  `output/Reports/PreMarket/<date>_us_premarket.html`, re-rendered across the
+  pre-market scans (-20/-10/-5) whenever one finds fresh tickers. The
+  append-across-scans source is the markdown accumulator
+  `output/state/premarket_catalyst_<date>.md` (internal state, 2-day
+  cleanup) — do not write `.md` under `Reports/`.
 
 ## RS gating
 

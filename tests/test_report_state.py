@@ -40,6 +40,15 @@ def test_reports_dir_is_under_project_root():
     assert state.OUTPUT_REPORTS_DIR.parent.name == "output"
 
 
+def test_postmarket_and_premarket_dirs_are_under_reports():
+    assert state.POSTMARKET_DIR == state.OUTPUT_REPORTS_DIR / "PostMarket"
+    assert state.PREMARKET_DIR == state.OUTPUT_REPORTS_DIR / "PreMarket"
+
+
+def test_premarket_state_dir_is_output_state():
+    assert state.OUTPUT_STATE_DIR == state.PROJECT_ROOT / "output" / "state"
+
+
 def test_input_dir_for_market():
     us_dir = state.input_dir_for_market("us")
     hk_dir = state.input_dir_for_market("hk")

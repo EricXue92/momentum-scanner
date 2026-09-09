@@ -10,7 +10,7 @@
 >
 > **百分位 RS 表(美股 3M、港股 12M+3M)和港股长线侧 metrics frame 每天在 GitHub Actions 上算好,以 CSV 发布到 `data/`;本地流水线只负责拉取**——因为家用 IP 上的 yfinance 计算跑到一半就会被限流。RS 闸两市结构对称:**事件组(美股 Longs 5 组、港股 EarningsGap/HighVolume/GapUp)走 12M ≥ 90 单闸,其余长线侧(两市 Leaders / 条件 RS 组、美股 Shorts)走 3M ≥ 90 单闸**;每组一个独立旋钮,双闸可按组随时加回。历史不足 12 个月的新股则走**按历史深度分级的 IPO ladder**。
 >
-> 港股流水线有自己独立的 20:00 HKT 计划槽,美股则跑在 10:00 HKT,两者各写各自的分市场日志。每个 EOD 跑完后,wrapper 脚本会再对该市场跑一次 `--mode report`,为当天新发现的长线侧个股生成 CANSLIM 简报(Markdown + 独立 HTML)。报告后端可选:默认 DeepSeek V4 + Tavily,备选 Anthropic `web_search`;也支持 Kimi / GLM / MiniMax(+ Tavily),走各自的 Anthropic 兼容端点。
+> 港股流水线有自己独立的 20:00 HKT 计划槽,美股则跑在 10:00 HKT,两者各写各自的分市场日志。美股 EOD 跑完后,wrapper 脚本会再跑一次 `--mode report --market us`,为当天新发现的长线侧个股生成 CANSLIM 简报(独立 HTML);港股不再排程生成报告。报告后端可选:默认 DeepSeek V4 + Tavily,备选 Anthropic `web_search`;也支持 Kimi / GLM / MiniMax(+ Tavily),走各自的 Anthropic 兼容端点。
 
 ## 筛选器 (Screeners)
 
@@ -217,7 +217,7 @@ Oliver Kell 的相对强度打法,专挑弱市里扛住的股票。**只在 SPY 
 
 ## 每日 CANSLIM 报告
 
-每次 EOD 跑完后,`--mode report --market {us,hk}` 会读取当天带日期的长线侧 `.txt` 文件,按分组优先级排序、每个市场上限 30 只,再调用所配置的 LLM 后端,为每只 ticker 生成 CANSLIM 风格的基本面加展望简报。输出为 `output/Reports/<date>_{us,hk}.md`,以及一个自包含的 `<date>_{us,hk}.html`(CSS 内联、无外部依赖,双击即可在任意浏览器打开)。
+每次 EOD 跑完后,`--mode report --market {us,hk}` 会读取当天带日期的长线侧 `.txt` 文件,按分组优先级排序、每个市场上限 30 只,再调用所配置的 LLM 后端,为每只 ticker 生成 CANSLIM 风格的基本面加展望简报。输出为自包含的 `output/Reports/PostMarket/<date>_{us,hk}.html`(CSS 内联、无外部依赖,双击即可在任意浏览器打开),不再生成 Markdown。只有美股报告在排程里(`run_eod.sh`);`run_hk_eod.sh` 已跳过 report 步骤,`--market hk` 仅供手动调用。
 
 **后端(`[report] backend`,大小写不敏感;全部走 Anthropic Python SDK):**
 
@@ -243,7 +243,7 @@ Oliver Kell 的相对强度打法,专挑弱市里扛住的股票。**只在 SPY 
 
 ### 盘前 catalyst 报告
 
-一份**独立**的短报告。当盘前扫描发现新的 US gapper 时,由 morning-gap 路径 **spawn 出一个 detached 子进程**来生成(`[morning_gap_catalyst]`),绝不能阻塞 morning-gap 主进程。无论 `[report] backend` 配成什么,它都**固定用 DeepSeek + Tavily**,且只读 JSON 快照 sidecar(不碰 Futu / yfinance)。输出为 `output/Reports/<date>_us_premarket.md`,盘前任一扫描(-20/-10/-5)发现新票都会触发,报告在多次扫描间累加(单次上限 `max_tickers_per_run`,默认 10;每只 ticker 最多搜索 `max_search_calls` = 3 次)。写完后再推一条 "Catalyst Report Ready" 的 ntfy 通知,附上报告路径。
+一份**独立**的短报告。当盘前扫描发现新的 US gapper 时,由 morning-gap 路径 **spawn 出一个 detached 子进程**来生成(`[morning_gap_catalyst]`),绝不能阻塞 morning-gap 主进程。无论 `[report] backend` 配成什么,它都**固定用 DeepSeek + Tavily**,且只读 JSON 快照 sidecar(不碰 Futu / yfinance)。输出为 `output/Reports/PreMarket/<date>_us_premarket.html`,盘前任一扫描(-20/-10/-5)发现新票都会触发,多次扫描间基于 `output/state/` 下的 markdown 累积文件重新渲染(单次上限 `max_tickers_per_run`,默认 10;每只 ticker 最多搜索 `max_search_calls` = 3 次)。写完后再推一条 "Catalyst Report Ready" 的 ntfy 通知,附上报告路径。
 
 ## Dedup(去重)
 
@@ -266,9 +266,9 @@ output/
 ├── Webull/                    # 换行分隔镜像,供 Webull "Upload as File"
 │   ├── US/<date>_*.txt
 │   └── HK/<date>_*.txt
-├── Reports/                   # 每日 CANSLIM 简报(Markdown + 独立 HTML)+ 盘前 catalyst 报告
-│   ├── <date>_{us,hk}.{md,html}
-│   └── <date>_us_premarket.md
+├── Reports/                   # 只有 HTML;保留 7 天
+│   ├── PostMarket/<date>_us.html      # 每日 CANSLIM 简报(仅美股)
+│   └── PreMarket/<date>_us_premarket.html   # 盘前 catalyst 报告
 ├── hk_rs_<date>.txt           # 每日 RS 最强 top-10 快照,港股
 ├── rs_line_audit_{US,HK}_<date>{,_drop,_keep_ranked}.txt   # audit 报告 + sidecar
 └── state/                     # 跨日 "seen" master、RS 表缓存、morning-gap 每日 seen、EDGAR 缓存

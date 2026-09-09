@@ -1683,24 +1683,17 @@ def write_report_files(
     generated_at: datetime,
     date_iso: str,
     model_label: str | None = None,
-) -> tuple[Path, Path]:
-    """Write both the .md and .html reports; return their paths."""
+) -> Path:
+    """Write the .html report (the only deliverable); return its path."""
     out_dir.mkdir(parents=True, exist_ok=True)
-    md_path = out_dir / f"{date_stem}_{market}.md"
     html_path = out_dir / f"{date_stem}_{market}.html"
-    md_text = render_markdown_document(
-        market=market, date_iso=date_iso, enriched=enriched,
-        prose_sections=prose_sections, truncated=truncated,
-        generated_at=generated_at, model_label=model_label,
-    )
     html_text = render_html_document(
         market=market, date_iso=date_iso, enriched=enriched,
         prose_sections=prose_sections, truncated=truncated,
         generated_at=generated_at, model_label=model_label,
     )
-    md_path.write_text(md_text, encoding="utf-8")
     html_path.write_text(html_text, encoding="utf-8")
-    return md_path, html_path
+    return html_path
 
 
 # --- Backwards-compat shims (older tests still call these) -------------------

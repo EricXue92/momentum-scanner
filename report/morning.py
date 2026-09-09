@@ -3,7 +3,8 @@
 Triggered by main.py morning-gap path as a detached subprocess. Reads a
 snapshot JSON sidecar (per-ticker gap%, price, market cap, first-seen
 offset), fans out DeepSeek + Tavily catalyst analysis per ticker, appends
-to output/Reports/<date>_us_premarket.md, then pushes ntfy."""
+to output/Reports/PreMarket/<date>_us_premarket.html (the markdown
+accumulator that feeds it lives in output/state/), then pushes ntfy."""
 from __future__ import annotations
 
 import argparse
@@ -23,7 +24,7 @@ import anthropic
 
 from notify import notify_morning_catalyst_ready
 from report.llm import DeepSeekBackend, LLMBackend
-from report.state import CONFIG_PATH, OUTPUT_REPORTS_DIR, load_dotenv
+from report.state import CONFIG_PATH, OUTPUT_STATE_DIR, PREMARKET_DIR, load_dotenv
 
 logger = logging.getLogger(__name__)
 
@@ -298,11 +299,15 @@ async def _run_async(
         await backend.aclose()
 
     date_stem = date_iso.replace("-", "_")
-    out_path = OUTPUT_REPORTS_DIR / f"{date_stem}_us_premarket.md"
+    # The markdown is the append-across-scans accumulator (byte-appended by
+    # write_report); it is internal state, not a deliverable. The HTML under
+    # Reports/PreMarket is re-rendered from the full accumulator every scan.
+    md_state_path = OUTPUT_STATE_DIR / f"premarket_catalyst_{date_stem}.md"
+    html_path = PREMARKET_DIR / f"{date_stem}_us_premarket.html"
     now_hkt = datetime.now(HKT)
     now_et = datetime.now(ET)
     write_report(
-        out_path=out_path,
+        out_path=md_state_path,
         date_iso=date_iso,
         offset_min=offset_min,
         entries=entries,
@@ -312,18 +317,14 @@ async def _run_async(
         skipped_count=skipped,
         et_time_hhmm=now_et.strftime("%H:%M"),
     )
-    logger.info(f"[morning] wrote {out_path}")
+    logger.info(f"[morning] updated accumulator {md_state_path}")
 
-    # Render HTML alongside the .md (soft-fail so HTML failure doesn't block ntfy).
-    try:
-        from report.renderer import markdown_to_html
-        md_text = out_path.read_text(encoding="utf-8")
-        html_text = markdown_to_html(md_text, f"Pre-market Catalyst Report — {date_iso} (US)")
-        html_path = out_path.with_suffix(".html")
-        html_path.write_text(html_text, encoding="utf-8")
-        logger.info(f"[morning] wrote {html_path}")
-    except Exception as e:
-        logger.warning(f"[morning] HTML render failed (md still wrote): {e}")
+    from report.renderer import markdown_to_html  # noqa: PLC0415
+    md_text = md_state_path.read_text(encoding="utf-8")
+    html_text = markdown_to_html(md_text, f"Pre-market Catalyst Report — {date_iso} (US)")
+    html_path.parent.mkdir(parents=True, exist_ok=True)
+    html_path.write_text(html_text, encoding="utf-8")
+    logger.info(f"[morning] wrote {html_path}")
 
     # Reload full config for [notify] section.
     try:
@@ -332,7 +333,7 @@ async def _run_async(
     except (OSError, tomllib.TOMLDecodeError):
         full_cfg = {}
     notify_morning_catalyst_ready(
-        report_path=out_path,
+        report_path=html_path,
         offset_min=offset_min,
         n_tickers=len(entries),
         config=full_cfg,

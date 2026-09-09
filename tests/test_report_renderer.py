@@ -163,8 +163,8 @@ def test_render_markdown_document_includes_data_tables():
 
 # --- write_report_files (new API) -------------------------------------------
 
-def test_write_report_files_writes_both(tmp_path: Path):
-    md_path, html_path = renderer.write_report_files(
+def test_write_report_files_writes_html_only(tmp_path: Path):
+    html_path = renderer.write_report_files(
         out_dir=tmp_path,
         date_stem="2026_05_07",
         market="us",
@@ -174,16 +174,16 @@ def test_write_report_files_writes_both(tmp_path: Path):
         generated_at=datetime(2026, 5, 7, 10, 5, 0, tzinfo=HKT),
         date_iso="2026-05-07",
     )
-    assert md_path == tmp_path / "2026_05_07_us.md"
     assert html_path == tmp_path / "2026_05_07_us.html"
-    assert "Daily Scan" in md_path.read_text(encoding="utf-8")
     assert html_path.read_text(encoding="utf-8").startswith("<!doctype html>")
+    assert not (tmp_path / "2026_05_07_us.md").exists()
+    assert sorted(f.name for f in tmp_path.iterdir()) == ["2026_05_07_us.html"]
 
 
 def test_write_report_files_handles_chinese(tmp_path: Path):
     d = _fake_data("0700.HK", "Leaders")
     d["company_name"] = "腾讯控股"
-    md_path, html_path = renderer.write_report_files(
+    html_path = renderer.write_report_files(
         out_dir=tmp_path,
         date_stem="2026_05_07",
         market="hk",
@@ -193,9 +193,7 @@ def test_write_report_files_handles_chinese(tmp_path: Path):
         generated_at=datetime(2026, 5, 7, 20, 5, 0, tzinfo=HKT),
         date_iso="2026-05-07",
     )
-    md_text = md_path.read_text(encoding="utf-8")
     html_text = html_path.read_text(encoding="utf-8")
-    assert "腾讯控股" in md_text
     assert "腾讯控股" in html_text
     assert "公司速览" in html_text
 

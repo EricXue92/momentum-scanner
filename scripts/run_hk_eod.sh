@@ -14,10 +14,9 @@ fi
 
 exec >> "$LOG" 2>&1
 
-# Load secrets (ANTHROPIC_API_KEY for the anthropic report backend, or
-# DEEPSEEK_API_KEY + TAVILY_API_KEY for the deepseek backend) from the
-# project's .env (gitignored). Launchd does NOT inherit the user's
-# interactive shell environment.
+# Load secrets from the project's .env (gitignored) — kept for parity with
+# run_eod.sh even though HK no longer runs the report step. Launchd does NOT
+# inherit the user's interactive shell environment.
 ENV_FILE=/Users/xue/momentum-scanner/.env
 if [[ -f "$ENV_FILE" ]]; then
     set -a
@@ -49,10 +48,8 @@ kill "$WATCHDOG_PID" 2>/dev/null
 wait "$WATCHDOG_PID" 2>/dev/null
 set -e
 
-# Report is a soft side-effect; failures here must not turn the EOD run red.
-set +e
-"$UV" run --directory "$PROJECT" main.py --mode report --market hk
-set -e
+# No CANSLIM report for HK (US-only since 2026-09-09; run
+# `main.py --mode report --market hk` by hand if one is ever needed).
 
 # Daily strongest-RS snapshot (output/hk_rs_<date>.txt): the rs-line audit in
 # report-only mode. --dry-run is load-bearing — it skips the y/N prompt AND

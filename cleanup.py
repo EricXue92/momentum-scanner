@@ -34,10 +34,20 @@ _RETENTION_RULES: tuple[_Rule, ...] = (
     _Rule("TV/HK",     re.compile(rf"^{_DATE_U}_.+\.txt$"),  "%Y_%m_%d", 5),
     _Rule("Webull/US", re.compile(rf"^{_DATE_U}_.+\.txt$"),  "%Y_%m_%d", 5),
     _Rule("Webull/HK", re.compile(rf"^{_DATE_U}_.+\.txt$"),  "%Y_%m_%d", 5),
-    # CANSLIM reports (report/) and the pre-market catalyst report
-    # (<date>_us_premarket.*) — 7-day retention (today + 6 prior days).
+    # CANSLIM reports (PostMarket/) and the pre-market catalyst report
+    # (PreMarket/) — HTML only, 7-day retention (today + 6 prior days).
+    _Rule("Reports/PostMarket", re.compile(rf"^{_DATE_U}_(us|hk)\.html$"),
+          "%Y_%m_%d", 7),
+    _Rule("Reports/PreMarket",  re.compile(rf"^{_DATE_U}_us_premarket\.html$"),
+          "%Y_%m_%d", 7),
+    # Legacy flat layout (pre-2026-09-09: .md + .html at the Reports root).
+    # Kept so leftovers age out on the same window; drop once the root is empty.
     _Rule("Reports",   re.compile(rf"^{_DATE_U}_(us|hk|us_premarket)\.(md|html)$"),
           "%Y_%m_%d", 7),
+    # Pre-market catalyst markdown accumulator (report/morning.py) — only
+    # today's file is ever appended to. 2-day window like other state caches.
+    _Rule("state", re.compile(rf"^premarket_catalyst_{_DATE_U}\.md$"),
+          "%Y_%m_%d", 2),
     # Per-day state caches — 2-day retention.
     _Rule("state", re.compile(rf"^morning_gap_seen_(?:pre|post)_{_DATE_U}\.txt$"),
           "%Y_%m_%d", 2),

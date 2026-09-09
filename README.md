@@ -10,7 +10,7 @@ A multi-source momentum and short-selling stock scanner: US discovery runs on Fi
 >
 > **The percentile RS tables (US 3M, HK 12M+3M) and the HK long-side metrics frame are computed daily on GitHub Actions and published as CSVs to `data/`; the local pipeline only fetches them** — yfinance computation from a residential IP gets rate-limited halfway through. The RS gates are structurally symmetric across both markets: **event groups (US Longs 5 groups, HK EarningsGap/HighVolume/GapUp) use a single 12M ≥ 90 gate; everything else long-side (Leaders / conditional RS groups in both markets, US Shorts) uses a single 3M ≥ 90 gate**; each group has an independent knob, and the double gate can be re-enabled per group at any time. New issues with less than 12 months of history go through a **history-depth-tiered IPO ladder**.
 >
-> The HK pipeline has its own 20:00 HKT schedule slot; US runs at 10:00 HKT, each writing its own per-market log. After each EOD run, the wrapper script runs `--mode report` once for that market, generating a CANSLIM briefing (Markdown + standalone HTML) for the day's newly discovered long-side names. Report backends: DeepSeek V4 + Tavily by default, Anthropic `web_search` as the alternative; Kimi / GLM / MiniMax (+ Tavily) are also supported via their Anthropic-compatible endpoints.
+> The HK pipeline has its own 20:00 HKT schedule slot; US runs at 10:00 HKT, each writing its own per-market log. After the US EOD run, the wrapper script runs `--mode report --market us`, generating a CANSLIM briefing (standalone HTML) for the day's newly discovered long-side names; HK is not scheduled for a report. Report backends: DeepSeek V4 + Tavily by default, Anthropic `web_search` as the alternative; Kimi / GLM / MiniMax (+ Tavily) are also supported via their Anthropic-compatible endpoints.
 
 ## Screeners
 
@@ -217,7 +217,7 @@ Requires FutuOpenD online with US Lv1 BBO real-time quote entitlement; otherwise
 
 ## Daily CANSLIM report
 
-After each EOD run, `--mode report --market {us,hk}` reads the day's dated long-side `.txt` files, orders them by group priority with a per-market cap of 30 names, then calls the configured LLM backend to generate a CANSLIM-style fundamentals-plus-outlook briefing per ticker. Output: `output/Reports/<date>_{us,hk}.md` plus a self-contained `<date>_{us,hk}.html` (inline CSS, zero external dependencies — double-click to open in any browser).
+After each EOD run, `--mode report --market {us,hk}` reads the day's dated long-side `.txt` files, orders them by group priority with a per-market cap of 30 names, then calls the configured LLM backend to generate a CANSLIM-style fundamentals-plus-outlook briefing per ticker. Output: a self-contained `output/Reports/PostMarket/<date>_{us,hk}.html` (inline CSS, zero external dependencies — double-click to open in any browser); no Markdown twin. Only the US report is scheduled (`run_eod.sh`); `run_hk_eod.sh` skips the report step, so `--market hk` is manual-only.
 
 **Backends (`[report] backend`, case-insensitive; all go through the Anthropic Python SDK):**
 
@@ -243,7 +243,7 @@ After each EOD run, `--mode report --market {us,hk}` reads the day's dated long-
 
 ### Pre-market catalyst report
 
-A **standalone** short report. When a pre-market scan finds new US gappers, the morning-gap path **spawns a detached subprocess** to generate it (`[morning_gap_catalyst]`); it must never block the morning-gap main process. Regardless of `[report] backend`, it **always uses DeepSeek + Tavily**, and reads only the JSON snapshot sidecar (never touches Futu / yfinance). Output: `output/Reports/<date>_us_premarket.md`, triggered by any pre-market scan (-20/-10/-5) that finds fresh tickers, appending across scans (per-run cap `max_tickers_per_run`, default 10; at most `max_search_calls` = 3 searches per ticker). Once written, it pushes a "Catalyst Report Ready" ntfy notification with the report path.
+A **standalone** short report. When a pre-market scan finds new US gappers, the morning-gap path **spawns a detached subprocess** to generate it (`[morning_gap_catalyst]`); it must never block the morning-gap main process. Regardless of `[report] backend`, it **always uses DeepSeek + Tavily**, and reads only the JSON snapshot sidecar (never touches Futu / yfinance). Output: `output/Reports/PreMarket/<date>_us_premarket.html`, triggered by any pre-market scan (-20/-10/-5) that finds fresh tickers, re-rendered across scans from a markdown accumulator in `output/state/` (per-run cap `max_tickers_per_run`, default 10; at most `max_search_calls` = 3 searches per ticker). Once written, it pushes a "Catalyst Report Ready" ntfy notification with the report path.
 
 ## Dedup
 
@@ -266,9 +266,9 @@ output/
 ├── Webull/                    # newline-separated mirror, for Webull "Upload as File"
 │   ├── US/<date>_*.txt
 │   └── HK/<date>_*.txt
-├── Reports/                   # daily CANSLIM briefings (Markdown + standalone HTML) + pre-market catalyst report
-│   ├── <date>_{us,hk}.{md,html}
-│   └── <date>_us_premarket.md
+├── Reports/                   # HTML only; 7-day retention
+│   ├── PostMarket/<date>_us.html      # daily CANSLIM briefing (US only)
+│   └── PreMarket/<date>_us_premarket.html   # pre-market catalyst report
 ├── hk_rs_<date>.txt           # daily strongest-RS top-10 snapshot, HK
 ├── rs_line_audit_{US,HK}_<date>{,_drop,_keep_ranked}.txt   # audit report + sidecars
 └── state/                     # cross-day "seen" masters, RS table caches, morning-gap daily seen, EDGAR cache

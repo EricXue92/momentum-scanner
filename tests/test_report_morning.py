@@ -168,7 +168,8 @@ async def test_run_async_writes_report_and_pushes_notification(
                        last_price=138.2, market_cap=3.4e12,
                        first_seen_offset_minutes=-20)],
     )
-    out_dir = tmp_path / "Reports"
+    out_dir = tmp_path / "Reports" / "PreMarket"
+    state_dir = tmp_path / "state"
     monkeypatch.setenv("DEEPSEEK_API_KEY", "dsk-test")
     monkeypatch.setenv("TAVILY_API_KEY", "tvly-test")
 
@@ -179,7 +180,8 @@ async def test_run_async_writes_report_and_pushes_notification(
 
     from report import morning
     monkeypatch.setattr(morning, "_build_deepseek_backend", lambda cfg: fake_backend)
-    monkeypatch.setattr(morning, "OUTPUT_REPORTS_DIR", out_dir)
+    monkeypatch.setattr(morning, "PREMARKET_DIR", out_dir)
+    monkeypatch.setattr(morning, "OUTPUT_STATE_DIR", state_dir)
     notify_calls: list[dict] = []
     monkeypatch.setattr(
         morning,
@@ -192,10 +194,17 @@ async def test_run_async_writes_report_and_pushes_notification(
     )
 
     assert rc == 0
-    report = out_dir / "2026_06_03_us_premarket.md"
+    # Deliverable is HTML-only under Reports/PreMarket; the markdown
+    # accumulator (append-across-scans source) lives in output/state.
+    report = out_dir / "2026_06_03_us_premarket.html"
     assert report.exists()
     assert "NVDA" in report.read_text(encoding="utf-8")
+    assert sorted(f.name for f in out_dir.iterdir()) == ["2026_06_03_us_premarket.html"]
+    md_state = state_dir / "premarket_catalyst_2026_06_03.md"
+    assert md_state.exists()
+    assert "NVDA" in md_state.read_text(encoding="utf-8")
     assert notify_calls and notify_calls[0]["n_tickers"] == 1
+    assert notify_calls[0]["report_path"] == report
     # Sidecar must be cleaned up.
     assert not snap.exists()
 

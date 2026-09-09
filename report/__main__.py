@@ -2,7 +2,8 @@
 
 Read dated .txt files for the given market+date, prioritize and cap, enrich each
 ticker with yfinance + RS table, fan out async Claude calls, render and write
-the .md + .html artifacts. Soft-fail on any unexpected error."""
+the .html artifact to output/Reports/PostMarket/. Soft-fail on any unexpected
+error."""
 from __future__ import annotations
 
 import argparse
@@ -19,7 +20,7 @@ from report import analyst, enrich, ranker, renderer
 from report.llm import build_backend
 from report.state import (
     MAX_TICKERS_PER_REPORT,
-    OUTPUT_REPORTS_DIR,
+    POSTMARKET_DIR,
     PROJECT_ROOT,
     groups_for_market,
     input_dir_for_market,
@@ -190,8 +191,8 @@ async def _run_async(market: str, date_stem: str, date_iso: str) -> int:
     finally:
         await backend.aclose()
 
-    md_path, html_path = renderer.write_report_files(
-        out_dir=OUTPUT_REPORTS_DIR,
+    html_path = renderer.write_report_files(
+        out_dir=POSTMARKET_DIR,
         date_stem=date_stem,
         market=market,
         enriched=enriched,
@@ -201,7 +202,6 @@ async def _run_async(market: str, date_stem: str, date_iso: str) -> int:
         date_iso=date_iso,
         model_label=backend.model_label(),
     )
-    logger.info(f"[report] wrote {md_path}")
     logger.info(f"[report] wrote {html_path}")
     return 0
 
