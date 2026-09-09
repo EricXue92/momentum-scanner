@@ -734,3 +734,34 @@ def test_html_cover_market_label_handles_hk():
     assert "每日股票精选 · 港股" in html
     # HK group label still reads as "Leaders" in English
     assert "Leaders" in html
+
+
+def test_html_renders_evidence_meta_line_when_given():
+    html = renderer.render_html_document(
+        market="us", date_iso="2026-09-09",
+        enriched=[_fake_data("AXTI")], prose_sections=["### 公司速览\n\nx"],
+        truncated=[], generated_at=datetime(2026, 9, 9, 10, 0, tzinfo=HKT),
+        evidence_meta=[{"news_count": 10, "filings_count": 6, "search_budget": 0}],
+    )
+    assert 'class="evidence-meta"' in html
+    assert "证据 · 新闻 10 · 公告 6 · 搜索 0" in html
+
+
+def test_html_omits_evidence_meta_when_absent_or_none():
+    common = dict(
+        market="us", date_iso="2026-09-09",
+        enriched=[_fake_data("AXTI")], prose_sections=["### 公司速览\n\nx"],
+        truncated=[], generated_at=datetime(2026, 9, 9, 10, 0, tzinfo=HKT),
+    )
+    assert "evidence-meta" not in renderer.render_html_document(**common)
+    assert "evidence-meta" not in renderer.render_html_document(**common, evidence_meta=[None])
+
+
+def test_html_evidence_meta_hk_shows_dash_for_filings():
+    html = renderer.render_html_document(
+        market="hk", date_iso="2026-09-09",
+        enriched=[_fake_data("0700.HK")], prose_sections=["### 公司速览\n\nx"],
+        truncated=[], generated_at=datetime(2026, 9, 9, 20, 0, tzinfo=HKT),
+        evidence_meta=[{"news_count": 4, "filings_count": None, "search_budget": 0}],
+    )
+    assert "证据 · 新闻 4 · 公告 — · 搜索 0" in html

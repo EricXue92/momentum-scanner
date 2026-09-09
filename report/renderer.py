@@ -1193,7 +1193,21 @@ def _render_prose(prose_md: str) -> str:
     return f'<div class="prose">{body}</div>'
 
 
-def _render_ticker_block(idx: int, data: dict[str, Any], prose_md: str) -> str:
+def _render_evidence_meta(meta: dict[str, Any] | None) -> str:
+    """One muted line under the snapshot: how much pre-fetched evidence the
+    LLM had and whether a fallback web search was allowed. Lets the operator
+    judge coverage day by day. Empty string when the feature is off."""
+    if not meta:
+        return ""
+    def cell(v: Any) -> str:
+        return "—" if v is None else str(v)
+    return (
+        f'<p class="evidence-meta">证据 · 新闻 {cell(meta.get("news_count"))} · '
+        f'公告 {cell(meta.get("filings_count"))} · 搜索 {cell(meta.get("search_budget"))}</p>'
+    )
+
+
+def _render_ticker_block(idx: int, data: dict[str, Any], prose_md: str, evidence_meta: dict[str, Any] | None = None) -> str:
     ticker = data.get("ticker") or "?"
     is_ipo_no_data = (data.get("group") == "IPO") and _has_no_fundamentals(data)
     if is_ipo_no_data:
@@ -1209,6 +1223,7 @@ def _render_ticker_block(idx: int, data: dict[str, Any], prose_md: str) -> str:
         f'{_render_ticker_header(idx, data)}'
         f'<div class="ticker-body">'
         f'{_render_snapshot(data)}'
+        f'{_render_evidence_meta(evidence_meta)}'
         f'{fundamentals_html}'
         f'{_render_prose(prose_md)}'
         f"</div>"
@@ -1464,12 +1479,14 @@ def render_html_document(
     truncated: list[tuple[str, str]],
     generated_at: datetime,
     model_label: str | None = None,
+    evidence_meta: list[dict[str, Any] | None] | None = None,
 ) -> str:
     market_label = market.upper()
     analyzed_count = len(enriched)
     total = analyzed_count + len(truncated)
+    metas = evidence_meta or [None] * len(enriched)
     blocks = [
-        _render_ticker_block(i + 1, d, p)
+        _render_ticker_block(i + 1, d, p, metas[i] if i < len(metas) else None)
         for i, (d, p) in enumerate(zip(enriched, prose_sections))
     ]
     index_html = _render_index(enriched)
@@ -1510,12 +1527,24 @@ def render_html_document(
         f'{"".join(blocks)}{truncated_html}{eps_footnote_html}{footer_html}</div>'
     )
     title = f"Daily Scan — {date_iso} ({market_label})"
+    # Include evidence-meta CSS only if any evidence_meta is actually used
+    has_evidence = evidence_meta and any(meta for meta in evidence_meta)
+    css = INLINE_CSS
+    if has_evidence:
+        css += (
+            "\n.evidence-meta {\n"
+            "  font-size: 11px;\n"
+            "  color: var(--muted);\n"
+            "  margin: -14px 0 18px;\n"
+            "  letter-spacing: 0.01em;\n"
+            "}\n"
+        )
     return (
         f"<!doctype html>\n<html lang=\"zh\">\n<head>\n"
         f'  <meta charset="utf-8">\n'
         f'  <meta name="viewport" content="width=device-width,initial-scale=1">\n'
         f"  <title>{title}</title>\n"
-        f"  <style>{INLINE_CSS}</style>\n"
+        f"  <style>{css}</style>\n"
         f"</head>\n<body>\n{body}\n</body>\n</html>\n"
     )
 
@@ -1683,6 +1712,7 @@ def write_report_files(
     generated_at: datetime,
     date_iso: str,
     model_label: str | None = None,
+    evidence_meta: list[dict[str, Any] | None] | None = None,
 ) -> Path:
     """Write the .html report (the only deliverable); return its path."""
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -1691,6 +1721,7 @@ def write_report_files(
         market=market, date_iso=date_iso, enriched=enriched,
         prose_sections=prose_sections, truncated=truncated,
         generated_at=generated_at, model_label=model_label,
+        evidence_meta=evidence_meta,
     )
     html_path.write_text(html_text, encoding="utf-8")
     return html_path
