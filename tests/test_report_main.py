@@ -119,3 +119,39 @@ def test_load_rs_lookup_hk_uses_12m_cache_when_both_present(
     monkeypatch.setattr(orch, "PROJECT_ROOT", tmp_path)
     lookup = orch._load_rs_lookup("hk", "2026_05_07")
     assert lookup("0700.HK") == 92  # 12M 表的值，不是 3M 表的 77
+
+
+import asyncio  # noqa: E402
+from datetime import date  # noqa: E402
+
+from report import __main__ as report_main  # noqa: E402
+from report import evidence  # noqa: E402
+
+
+def test_load_evidence_config_reads_subsection():
+    cfg = report_main._load_evidence_config({"evidence": {"enabled": False, "news_max_items": 4}})
+    assert cfg.enabled is False and cfg.news_max_items == 4
+
+
+def test_load_evidence_config_defaults_when_missing():
+    cfg = report_main._load_evidence_config({})
+    assert cfg.enabled is True and cfg.news_max_items == 10
+
+
+async def test_prefetch_evidence_timeout_yields_empty_bundle(monkeypatch):
+    def slow(sym, market, cfg, *, as_of=None):
+        import time
+        time.sleep(0.5)
+        return {"never": True}
+    monkeypatch.setattr(evidence, "fetch_evidence", slow)
+    cfg = evidence.EvidenceConfig(timeout_seconds=0.05)
+    ev = await report_main._prefetch_evidence("AXTI", "us", cfg, date(2026, 9, 9))
+    assert ev["news_count"] == 0 and ev["errors"] == ["timeout"]
+
+
+async def test_prefetch_evidence_returns_bundle(monkeypatch):
+    bundle = evidence.empty_evidence(date(2026, 9, 9))
+    bundle["news_count"] = 7
+    monkeypatch.setattr(evidence, "fetch_evidence", lambda sym, market, cfg, *, as_of=None: bundle)
+    ev = await report_main._prefetch_evidence("AXTI", "us", evidence.EvidenceConfig(), date(2026, 9, 9))
+    assert ev["news_count"] == 7

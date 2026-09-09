@@ -444,7 +444,24 @@ web_search_max_uses = 2
 model = "deepseek-v4-pro"
 base_url = "https://api.deepseek.com/anthropic"
 max_tokens = 3500
-max_search_calls = 2
+max_search_calls = 2   # 仅在 [report.evidence].enabled = false 或盘前 catalyst 路径时生效
+
+[report.evidence]
+# 证据包预取(spec: docs/superpowers/specs/2026-09-09-report-evidence-prefetch-design.md)。
+# 程序先从 yfinance(新闻 / 分析师 / 财报日历)+ EDGAR(近期公告)拉证据,LLM 只调一次;
+# 证据条数(news + filings)低于 min_items_for_no_search 时才允许 fallback_search_calls 次 Tavily。
+# enabled = false 回到旧的 tool-loop 行为(上面各后端的 max_search_calls 生效)。
+enabled = true
+news_max_items = 10
+news_max_age_hours = 720        # 30 天
+news_summary_chars = 300
+filings_days = 60               # 仅 US;HK 无公告源
+filings_max_items = 8
+analyst_grades_days = 90
+search_fallback = true
+min_items_for_no_search = 3
+fallback_search_calls = 1
+timeout_seconds = 20
 
 # [report.kimi]
 # model = "kimi-k2-turbo-preview"           # base_url 缺省 https://api.moonshot.cn/anthropic

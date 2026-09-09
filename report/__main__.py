@@ -1,9 +1,9 @@
 """Orchestrator for `python -m report` / `main.py --mode report`.
 
 Read dated .txt files for the given market+date, prioritize and cap, enrich each
-ticker with yfinance + RS table, fan out async Claude calls, render and write
-the .html artifact to output/Reports/PostMarket/. Soft-fail on any unexpected
-error."""
+ticker with yfinance + RS table, prefetch the evidence bundle per ticker
+(report/evidence.py), fan out async Claude calls, render and write the .html
+artifact to output/Reports/PostMarket/. Soft-fail on any unexpected error."""
 from __future__ import annotations
 
 import argparse
@@ -16,7 +16,7 @@ from datetime import date, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from report import analyst, enrich, ranker, renderer
+from report import analyst, enrich, evidence, ranker, renderer
 from report.llm import build_backend
 from report.state import (
     MAX_TICKERS_PER_REPORT,
@@ -129,6 +129,29 @@ def _empty_data(ticker: str, group: str, exchange: str) -> dict:
     return {**_EMPTY_DATA_TEMPLATE, "ticker": ticker, "group": group, "exchange": exchange}
 
 
+def _load_evidence_config(report_cfg: dict) -> evidence.EvidenceConfig:
+    return evidence.EvidenceConfig.from_dict((report_cfg or {}).get("evidence"))
+
+
+async def _prefetch_evidence(
+    yf_sym: str, market: str, cfg: evidence.EvidenceConfig, as_of: date
+) -> dict:
+    """Run the sync yfinance/EDGAR fetch off-loop with a hard timeout. A
+    timeout is treated as all-sources-failed so the search fallback can
+    kick in; it must never abort the report."""
+    try:
+        return await asyncio.wait_for(
+            asyncio.to_thread(evidence.fetch_evidence, yf_sym, market, cfg, as_of=as_of),
+            timeout=cfg.timeout_seconds,
+        )
+    except asyncio.TimeoutError:
+        logger.warning(f"[evidence] {yf_sym}: prefetch timed out after {cfg.timeout_seconds}s")
+        return evidence.empty_evidence(as_of, errors=["timeout"])
+    except Exception as e:  # fetch_evidence never raises, but to_thread plumbing might
+        logger.warning(f"[evidence] {yf_sym}: prefetch failed: {type(e).__name__}: {e}")
+        return evidence.empty_evidence(as_of, errors=[f"prefetch: {type(e).__name__}"])
+
+
 async def _run_async(market: str, date_stem: str, date_iso: str) -> int:
     # Direct `uv run main.py --mode report ...` invocations don't go through the
     # wrapper script's `source .env`, so try to fill the gap here. No-op if the
@@ -157,11 +180,14 @@ async def _run_async(market: str, date_stem: str, date_iso: str) -> int:
     )
 
     rs_lookup = _load_rs_lookup(market, date_stem)
+    ev_cfg = _load_evidence_config(report_cfg)
 
     as_of = date.fromisoformat(date_iso)
 
     # Enrich (sequential — yfinance is the bottleneck and parallel pulls trip rate limits).
     enriched: list[dict] = []
+    evidences: list[dict | None] = []
+    budgets: list[int | None] = []
     for qualified, group in analyzed_entries:
         exchange, symbol = _split_exchange_ticker(qualified)
         yf_sym = _yf_ticker(symbol, market)
@@ -171,6 +197,17 @@ async def _run_async(market: str, date_stem: str, date_iso: str) -> int:
             logger.warning(f"[report] enrich failed for {qualified}: {e}")
             data = _empty_data(yf_sym, group, exchange)
         enriched.append(data)
+        if ev_cfg.enabled:
+            ev = await _prefetch_evidence(yf_sym, market, ev_cfg, as_of)
+            budget = evidence.search_budget(ev, ev_cfg)
+            logger.info(
+                f"[evidence] {yf_sym}: {evidence.summarize_for_log(ev)} search={budget}"
+                + (f" errors={ev['errors']}" if ev.get("errors") else "")
+            )
+        else:
+            ev, budget = None, None
+        evidences.append(ev)
+        budgets.append(budget)
 
     if not SYSTEM_PROMPT_PATH.is_file():
         logger.error(f"[report] system prompt missing at {SYSTEM_PROMPT_PATH}")
@@ -184,8 +221,11 @@ async def _run_async(market: str, date_stem: str, date_iso: str) -> int:
     semaphore = asyncio.Semaphore(3)
     try:
         coroutines = [
-            analyst.analyze_ticker(backend, system_prompt, data, semaphore)
-            for data in enriched
+            analyst.analyze_ticker(
+                backend, system_prompt, data, semaphore,
+                evidence=ev, max_search_calls=budget,
+            )
+            for data, ev, budget in zip(enriched, evidences, budgets)
         ]
         sections = await asyncio.gather(*coroutines)
     finally:
@@ -201,6 +241,14 @@ async def _run_async(market: str, date_stem: str, date_iso: str) -> int:
         generated_at=datetime.now(HKT),
         date_iso=date_iso,
         model_label=backend.model_label(),
+        evidence_meta=[
+            None if ev is None else {
+                "news_count": ev.get("news_count", 0),
+                "filings_count": None if ev.get("filings") is None else ev.get("filings_count", 0),
+                "search_budget": budget,
+            }
+            for ev, budget in zip(evidences, budgets)
+        ],
     )
     logger.info(f"[report] wrote {html_path}")
     return 0

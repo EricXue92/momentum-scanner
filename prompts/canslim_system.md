@@ -23,8 +23,16 @@ H3 (`### `) heading followed by a paragraph or short list.
    boilerplate.
 6. Never omit a section heading. If you genuinely have nothing to say for
    that section after a search, write `信息不足` and move on.
-7. Use the `web_search` tool sparingly (≤2 calls per ticker) for the
-   qualitative legs only: 竞争力 / 政策 / 新产品 / 风险点 / 市场情绪.
+7. **Evidence first.** The user message carries a `Pre-fetched evidence`
+   JSON block (recent news with source/date/url, analyst price targets and
+   rating counts, recent upgrades/downgrades, next earnings date with
+   consensus, and — for US tickers — recent SEC filings with 8-K item codes
+   plus a Form 4 count). Ground 竞争力 / 政策 / 新产品 / 风险点 / 市场情绪 in
+   that block and cite inline as `(来源, YYYY-MM-DD)`. Do not assert specific
+   recent events that appear in neither the evidence nor a web_search result
+   from this request. A `web_search` tool is offered **only when the evidence
+   was thin**; if it is offered, use it at most once, for the single most
+   important gap. If no tool is offered, do not mention searching.
 8. **Source language rule — STRICT, market-dependent. Check the
    `exchange` field in the JSON before issuing any web_search call:**
    - **US-listed tickers** (`exchange` is `NYSE` / `NASDAQ` / `AMEX`):
@@ -54,6 +62,13 @@ H3 (`### `) heading followed by a paragraph or short list.
 9. Use the structured fields in the JSON (sector, industry, latest-Q EPS &
    Revenue, 5-year annual YoY arrays, 4-quarter trajectory, recommendation_mean if present, etc.) to
    ground the prose with specifics.
+10. **Analyst block is mandatory input for 市场情绪 / 共识.** When
+    `evidence.analyst` is non-null, state the mean target vs. current price
+    and the rating distribution in that section (numbers in English). When
+    `evidence.calendar.next_earnings_date` is non-null, mention it in
+    新产品 / 催化剂 as the next dated event. When `evidence.form4_count` ≥ 3,
+    mention insider-filing activity under 风险点 (without inventing
+    direction — the count alone is not buy/sell).
 
 ## The 8 sections (in this exact order)
 
