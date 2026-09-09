@@ -199,3 +199,51 @@ def test_extract_text_back_compat_strips_preamble_before_h2():
     response.content = [block]
     out = _extract_text(response)
     assert out.startswith("## AAPL")
+
+
+def test_build_user_message_is_compact_json(fake_data):
+    msg = analyst.build_user_message(fake_data)
+    assert '"ticker":"AAPL"' in msg          # no spaces after separators
+    assert "Use the web_search tool sparingly" in msg
+    assert "Pre-fetched evidence" not in msg
+
+
+def test_build_user_message_with_evidence_block(fake_data):
+    ev = {
+        "as_of": "2026-09-09",
+        "news": [{"date": "2026-09-08", "title": "Apple beats", "source": "Reuters", "summary": "s", "url": "u"}],
+        "analyst": {"price_target": {"mean": 250.0}},
+        "calendar": None, "filings": [], "form4_count": 0,
+        "news_count": 1, "filings_count": 0, "errors": [],
+    }
+    msg = analyst.build_user_message(fake_data, evidence=ev)
+    assert "Pre-fetched evidence" in msg
+    assert '"title":"Apple beats"' in msg
+    assert "Ground every qualitative section in the evidence above" in msg
+    assert "Only call `web_search` if the tool is offered" in msg
+    assert "Use the web_search tool sparingly" not in msg
+    # evidence block comes after the structured block
+    assert msg.index('"ticker":"AAPL"') < msg.index("Pre-fetched evidence")
+
+
+async def test_analyze_ticker_passes_evidence_and_budget(fake_data):
+    analyze = AsyncMock(return_value="### 公司速览\n\nok")
+    backend = _fake_backend(analyze)
+    ev = {"news": [], "news_count": 0, "filings": [], "filings_count": 0,
+          "analyst": None, "calendar": None, "form4_count": 0, "errors": [], "as_of": "2026-09-09"}
+    await analyst.analyze_ticker(
+        backend=backend, system_prompt="sys", data=fake_data,
+        semaphore=asyncio.Semaphore(1), evidence=ev, max_search_calls=0,
+    )
+    args, kwargs = analyze.await_args
+    assert kwargs["max_search_calls"] == 0
+    assert "Pre-fetched evidence" in args[1]
+
+
+async def test_analyze_ticker_default_passes_none_budget(fake_data):
+    analyze = AsyncMock(return_value="### 公司速览\n\nok")
+    backend = _fake_backend(analyze)
+    await analyst.analyze_ticker(
+        backend=backend, system_prompt="sys", data=fake_data, semaphore=asyncio.Semaphore(1),
+    )
+    assert analyze.await_args.kwargs["max_search_calls"] is None

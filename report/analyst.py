@@ -25,17 +25,35 @@ RETRY_BACKOFF_SECONDS = 5.0
 # round-trips are factored in.
 PER_CALL_TIMEOUT_SECONDS = 180.0
 
+_COMPACT = {"separators": (",", ":"), "ensure_ascii": False, "default": str}
 
-def build_user_message(data: dict[str, Any]) -> str:
-    """Serialize the enrichment dict as a structured prompt for the model."""
-    payload = json.dumps(data, ensure_ascii=False, indent=2, default=str)
-    return (
+
+def build_user_message(data: dict[str, Any], evidence: dict[str, Any] | None = None) -> str:
+    """Serialize the enrichment dict (and, when present, the pre-fetched
+    evidence bundle) as a structured prompt for the model. Compact JSON —
+    indentation was ~30% of the input tokens for zero benefit."""
+    payload = json.dumps(data, **_COMPACT)
+    parts = [
         f"Ticker: {data['ticker']}  |  Group: {data['group']}  |  Exchange: {data['exchange']}\n\n"
         f"Structured data (use these numbers verbatim in the Snapshot block; for any field that is "
         f"null, write '信息不足' in the qualitative analysis):\n\n```json\n{payload}\n```\n\n"
-        f"Generate the Markdown section per the template in the system prompt. Use the web_search "
-        f"tool sparingly (≤2 calls) for the qualitative legs."
-    )
+    ]
+    if evidence is not None:
+        ev_payload = json.dumps(evidence, **_COMPACT)
+        parts.append(
+            "Pre-fetched evidence (news / analyst consensus / earnings calendar / SEC filings; "
+            "use these as primary sources for the qualitative sections and cite as (source, date)):"
+            f"\n\n```json\n{ev_payload}\n```\n\n"
+            "Generate the Markdown section per the template in the system prompt. Ground every "
+            "qualitative section in the evidence above. Only call `web_search` if the tool is "
+            "offered in this request, and at most once."
+        )
+    else:
+        parts.append(
+            "Generate the Markdown section per the template in the system prompt. Use the web_search "
+            "tool sparingly (≤2 calls) for the qualitative legs."
+        )
+    return "".join(parts)
 
 
 async def analyze_ticker(
@@ -43,16 +61,19 @@ async def analyze_ticker(
     system_prompt: str,
     data: dict[str, Any],
     semaphore: asyncio.Semaphore,
+    *,
+    evidence: dict[str, Any] | None = None,
+    max_search_calls: int | None = None,
 ) -> str:
     """Call the backend for one ticker. On retry exhaustion, return a
     placeholder Markdown section so the renderer never sees a missing entry."""
-    user_msg = build_user_message(data)
+    user_msg = build_user_message(data, evidence)
     last_error: Exception | None = None
     for attempt in (1, 2):
         try:
             async with semaphore:
                 text = await asyncio.wait_for(
-                    backend.analyze(system_prompt, user_msg),
+                    backend.analyze(system_prompt, user_msg, max_search_calls=max_search_calls),
                     timeout=PER_CALL_TIMEOUT_SECONDS,
                 )
             if not text:
