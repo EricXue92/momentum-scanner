@@ -217,7 +217,7 @@ Requires FutuOpenD online with US Lv1 BBO real-time quote entitlement; otherwise
 
 ## Daily CANSLIM report
 
-After each EOD run, `--mode report --market {us,hk}` reads the day's dated long-side `.txt` files, orders them by group priority with a per-market cap of 30 names, then calls the configured LLM backend to generate a CANSLIM-style fundamentals-plus-outlook briefing per ticker. Output: a self-contained `output/Reports/PostMarket/<date>_{us,hk}.html` (inline CSS, zero external dependencies — double-click to open in any browser); no Markdown twin. Only the US report is scheduled (`run_eod.sh`); `run_hk_eod.sh` skips the report step, so `--market hk` is manual-only.
+After the US EOD run, `--mode report --market us` reads the day's dated long-side `.txt` files, orders them by group priority with a per-market cap of 30 names, then calls the configured LLM backend to generate a CANSLIM-style fundamentals-plus-outlook briefing per ticker. Output: a self-contained `output/Reports/PostMarket/<date>_{us,hk}.html` (inline CSS, zero external dependencies — double-click to open in any browser); no Markdown twin. Only the US report is scheduled (`run_eod.sh`); `run_hk_eod.sh` skips the report step, so `--market hk` is manual-only.
 
 **Backends (`[report] backend`, case-insensitive; all go through the Anthropic Python SDK):**
 
@@ -283,6 +283,7 @@ output/
     ├── rs_rating_3m_<date>.csv      # local cache of the US 3M RS cloud CSV (raw_score + percentile, vs SPY)
     ├── hk_rs_rating_<date>.csv      # local cache of the HK RS cloud CSV (12M + 3M, vs HSI)
     ├── hk_metrics_<date>.csv        # local cache of the HK long-side metrics frame (cloud data/hk_metrics/)
+    ├── premarket_catalyst_<date>.md # markdown accumulator behind Reports/PreMarket/ (appended across -20/-10/-5; 2-day)
     └── edgar_cache/                 # SEC EDGAR companyfacts cache (for the CANSLIM report)
 ```
 
@@ -312,7 +313,7 @@ The morning-gap scans push four kinds of notifications via [ntfy.sh](https://ntf
 
 - **Regular** — pushed when a scan finds **new** names (not seen in an earlier same-phase scan that day), body lists all selected names;
 - **PROMOTED (high priority)** — pushed separately when a pre-market gapper first passes the cumulative-volume gate post-open (the pre-market gap confirmed by RTH volume);
-- **Catalyst Report Ready** — pushed when the pre-market catalyst report is written, with the report path;
+- **Catalyst Report Ready** — pushed when the pre-market catalyst report is written, with the HTML path under `output/Reports/PreMarket/`;
 - **SKIPPED (high priority)** — pushed when a scheduled scan clean-exits without scanning because the network never came up within the net-ready gate, so a lost window doesn't pass silently.
 
 The RS-workflow self-triggers (see "Automation") reuse the same topic for their failure alerts, so all pipeline alerts land in one channel.
@@ -327,8 +328,8 @@ uv run main.py --mode us-eod                         # US EOD (Longs/Leaders/Sho
 uv run main.py --mode hk-eod                         # HK EOD (Shorts + Longs/Leaders/RS)
 uv run main.py --mode morning-gap                    # US intraday gap scan (auto-detects window, clean-exits outside it)
 uv run main.py --mode hk-morning-gap                 # HK intraday gap scan (post-open only)
-uv run main.py --mode report --market us             # CANSLIM briefing for today's US names (needs backend keys)
-uv run main.py --mode report --market hk --date YYYY-MM-DD   # backfill a given day
+uv run main.py --mode report --market us             # CANSLIM briefing for today's US names → Reports/PostMarket/ (needs backend keys)
+uv run main.py --mode report --market us --date YYYY-MM-DD   # backfill a given day (--market hk works too, but is not scheduled)
 uv run main.py --mode rs-line-audit --market both    # score the cross-day master by RS-line trend, prompt to prune (manual)
 ```
 

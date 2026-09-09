@@ -217,7 +217,7 @@ Oliver Kell 的相對強度打法,專挑弱市裡扛住的股票。**只在 SPY 
 
 ## 每日 CANSLIM 報告
 
-每次 EOD 跑完後,`--mode report --market {us,hk}` 會讀取當天帶日期的長線側 `.txt` 文件,按分組優先級排序、每個市場上限 30 只,再調用所配置的 LLM 後端,為每隻 ticker 生成 CANSLIM 風格的基本面加展望簡報。輸出為自包含的 `output/Reports/PostMarket/<date>_{us,hk}.html`(CSS 內聯、無外部依賴,雙擊即可在任意瀏覽器打開),不再生成 Markdown。只有美股報告在排程裡(`run_eod.sh`);`run_hk_eod.sh` 已跳過 report 步驟,`--market hk` 僅供手動調用。
+美股 EOD 跑完後,`--mode report --market us` 會讀取當天帶日期的長線側 `.txt` 文件,按分組優先級排序、每個市場上限 30 只,再調用所配置的 LLM 後端,為每隻 ticker 生成 CANSLIM 風格的基本面加展望簡報。輸出為自包含的 `output/Reports/PostMarket/<date>_{us,hk}.html`(CSS 內聯、無外部依賴,雙擊即可在任意瀏覽器打開),不再生成 Markdown。只有美股報告在排程裡(`run_eod.sh`);`run_hk_eod.sh` 已跳過 report 步驟,`--market hk` 僅供手動調用。
 
 **後端(`[report] backend`,大小寫不敏感;全部走 Anthropic Python SDK):**
 
@@ -283,6 +283,7 @@ output/
     ├── rs_rating_3m_<date>.csv      # US 3M RS 雲端 CSV 的本地緩存(raw_score + 百分位, vs SPY)
     ├── hk_rs_rating_<date>.csv      # HK RS 雲端 CSV 的本地緩存(12M + 3M, vs HSI)
     ├── hk_metrics_<date>.csv        # HK 長線 metrics 幀本地緩存(雲端 data/hk_metrics/)
+    ├── premarket_catalyst_<date>.md # Reports/PreMarket/ 背後的 markdown 累積文件(-20/-10/-5 間追加;保留 2 天)
     └── edgar_cache/                 # SEC EDGAR companyfacts 緩存(CANSLIM 報告用)
 ```
 
@@ -312,7 +313,7 @@ Morning-gap 掃描通過 [ntfy.sh](https://ntfy.sh) 推送四類通知:
 
 - **常規**——本輪出現**新**票(當天同階段更早的掃描裡沒見過的)時推一條,正文列出全部入選票;
 - **PROMOTED(高優先級)**——盤前見過的 gapper 在盤後首次通過累計量閘門(盤前缺口被 RTH 成交量確認)時單獨推一條;
-- **Catalyst Report Ready**——盤前 catalyst 報告寫完後推一條,附報告路徑;
+- **Catalyst Report Ready**——盤前 catalyst 報告寫完後推一條,附 `output/Reports/PreMarket/` 下的 HTML 路徑;
 - **SKIPPED(高優先級)**——定時掃描因網絡遲遲不通(net-ready 閘)而乾淨退出、錯過窗口時推一條,避免窗口丟失得無聲無息。
 
 RS workflow 自觸發器(見「自動化」一節)的失敗告警也複用同一 topic,所有 pipeline 告警落在同一頻道。
@@ -327,8 +328,8 @@ uv run main.py --mode us-eod                         # US EOD (Longs/Leaders/Sho
 uv run main.py --mode hk-eod                         # HK EOD (Shorts + Longs/Leaders/RS)
 uv run main.py --mode morning-gap                    # US 盤中缺口掃描(自動檢測窗口,窗口外乾淨退出)
 uv run main.py --mode hk-morning-gap                 # HK 盤中缺口掃描(僅盤後)
-uv run main.py --mode report --market us             # 為今日 US 票生成 CANSLIM 簡報(需後端密鑰)
-uv run main.py --mode report --market hk --date YYYY-MM-DD   # 回填某一天
+uv run main.py --mode report --market us             # 為今日 US 票生成 CANSLIM 簡報 → Reports/PostMarket/(需後端密鑰)
+uv run main.py --mode report --market us --date YYYY-MM-DD   # 回填某一天(--market hk 也能跑,但不在排程內)
 uv run main.py --mode rs-line-audit --market both    # 按 RS-line 趨勢給跨日 master 打分,提示裁剪(手動)
 ```
 
