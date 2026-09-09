@@ -256,7 +256,6 @@ _COMPAT_PROVIDERS: dict[str, dict[str, str]] = {
     },
     "kimi": {
         "env": "MOONSHOT_API_KEY",
-        "env_alias": "KIMI_API_KEY",
         "base_url": "https://api.moonshot.cn/anthropic",
         "model": "kimi-k2-turbo-preview",
         "vendor": "Moonshot",
@@ -297,9 +296,7 @@ def build_backend(report_cfg: dict[str, Any] | None) -> LLMBackend:
 
     if backend_name in _COMPAT_PROVIDERS:
         spec = _COMPAT_PROVIDERS[backend_name]
-        api_key = os.environ.get(spec["env"]) or (
-            os.environ.get(spec["env_alias"]) if "env_alias" in spec else None
-        )
+        api_key = os.environ.get(spec["env"])
         tavily_key = os.environ.get("TAVILY_API_KEY")
         missing = [n for n, v in ((spec["env"], api_key), ("TAVILY_API_KEY", tavily_key)) if not v]
         if missing:

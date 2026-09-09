@@ -61,16 +61,6 @@ def test_build_backend_kimi_compat_provider(monkeypatch):
     assert backend.model_label() == "kimi-k2-turbo-preview (Moonshot)"
 
 
-def test_build_backend_kimi_accepts_kimi_api_key_alias(monkeypatch):
-    # The project's .env names the Moonshot key KIMI_API_KEY; accept it as a
-    # fallback so switching backend = "kimi" needs no env rename.
-    monkeypatch.delenv("MOONSHOT_API_KEY", raising=False)
-    monkeypatch.setenv("KIMI_API_KEY", "sk-kimi-alias")
-    monkeypatch.setenv("TAVILY_API_KEY", "tvly-test")
-    backend = llm.build_backend({"backend": "kimi"})
-    assert backend.name == "kimi"
-
-
 def test_build_backend_compat_provider_config_overrides(monkeypatch):
     monkeypatch.setenv("ZHIPUAI_API_KEY", "sk-glm-test")
     monkeypatch.setenv("TAVILY_API_KEY", "tvly-test")
