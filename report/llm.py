@@ -39,13 +39,32 @@ class LLMBackend(Protocol):
 
     name: str
 
-    async def analyze(self, system_prompt: str, user_message: str) -> str: ...
+    async def analyze(
+        self, system_prompt: str, user_message: str, *, max_search_calls: int | None = None
+    ) -> str: ...
 
     def model_label(self) -> str:
         """Human-readable `<model-id> (<vendor>)` for the report footer."""
         ...
 
     async def aclose(self) -> None: ...
+
+
+def _log_usage(model: str, response: Any) -> None:
+    """One INFO line per API call so the operator can track token spend
+    from the launchd log. Tolerates SDK objects without usage."""
+    usage = getattr(response, "usage", None)
+    if usage is None:
+        return
+    inp = getattr(usage, "input_tokens", None)
+    out = getattr(usage, "output_tokens", None)
+    cache_hit = getattr(usage, "cache_read_input_tokens", None)
+    line = f"[llm] {model} in={inp} cache_hit={cache_hit if cache_hit is not None else '-'} out={out}"
+    server = getattr(usage, "server_tool_use", None)
+    searches = getattr(server, "web_search_requests", None) if server is not None else None
+    if searches is not None:
+        line += f" searches={searches}"
+    logger.info(line)
 
 
 def _extract_text(response: Any) -> str:
@@ -94,8 +113,11 @@ class AnthropicBackend:
     def model_label(self) -> str:
         return f"{self._model} (Anthropic)"
 
-    async def analyze(self, system_prompt: str, user_message: str) -> str:
-        response = await self._client.messages.create(
+    async def analyze(
+        self, system_prompt: str, user_message: str, *, max_search_calls: int | None = None
+    ) -> str:
+        budget = self._web_search_max_uses if max_search_calls is None else max_search_calls
+        kwargs: dict[str, Any] = dict(
             model=self._model,
             max_tokens=self._max_tokens,
             system=[
@@ -105,15 +127,18 @@ class AnthropicBackend:
                     "cache_control": {"type": "ephemeral"},
                 }
             ],
-            tools=[
+            messages=[{"role": "user", "content": user_message}],
+        )
+        if budget > 0:
+            kwargs["tools"] = [
                 {
                     "type": "web_search_20250305",
                     "name": "web_search",
-                    "max_uses": self._web_search_max_uses,
+                    "max_uses": budget,
                 }
-            ],
-            messages=[{"role": "user", "content": user_message}],
-        )
+            ]
+        response = await self._client.messages.create(**kwargs)
+        _log_usage(self._model, response)
         return _extract_text(response)
 
 
@@ -179,31 +204,46 @@ class ToolLoopBackend:
             await self._tavily.__aenter__()
             self._tavily_ctx_open = True
 
-    async def analyze(self, system_prompt: str, user_message: str) -> str:
-        await self._ensure_tavily()
+    async def analyze(
+        self, system_prompt: str, user_message: str, *, max_search_calls: int | None = None
+    ) -> str:
+        budget = self._max_search_calls if max_search_calls is None else max_search_calls
+        system = [
+            {
+                "type": "text",
+                "text": system_prompt,
+                "cache_control": {"type": "ephemeral"},
+            }
+        ]
         messages: list[dict[str, Any]] = [
             {"role": "user", "content": user_message}
         ]
+        if budget <= 0:
+            # Evidence-sufficient path: one no-tool round trip.
+            response = await self._client.messages.create(
+                model=self._model, max_tokens=self._max_tokens, system=system, messages=messages,
+            )
+            _log_usage(self._model, response)
+            return _extract_text(response)
+
+        await self._ensure_tavily()
         # Cap iterations at search budget + 1 (the +1 lets the model emit the
         # final assistant turn after its last search).
-        for iteration in range(self._max_search_calls + 1):
+        for iteration in range(budget + 1):
             response = await self._client.messages.create(
                 model=self._model,
                 max_tokens=self._max_tokens,
-                system=[
-                    {
-                        "type": "text",
-                        "text": system_prompt,
-                        "cache_control": {"type": "ephemeral"},
-                    }
-                ],
+                system=system,
                 tools=[_TAVILY_SEARCH_TOOL],
                 messages=messages,
             )
+            _log_usage(self._model, response)
             if getattr(response, "stop_reason", None) != "tool_use":
                 return _extract_text(response)
-            # Append assistant's tool_use turn verbatim, then a user turn
-            # carrying tool_result blocks for every tool_use it emitted.
+            if iteration >= budget:
+                # Model wants another search but the budget is spent — fall
+                # through to the forced no-tool turn without searching.
+                break
             messages.append({"role": "assistant", "content": response.content})
             tool_results: list[dict[str, Any]] = []
             for block in response.content or []:
@@ -219,22 +259,15 @@ class ToolLoopBackend:
                     }
                 )
             if not tool_results:
-                # Defensive: stop_reason said tool_use but we found none.
                 return _extract_text(response)
             messages.append({"role": "user", "content": tool_results})
-        # Hit search budget — force one final no-tool turn so the model emits text.
+        # Budget exhausted — force one final no-tool turn so the model emits
+        # text. `messages` always ends with a user turn here (we break before
+        # appending the over-budget tool_use), so the sequence stays valid.
         final = await self._client.messages.create(
-            model=self._model,
-            max_tokens=self._max_tokens,
-            system=[
-                {
-                    "type": "text",
-                    "text": system_prompt,
-                    "cache_control": {"type": "ephemeral"},
-                }
-            ],
-            messages=messages,
+            model=self._model, max_tokens=self._max_tokens, system=system, messages=messages,
         )
+        _log_usage(self._model, final)
         return _extract_text(final)
 
 

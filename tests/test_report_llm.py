@@ -173,3 +173,104 @@ async def test_deepseek_caps_tool_calls_then_forces_final_turn(monkeypatch):
     # Third (forced) call must NOT include a `tools` kwarg.
     third_call_kwargs = backend._client.messages.create.await_args_list[2].kwargs
     assert "tools" not in third_call_kwargs
+
+
+async def test_toolloop_budget_zero_makes_single_call_without_tools(monkeypatch):
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "dsk")
+    monkeypatch.setenv("TAVILY_API_KEY", "tvly")
+    backend = llm.build_backend({"backend": "deepseek"})
+    backend._client.messages.create = AsyncMock(
+        return_value=_final_text_response("### 公司速览\n\nno search")
+    )
+    backend._tavily.search = AsyncMock()
+    backend._tavily.__aenter__ = AsyncMock(return_value=backend._tavily)
+    backend._tavily.__aexit__ = AsyncMock(return_value=None)
+
+    out = await backend.analyze("<sys>", "<user>", max_search_calls=0)
+
+    assert out.startswith("### 公司速览")
+    assert backend._client.messages.create.await_count == 1
+    kwargs = backend._client.messages.create.await_args.kwargs
+    assert "tools" not in kwargs
+    backend._tavily.search.assert_not_awaited()
+
+
+async def test_toolloop_explicit_budget_overrides_constructor_default(monkeypatch):
+    """Constructor default is 2; passing 1 must cap the loop at 1 search."""
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "dsk")
+    monkeypatch.setenv("TAVILY_API_KEY", "tvly")
+    backend = llm.build_backend({"backend": "deepseek", "deepseek": {"max_search_calls": 2}})
+    backend._client.messages.create = AsyncMock(
+        side_effect=[
+            _tool_use_response("q1"),
+            _tool_use_response("q2"),
+            _final_text_response("### 公司速览\n\nfinal"),
+        ]
+    )
+    backend._tavily.search = AsyncMock(return_value="ctx")
+    backend._tavily.__aenter__ = AsyncMock(return_value=backend._tavily)
+    backend._tavily.__aexit__ = AsyncMock(return_value=None)
+
+    out = await backend.analyze("<sys>", "<user>", max_search_calls=1)
+    assert out.startswith("### 公司速览")
+    assert backend._client.messages.create.await_count == 3
+    assert "tools" not in backend._client.messages.create.await_args_list[2].kwargs
+    # Only the first tool_use was actually searched (budget 1).
+    assert backend._tavily.search.await_count == 1
+
+
+async def test_toolloop_none_budget_uses_constructor_default(monkeypatch):
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "dsk")
+    monkeypatch.setenv("TAVILY_API_KEY", "tvly")
+    backend = llm.build_backend({"backend": "deepseek", "deepseek": {"max_search_calls": 0}})
+    backend._client.messages.create = AsyncMock(
+        return_value=_final_text_response("### 公司速览\n\nx")
+    )
+    backend._tavily.__aenter__ = AsyncMock(return_value=backend._tavily)
+    backend._tavily.__aexit__ = AsyncMock(return_value=None)
+    await backend.analyze("<sys>", "<user>")
+    assert "tools" not in backend._client.messages.create.await_args.kwargs
+
+
+async def test_anthropic_budget_zero_omits_web_search_tool(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant")
+    backend = llm.build_backend({"backend": "anthropic"})
+    backend._client.messages.create = AsyncMock(
+        return_value=_final_text_response("### 公司速览\n\nx")
+    )
+    await backend.analyze("<sys>", "<user>", max_search_calls=0)
+    assert "tools" not in backend._client.messages.create.await_args.kwargs
+
+
+async def test_anthropic_budget_positive_sets_max_uses(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant")
+    backend = llm.build_backend({"backend": "anthropic", "anthropic": {"web_search_max_uses": 2}})
+    backend._client.messages.create = AsyncMock(
+        return_value=_final_text_response("### 公司速览\n\nx")
+    )
+    await backend.analyze("<sys>", "<user>", max_search_calls=1)
+    tools = backend._client.messages.create.await_args.kwargs["tools"]
+    assert tools[0]["type"].startswith("web_search") and tools[0]["max_uses"] == 1
+    await backend.analyze("<sys>", "<user>")
+    tools = backend._client.messages.create.await_args.kwargs["tools"]
+    assert tools[0]["max_uses"] == 2
+
+
+def test_log_usage_formats_tokens(caplog):
+    usage = MagicMock()
+    usage.input_tokens = 4000
+    usage.output_tokens = 3000
+    usage.cache_read_input_tokens = 1200
+    usage.server_tool_use = None
+    resp = MagicMock()
+    resp.usage = usage
+    with caplog.at_level("INFO", logger="report.llm"):
+        llm._log_usage("deepseek-v4-pro", resp)
+    assert "[llm] deepseek-v4-pro in=4000 cache_hit=1200 out=3000" in caplog.text
+
+
+def test_log_usage_tolerates_missing_usage(caplog):
+    resp = MagicMock()
+    resp.usage = None
+    with caplog.at_level("INFO", logger="report.llm"):
+        llm._log_usage("m", resp)  # must not raise
