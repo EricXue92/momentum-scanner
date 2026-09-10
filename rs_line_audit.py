@@ -235,6 +235,38 @@ def _prune_master(
     )
 
 
+AUDIT_SUBDIR = "rs-audit"
+
+
+def write_audit_files(
+    text: str,
+    buckets: dict[str, list[str]],
+    market: str,
+    as_of: str,
+    output_dir: Path,
+) -> tuple[Path, Path, Path]:
+    """Write the audit report + ``_drop`` / ``_keep_ranked`` sidecars.
+
+    All three land in ``output_dir/rs-audit/`` (created on demand), named
+    ``rs_line_audit_<MKT>_<date>{,_drop,_keep_ranked}.txt``. Sidecars are
+    comma-separated; an empty bucket yields an empty file (no trailing
+    newline) so the operator can still see the audit ran. Returns
+    ``(report, drop, keep_ranked)`` paths.
+    """
+    target = output_dir / AUDIT_SUBDIR
+    target.mkdir(parents=True, exist_ok=True)
+    stem = f"rs_line_audit_{market.upper()}_{as_of}"
+    report = target / f"{stem}.txt"
+    report.write_text(text + "\n")
+    drop = target / f"{stem}_drop.txt"
+    drop.write_text(",".join(buckets["drops"]) + ("\n" if buckets["drops"] else ""))
+    keep = target / f"{stem}_keep_ranked.txt"
+    keep.write_text(
+        ",".join(buckets["keeps_ranked"]) + ("\n" if buckets["keeps_ranked"] else "")
+    )
+    return report, drop, keep
+
+
 def _audit_market(
     market: str,
     config: dict,
@@ -279,19 +311,12 @@ def _audit_market(
         anomaly_ids=anomaly_ids,
     )
 
-    out_file = output_dir / f"rs_line_audit_{market.upper()}_{as_of}.txt"
-    out_file.write_text(text + "\n")
-    logger.info(f"[rs-line-audit] wrote {out_file}")
-
     buckets = classify(ids, direction, reversal, tolerance, adr_mult)
-    drop_file = output_dir / f"rs_line_audit_{market.upper()}_{as_of}_drop.txt"
-    drop_file.write_text(",".join(buckets["drops"]) + ("\n" if buckets["drops"] else ""))
-    logger.info(f"[rs-line-audit] wrote {drop_file} ({len(buckets['drops'])} ids)")
-
-    keep_file = output_dir / f"rs_line_audit_{market.upper()}_{as_of}_keep_ranked.txt"
-    keep_file.write_text(
-        ",".join(buckets["keeps_ranked"]) + ("\n" if buckets["keeps_ranked"] else "")
+    out_file, drop_file, keep_file = write_audit_files(
+        text, buckets, market, as_of, output_dir
     )
+    logger.info(f"[rs-line-audit] wrote {out_file}")
+    logger.info(f"[rs-line-audit] wrote {drop_file} ({len(buckets['drops'])} ids)")
     logger.info(f"[rs-line-audit] wrote {keep_file} ({len(buckets['keeps_ranked'])} ids)")
 
     top_file = write_top_n(

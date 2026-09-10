@@ -270,7 +270,8 @@ output/
 │   ├── PostMarket/<date>_us.html      # daily CANSLIM briefing (US only)
 │   └── PreMarket/<date>_us_premarket.html   # pre-market catalyst report
 ├── hk_rs_<date>.txt           # daily strongest-RS top-10 snapshot, HK
-├── rs_line_audit_{US,HK}_<date>{,_drop,_keep_ranked}.txt   # audit report + sidecars
+├── rs-audit/                  # audit report + sidecars; 5-day retention
+│   └── rs_line_audit_{US,HK}_<date>{,_drop,_keep_ranked}.txt
 └── state/                     # cross-day "seen" masters, RS table caches, morning-gap daily seen, EDGAR cache
     ├── eod_seen_US.txt        # US long-side master (5 Longs groups + Leaders + RS)
     ├── eod_seen_HK.txt        # HK long-side master (EarningsGap/HighVolume/GapUp/Leaders/RS)

@@ -151,3 +151,29 @@ def test_hk_master_to_futu_pads_and_prefixes():
     assert _hk_master_to_futu("HKEX:522") == "HK.00522"
     assert _hk_master_to_futu("HKEX:1304") == "HK.01304"
     assert _hk_master_to_futu("148") == "HK.00148"   # tolerate bare code
+
+
+def test_write_audit_files_lands_in_rs_audit_subdir(tmp_path):
+    from rs_line_audit import write_audit_files
+    buckets = {"drops": ["BBB", "DDD"], "exempts": [], "keeps_ranked": ["AAA", "CCC"]}
+    report, drop, keep = write_audit_files(
+        "report text", buckets, "us", "2026-09-10", tmp_path
+    )
+    audit = tmp_path / "rs-audit"
+    assert report == audit / "rs_line_audit_US_2026-09-10.txt"
+    assert drop == audit / "rs_line_audit_US_2026-09-10_drop.txt"
+    assert keep == audit / "rs_line_audit_US_2026-09-10_keep_ranked.txt"
+    assert report.read_text() == "report text\n"
+    assert drop.read_text() == "BBB,DDD\n"
+    assert keep.read_text() == "AAA,CCC\n"
+    # nothing leaked to the output root
+    assert not list(tmp_path.glob("rs_line_audit_*"))
+
+
+def test_write_audit_files_hk_and_empty_buckets(tmp_path):
+    from rs_line_audit import write_audit_files
+    buckets = {"drops": [], "exempts": [], "keeps_ranked": []}
+    report, drop, keep = write_audit_files("r", buckets, "hk", "2026-09-10", tmp_path)
+    assert report.name == "rs_line_audit_HK_2026-09-10.txt"
+    assert drop.read_text() == ""
+    assert keep.read_text() == ""

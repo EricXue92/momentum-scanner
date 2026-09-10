@@ -81,9 +81,13 @@ _RETENTION_RULES: tuple[_Rule, ...] = (
     _Rule("", re.compile(rf"^(?:rs_us|hk_rs)_{_DATE_D}\.txt$"),
           "%Y-%m-%d", 4),
     # Audit report + sidecars accumulate daily now that the audit is on the
-    # EOD schedule. Same 4-day window as the snapshots above.
+    # EOD schedule. Live in rs-audit/ (since 2026-09-10), 5-day window like
+    # the TV/Webull scan outputs. The root rule is kept so pre-move
+    # leftovers still age out; drop it once the root is clean.
+    _Rule("rs-audit", re.compile(rf"^rs_line_audit_(?:US|HK)_{_DATE_D}(?:_drop|_keep_ranked)?\.txt$"),
+          "%Y-%m-%d", 5),
     _Rule("", re.compile(rf"^rs_line_audit_(?:US|HK)_{_DATE_D}(?:_drop|_keep_ranked)?\.txt$"),
-          "%Y-%m-%d", 4),
+          "%Y-%m-%d", 5),
 )
 
 

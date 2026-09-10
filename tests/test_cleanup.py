@@ -235,20 +235,31 @@ def test_cleanup_top_n_snapshots_four_day_window(tmp_path: Path) -> None:
     assert not (out / "hk_rs_2026-05-11.txt").exists()
 
 
-def test_cleanup_audit_reports_four_day_window(tmp_path: Path) -> None:
+def test_cleanup_audit_reports_five_day_window_in_rs_audit_dir(tmp_path: Path) -> None:
+    out = tmp_path / "output"
+    audit = out / "rs-audit"
+    audit.mkdir(parents=True)
+    _touch(audit / "rs_line_audit_US_2026-05-15.txt")
+    _touch(audit / "rs_line_audit_US_2026-05-11.txt")          # 5th day — kept
+    _touch(audit / "rs_line_audit_US_2026-05-10.txt")          # 6th day — pruned
+    _touch(audit / "rs_line_audit_HK_2026-05-10_drop.txt")
+    _touch(audit / "rs_line_audit_HK_2026-05-10_keep_ranked.txt")
+    cleanup_old_outputs(out, date(2026, 5, 15))
+    assert (audit / "rs_line_audit_US_2026-05-15.txt").exists()
+    assert (audit / "rs_line_audit_US_2026-05-11.txt").exists()
+    assert not (audit / "rs_line_audit_US_2026-05-10.txt").exists()
+    assert not (audit / "rs_line_audit_HK_2026-05-10_drop.txt").exists()
+    assert not (audit / "rs_line_audit_HK_2026-05-10_keep_ranked.txt").exists()
+
+
+def test_cleanup_audit_reports_legacy_root_leftovers_age_out(tmp_path: Path) -> None:
     out = tmp_path / "output"
     out.mkdir()
-    _touch(out / "rs_line_audit_US_2026-05-15.txt")
-    _touch(out / "rs_line_audit_US_2026-05-12.txt")          # 4th day — kept
-    _touch(out / "rs_line_audit_US_2026-05-11.txt")          # 5th day — pruned
-    _touch(out / "rs_line_audit_HK_2026-05-11_drop.txt")
-    _touch(out / "rs_line_audit_HK_2026-05-11_keep_ranked.txt")
+    _touch(out / "rs_line_audit_US_2026-05-11.txt")            # 5th day — kept
+    _touch(out / "rs_line_audit_HK_2026-05-10_keep_ranked.txt")  # 6th day — pruned
     cleanup_old_outputs(out, date(2026, 5, 15))
-    assert (out / "rs_line_audit_US_2026-05-15.txt").exists()
-    assert (out / "rs_line_audit_US_2026-05-12.txt").exists()
-    assert not (out / "rs_line_audit_US_2026-05-11.txt").exists()
-    assert not (out / "rs_line_audit_HK_2026-05-11_drop.txt").exists()
-    assert not (out / "rs_line_audit_HK_2026-05-11_keep_ranked.txt").exists()
+    assert (out / "rs_line_audit_US_2026-05-11.txt").exists()
+    assert not (out / "rs_line_audit_HK_2026-05-10_keep_ranked.txt").exists()
 
 
 def test_cleanup_removes_old_hk_metrics_state_cache(tmp_path: Path) -> None:

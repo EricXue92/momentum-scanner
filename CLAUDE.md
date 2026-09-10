@@ -143,7 +143,7 @@ local (throttle-prone) k-line fetch.
   `docs/superpowers/specs/2026-05-27-rs-line-trend-filter-design.md`.
 - **`uv run main.py --mode rs-line-audit [--market us|hk|both] [--dry-run|--yes]`**
   scores the cross-day master, writes
-  `output/rs_line_audit_<MKT>_<date>{,_drop,_keep_ranked}.txt`, prints the
+  `output/rs-audit/rs_line_audit_<MKT>_<date>{,_drop,_keep_ranked}.txt`, prints the
   report, then **prompts y/N** to prune the drops from
   `output/state/eod_seen_{US,HK}.txt` so they can re-qualify on a future EOD run.
   Confirmed prunes back the master up first as `eod_seen_<MKT>.txt.bak.<stamp>`.
@@ -158,7 +158,8 @@ local (throttle-prone) k-line fetch.
   `output/TV/US/rs_us_<date>.txt` / `output/hk_rs_<date>.txt` — dated, skipped
   when empty, overwritten on same-day rerun (ranking snapshot, no dedup
   semantics; not Webull-mirrored, no eod_seen effect).
-  Cleanup: snapshots and audit report + sidecars all 4-day window.
+  Cleanup: snapshots 4-day window; audit report + sidecars (`rs-audit/`)
+  5-day window.
 
 ## Futu sync
 
