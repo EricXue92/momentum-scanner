@@ -20,6 +20,7 @@ OUTPUT_STATE_DIR = PROJECT_ROOT / "output" / "state"
 CONFIG_PATH = PROJECT_ROOT / "config.toml"
 
 PRIORITY_ORDER: list[str] = [
+    "TheSetup",
     "EarningsGap",
     "HighVolume",
     "Leaders",
@@ -30,7 +31,7 @@ PRIORITY_ORDER: list[str] = [
     "RS",
 ]
 
-_HK_EXCLUDES = {"NewHigh52W", "TopGainers"}
+_HK_EXCLUDES = {"TheSetup", "NewHigh52W", "TopGainers"}
 
 MAX_TICKERS_PER_REPORT = 30
 

@@ -54,7 +54,7 @@ mirrored to `output/Webull/{US,HK}/` (newline-sep), then Futu sync.
   `_dedup_seen` (which mutates `us_seen`) and written to
   `<date>_Repeat.txt`. Read-only w.r.t. the master — no write-back, and each
   group's own `.txt` keeps its "new names only" meaning. Config `[eod_repeat]`
-  (`keys` = the 4 event groups; `new_high_52w`/Leaders deliberately excluded as
+  (`keys` = the 5 event groups incl. `the_setup`; `new_high_52w`/Leaders deliberately excluded as
   persistent states). Futu/TV mappings ship commented out (groups must be
   hand-created), so sync is a no-op until you enable them.
 - **Cleanup** (`cleanup_old_outputs`) is driven by an explicit regex rule table
@@ -123,7 +123,8 @@ same workflow) and fetched locally via `hk_metrics.build_hk_metrics_cloud`, so
 discovery runs on the full universe on the happy path; a cloud miss falls back to the
 local (throttle-prone) k-line fetch.
 
-- Event groups gate on 12M only: US Longs 5 组; HK EarningsGap/HighVolume/GapUp
+- Event groups gate on 12M only: US Longs 6 组 (per-group `min_rs_percentile`
+  override, `_longs_rs_threshold`; `the_setup` = 0 → no RS gate); HK EarningsGap/HighVolume/GapUp
   (per-group wiring in `run_hk_eod`, mirrors US). US Leaders / conditional RS /
   Shorts are structurally 12M+3M double-gated; config.toml sets their 12M keys
   to 0 so they currently gate on 3M only. 12M keys: `min_rs_percentile`
@@ -136,6 +137,11 @@ local (throttle-prone) k-line fetch.
   yfinance batch in `filter_hk_shorts`). The 12M∩3M double gate is thus
   currently nowhere active (all knobs remain independently tunable).
 - Not gated: Morning Gap. IPO: conditional 3M only (≥ 64-day history).
+- **yfinance single-ticker frames:** `group_by="ticker"` returns a (ticker,
+  field) MultiIndex even for ONE ticker (yfinance 1.x); every `single` branch
+  indexes `data["Close"]` flat, so each download site wraps the result in
+  `_flatten_single_ticker_frame`. Without it a one-hit screener day drops its
+  only candidate ("failed to process ..., dropping" — ACVA 2026-09-11).
 - **Do NOT make fetch failure hard-fail:** walk back ≤ 3 days of stale cache, then
   pass through (no gate) with a warning. Tickers **missing** from the table are
   KEPT, not dropped.
@@ -172,7 +178,7 @@ local (throttle-prone) k-line fetch.
 Soft side-effect — logs a warning on failure, never raises. No-op when disabled /
 unmapped / empty tickers (an empty `.txt` must not wipe the existing group).
 Diff-based (one DEL + one ADD max). Append-only groups skip DEL and accumulate.
-Ticker format: US `AAPL`→`US.AAPL`, HK `522`→`HK.00522` (5-digit). The 17 custom
+Ticker format: US `AAPL`→`US.AAPL`, HK `522`→`HK.00522` (5-digit). The 18 custom
 groups must be created by hand in the client (API can't create groups).
 
 **Gotchas (do not regress):**

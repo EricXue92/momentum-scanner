@@ -61,6 +61,11 @@ local (throttle-prone) k-line fetch.
 
 - US Longs: 12M only. US Leaders + RS + Shorts, and all HK long-side: 12M ∩ 3M.
 - Not gated: HK Shorts, Morning Gap. IPO: conditional 3M only (≥ 64-day history).
+- **yfinance single-ticker frames:** `group_by="ticker"` returns a (ticker,
+  field) MultiIndex even for ONE ticker (yfinance 1.x); every `single` branch
+  indexes `data["Close"]` flat, so each download site wraps the result in
+  `_flatten_single_ticker_frame`. Without it a one-hit screener day drops its
+  only candidate ("failed to process ..., dropping" — ACVA 2026-09-11).
 - **Do NOT make fetch failure hard-fail:** walk back ≤ 3 days of stale cache, then
   pass through (no gate) with a warning. Tickers **missing** from the table are
   KEPT, not dropped.
@@ -77,7 +82,7 @@ local (throttle-prone) k-line fetch.
 Soft side-effect — logs a warning on failure, never raises. No-op when disabled /
 unmapped / empty tickers (an empty `.txt` must not wipe the existing group).
 Diff-based (one DEL + one ADD max). Append-only groups skip DEL and accumulate.
-Ticker format: US `AAPL`→`US.AAPL`, HK `522`→`HK.00522` (5-digit). The 17 custom
+Ticker format: US `AAPL`→`US.AAPL`, HK `522`→`HK.00522` (5-digit). The 18 custom
 groups must be created by hand in the client (API can't create groups).
 
 **Gotchas (do not regress):**

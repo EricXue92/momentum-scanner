@@ -18,13 +18,13 @@ adr_days = 20
 # 表中没有的票 (新 IPO / 外国挂牌) 保留不删。任一阈值设 0 关闭该层
 # (12M 两个都为 0 才跳过 GitHub 拉取; 3M 设 0 跳过 yfinance batch)。
 # 作用范围 (12M ∩ 3M 双闸):
-#   Longs 5 组   → 仅 12M (min_rs_percentile_longs)
+#   Longs 6 组   → 仅 12M (min_rs_percentile_longs; 组内可用 min_rs_percentile 覆盖, TheSetup = 0)
 #   Leaders      → 12M (min_rs_percentile) + 3M
 #   条件 RS 组    → 12M (min_rs_percentile_rs, 缺省继承 min_rs_percentile_longs) + 3M
 #   US Shorts    → 12M (min_rs_percentile_shorts, 缺省继承 min_rs_percentile_longs) + 3M
 #   US IPO(≥64天) → 仅 3M
 min_rs_percentile        = 0   # Leaders 12M (≥80 = top 20%) # 80
-min_rs_percentile_longs  = 90    # Longs 5 组 12M (≥90 = top 10%)
+min_rs_percentile_longs  = 90    # Longs 6 组 12M (≥90 = top 10%); TheSetup 组内覆盖为 0
 min_rs_percentile_rs     = 0     # 条件 RS 组 12M 层已关闭; 只走下方 3M 单闸
 min_rs_percentile_shorts = 0     # US Shorts 12M 层已关闭; 只走下方 3M 单闸
 min_rs_percentile_3m     = 90    # 3M 层
@@ -77,9 +77,22 @@ consecutive_days = 2
 #  美股 (US)
 # ════════════════════════════════════════════════════════════
 
-# Longs: 5 子策略，按下方 list 顺序内部互斥去重，各自单独输出。
-# 优先级 (高→低): EarningsGap > HighVolume > GapUp > NewHigh52W > TopGainers。
+# Longs: 6 子策略，按下方 list 顺序内部互斥去重，各自单独输出。
+# 优先级 (高→低): TheSetup > EarningsGap > HighVolume > GapUp > NewHigh52W > TopGainers。
 # 并集再参与 Longs > Leaders 的跨组去重。
+#
+# TheSetup: 放量 + 大缺口 (gap ≥ 5% + 本地 RVol ≥ 3× 20 日均量), 最高优先级。
+# 价格门槛放宽到 $10 (其他组 $20); avgvol/$vol/ADR%/RS 12M/SMA50+200 与其他组一致。
+# 与其他事件组一样过跨日 master 去重 (只出新票, 老票复燃进 Repeat.txt)。
+# 不过 12M RS 闸 (min_rs_percentile = 0; 其他组缺省继承 [settings].min_rs_percentile_longs)。
+[[longs]]
+key = "the_setup"
+name = "The Setup (Heavy Volume + Gap Up 5%)"
+filters = ["ind_stocksonly","cap_smallover","sh_avgvol_o500","sh_price_o10","ta_gap_u5","ta_sma50_pa","ta_sma200_pa"]
+min_relative_volume = 3
+relative_volume_days = 20
+min_rs_percentile = 0
+
 [[longs]]
 key = "earnings_gap"
 name = "Earnings Gap"
@@ -114,7 +127,7 @@ filters = ["ind_stocksonly","cap_smallover","sh_avgvol_o500","sh_price_o20","ta_
 # 刻意排除 new_high_52w / Leaders: 它们是持续状态，会天天复燃刷屏。
 [eod_repeat]
 enabled = true
-keys = ["earnings_gap", "high_volume", "gap_up", "top_gainers"]
+keys = ["the_setup", "earnings_gap", "high_volume", "gap_up", "top_gainers"]
 file_stem = "Repeat"
 
 # Leaders: 强势 + 站上 SMA50/SMA200，5 个 perf 窗口合并去重，输出 Leaders.txt。
@@ -319,6 +332,7 @@ port = 11111
 # (Futu 上限: 非交易户 500/组，活跃交易户 2000)。
 append_only_groups = [
     # 美股
+    "TheSetup",
     "EarningsGap",
     "HighVolume",
     "GapUp",
@@ -341,6 +355,7 @@ append_only_groups = [
 
 [futu.groups]
 # --- 美股 ---
+longs_the_setup = "TheSetup"
 # EarningsGap 是合并的 "gap watch" 组: EOD 财报缺口 + 盘前/盘后 morning-gap
 # 都同步进来 (append-only)。
 longs_earnings_gap = "EarningsGap"
@@ -383,7 +398,7 @@ enabled = false
 # 跨日累积。建议跟 Futu 那边保持一致避免行为分裂。
 append_only_lists = [
     # 美股
-    "EarningsGap", "MorningGap", "HighVolume", "GapUp", "NewHigh52W",
+    "TheSetup", "EarningsGap", "MorningGap", "HighVolume", "GapUp", "NewHigh52W",
     "TopGainers", "Leaders", "Shorts", "RS", "IPO",
     # 港股
     "HKShorts", "HKEarningsGap", "HKHighVolume", "HKGapUp", "HKLeaders",
@@ -392,6 +407,7 @@ append_only_lists = [
 
 [tv_sync.lists]
 # --- 美股 ---
+longs_the_setup    = "TheSetup"
 # 与 Futu 不同: TV 上 MorningGap 跟 EarningsGap 拆开 (Futu 那边三者并入
 # EarningsGap)。morning_gap 和 morning_gap_pre 合并到同一个 MorningGap。
 longs_earnings_gap = "EarningsGap"

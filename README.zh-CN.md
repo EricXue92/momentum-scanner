@@ -22,7 +22,7 @@
 
 | 闸门                                            | 作用范围                                | 阈值                                                           | 数据源                                                                                                                                                                                                                                                 |
 | ----------------------------------------------- | --------------------------------------- | -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **IBD RS Percentile 12M (事件组)**              | Longs 5 组                              | ≥ 90(top 10%;表中缺失的 ticker 保留)                           | [Fred6725/rs-log](https://github.com/Fred6725/relative-strength),`RS = 0.4·P3 + 0.2·P6 + 0.2·P9 + 0.2·P12` 对 SPY 归一,工作日 ~01:30 UTC 刷新                                                                                                          |
+| **IBD RS Percentile 12M (事件组)**              | Longs 6 组                              | ≥ 90(top 10%;表中缺失的 ticker 保留)                           | [Fred6725/rs-log](https://github.com/Fred6725/relative-strength),`RS = 0.4·P3 + 0.2·P6 + 0.2·P9 + 0.2·P12` 对 SPY 归一,工作日 ~01:30 UTC 刷新                                                                                                          |
 | **IBD RS Percentile 3M (Leaders/RS/US Shorts)** | Leaders + RS 组 + US Shorts(不含 Longs) | ≥ 90(top 10%;缺失 ticker 保留)                                 | `RS_3M = 0.5·R21 + 0.3·R42 + 0.2·R63` 对 SPY,universe = Fred6725 ticker 列表(~6100),**云端在 GitHub Actions 上计算**并发布到 `data/us_rs_3m/<date>.csv`(带 `raw_score` 供 IPO 的 out-of-universe 查排名);`us_rs_3m.py` 负责拉取(拉不到就往回退 ≤ 3 天) |
 | **Dollar Volume**                               | Longs + Leaders                         | 价 × 20 日均量 ≥ $100M                                         | yfinance 日线                                                                                                                                                                                                                                          |
 | **ADR%**                                        | Longs + Leaders                         | mean(`(High − Low) / Close`) × 100,取最近 20 根完整 bar ≥ 4.0% | yfinance 日线                                                                                                                                                                                                                                          |
@@ -31,7 +31,7 @@
 
 | 分组                                                            | 12M 闸                                               | 3M 闸                                                                |
 | --------------------------------------------------------------- | ---------------------------------------------------- | -------------------------------------------------------------------- |
-| Longs 5 组 (EarningsGap/HighVolume/GapUp/NewHigh52W/TopGainers) | `min_rs_percentile_longs` = **90**                   | —(设计上无此层)                                                      |
+| Longs 6 组 (TheSetup/EarningsGap/HighVolume/GapUp/NewHigh52W/TopGainers) | `min_rs_percentile_longs` = **90**                   | —(设计上无此层)                                                      |
 | Leaders                                                         | `min_rs_percentile` = 0(关)                          | `min_rs_percentile_3m` = **90**                                      |
 | 条件 RS 组                                                      | `min_rs_percentile_rs` = 0(关;缺省继承 longs 键)     | `min_rs_percentile_3m` = **90**                                      |
 | US Shorts                                                       | `min_rs_percentile_shorts` = 0(关;缺省继承 longs 键) | `min_rs_percentile_3m` = **90**                                      |
@@ -41,23 +41,24 @@
 
 ADR% 取代了过去的 Finviz `beta > 1.5` 过滤:beta 反映的是多年来与大盘的相关性,容易误杀那些眼下正活跃、真正 in-play 的中大盘催化剂票;而 ADR%(Kullamägi 式)直接衡量一只股票当下的波动幅度。
 
-### Longs(5 个策略,互斥)
+### Longs(6 个策略,互斥)
 
 Oliver Kell 的动量/突破 setup。按优先级排序,靠前的策略优先命中,每只 ticker 每天最多进一个 Longs 文件。
 
 | 优先级 | 策略          | Finviz 过滤                                                                                              |
 | ------ | ------------- | -------------------------------------------------------------------------------------------------------- |
+| 0      | `TheSetup`    | Small Cap+, Avg Vol > 500K, **Price > $10**, Gap Up 5%+, Above SMA50 & SMA200 + yfinance Rel Vol ≥ 3× 20 日均量(放量 + 大缺口;最高优先级);**不过 RS 12M 闸** |
 | 1      | `EarningsGap` | Small Cap+, Earnings Today, Avg Vol > 500K, Price > $20, Rel Vol > 1.5, Gap Up 5%+, Above SMA50 & SMA200 |
 | 2      | `HighVolume`  | Small Cap+, Avg Vol > 500K, Price > $20, Day Up, Above SMA50 & SMA200 + yfinance Rel Vol ≥ 3× 20 日均量  |
 | 3      | `GapUp`       | Small Cap+, Avg Vol > 500K, Price > $20, Gap Up 3%+, Above SMA50 & SMA200                                |
 | 4      | `NewHigh52W`  | Small Cap+, Avg Vol > 500K, Price > $20, New 52W High, Above SMA50 & SMA200                              |
 | 5      | `TopGainers`  | Small Cap+, Avg Vol > 500K, Price > $20, Above SMA50 & SMA200, Signal: Top Gainers                       |
 
-这 5 组同样要过全局的 Dollar Volume / ADR% 闸以及 IBD RS 12M ≥ 90。**Longs 不加 3M 层**——事件过滤本身选的就是新鲜动量。
+这 6 组同样要过全局的 Dollar Volume / ADR% 闸以及 IBD RS 12M ≥ 90(组内可用 `min_rs_percentile` 覆盖;`TheSetup` 设 0——放量大缺口本身就是信号,再要求 12M 领涨会把刚起势的票挡在门外)。**Longs 不加 3M 层**——事件过滤本身选的就是新鲜动量。
 
 ### EOD Repeat(美股,只读 sidecar)
 
-已在跨日 master 里、今天又命中 4 个*事件类* Longs 子组之一的老票(`[eod_repeat] keys` = EarningsGap/HighVolume/GapUp/TopGainers;NewHigh52W 和 Leaders 刻意排除——它们是持续状态,会天天复燃刷屏),汇总写入 `<date>_Repeat.txt` 供每日复查。对 master 只读:不写回,各组自身的 `.txt` 仍保持"只出新票"的语义。Futu/TV 同步映射默认注释掉(`Repeat` 分组/列表须先手动建好),启用前同步是 no-op。
+已在跨日 master 里、今天又命中 5 个*事件类* Longs 子组之一的老票(`[eod_repeat] keys` = TheSetup/EarningsGap/HighVolume/GapUp/TopGainers;NewHigh52W 和 Leaders 刻意排除——它们是持续状态,会天天复燃刷屏),汇总写入 `<date>_Repeat.txt` 供每日复查。对 master 只读:不写回,各组自身的 `.txt` 仍保持"只出新票"的语义。Futu/TV 同步映射默认注释掉(`Repeat` 分组/列表须先手动建好),启用前同步是 no-op。
 
 ### Leaders(5 个策略,合并)
 
@@ -229,9 +230,9 @@ Oliver Kell 的相对强度打法,专挑弱市里扛住的股票。**只在 SPY 
 
 | 方面              | 细节                                                                                                                                                                                                                                                                                                      |
 | ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **输入 (US)**     | 8 个带日期文件:`EarningsGap`, `HighVolume`, `Leaders`, `GapUp`, `NewHigh52W`, `IPO`, `TopGainers`, `RS`                                                                                                                                                                                                   |
+| **输入 (US)**     | 9 个带日期文件:`TheSetup`, `EarningsGap`, `HighVolume`, `Leaders`, `GapUp`, `NewHigh52W`, `IPO`, `TopGainers`, `RS`                                                                                                                                                                                                   |
 | **输入 (HK)**     | 6 个带日期文件:`EarningsGap`, `HighVolume`, `Leaders`, `GapUp`, `IPO`, `RS`(无 NewHigh52W / TopGainers)                                                                                                                                                                                                   |
-| **上限 & 优先级** | 30 只/市场(`MAX_TICKERS_PER_REPORT`);`EarningsGap > HighVolume > Leaders > GapUp > NewHigh52W > IPO > TopGainers > RS`。溢出的列在 "Truncated" 尾部小节。                                                                                                                                                 |
+| **上限 & 优先级** | 30 只/市场(`MAX_TICKERS_PER_REPORT`);`TheSetup > EarningsGap > HighVolume > Leaders > GapUp > NewHigh52W > IPO > TopGainers > RS`。溢出的列在 "Truncated" 尾部小节。                                                                                                                                                 |
 | **结构化字段**    | US 基本面 **SEC EDGAR companyfacts 优先**、yfinance 逐字段兜底(缓存于 `output/state/edgar_cache/`);HK 直接用 yfinance。字段:Market Cap, Price, EPS(最新季 + YoY), Revenue(最新季 + YoY), **5 年年度 YoY + 最近 4 季 YoY 轨迹**(两者), PE, ROE, Inst. Hold %, 最近财报日。RS 百分位取自缓存的 IBD/HSI 表。 |
 | **定性小节**      | 模型生成,每只 ticker 最多 2 次 web 搜索(`web_search_max_uses` / `max_search_calls`):公司速览, 基本面/财报, 竞争力, 政策/政府支持, 新产品/催化剂, 风险点, 综合判断。                                                                                                                                       |
 | **双语**          | 快照字段保持英文/数字;定性分析用简体中文。                                                                                                                                                                                                                                                                |
@@ -247,7 +248,7 @@ Oliver Kell 的相对强度打法,专挑弱市里扛住的股票。**只在 SPY 
 
 ## Dedup(去重)
 
-- **Longs 内部** — 5 个策略互斥(优先级 `EarningsGap > HighVolume > GapUp > NewHigh52W > TopGainers`)。
+- **Longs 内部** — 6 个策略互斥(优先级 `TheSetup > EarningsGap > HighVolume > GapUp > NewHigh52W > TopGainers`)。
 - **跨组** — 长线侧优先级 `Longs > Leaders > RS`。
 - **跨日 master** — `output/state/eod_seen_{US,HK,IPO,HKIPO}.txt`。每只 ticker 首次出现时进且仅进一个长线侧分组;后续运行只发*新*票。两个市场互相独立;IPO/HKIPO 各有自己的 master,这样一只晋升的票之后能出现在它本该属于的分组。删文件即重置。
 - **SMA50 自动清理(仅美股)** — 每次 `us-eod` 开头、加载 master 之前,master 里凡是收盘价**连续 2 个完整交易日低于 SMA50**(`[sma50_prune] consecutive_days`)**且最新收盘低于前一日收盘**(仍在下跌——线下反弹的票保留)的票会被自动从 `eod_seen_US.txt` 移除,之后可在未来的 EOD 重新合格、重新出现。移除前先备份(`eod_seen_US.txt.bak.<stamp>`)。软失败:yfinance 整体失败则跳过本次清理;历史缺失/过短的票保留不动。
@@ -260,7 +261,7 @@ Oliver Kell 的相对强度打法,专挑弱市里扛住的股票。**只在 SPY 
 ```
 output/
 ├── TV/                        # 逗号分隔,供 TradingView "Import list..."
-│   ├── US/<date>_{EarningsGap,HighVolume,GapUp,NewHigh52W,TopGainers,Leaders,Shorts,RS,IPO,Repeat,MorningGapPre{20,10,5},MorningGap{5..30}}.txt
+│   ├── US/<date>_{TheSetup,EarningsGap,HighVolume,GapUp,NewHigh52W,TopGainers,Leaders,Shorts,RS,IPO,Repeat,MorningGapPre{20,10,5},MorningGap{5..30}}.txt
 │   ├── US/rs_us_<date>.txt    # 每日 RS 最强 top-10 快照,美股(来自定时 rs-line audit)
 │   └── HK/<date>_{EarningsGap,HighVolume,GapUp,Leaders,Shorts,RS,IPO,HKMorningGap{10..60}}.txt
 ├── Webull/                    # 换行分隔镜像,供 Webull "Upload as File"
@@ -299,13 +300,13 @@ output/
 
 1. 启动 [FutuOpenD](https://openapi.futunn.com/futu-api-doc/intro/intro.html),登录(默认 `127.0.0.1:11111`)。
 2. 在 Futu PC 客户端手动建这些自定义分组(API 只能改已存在的分组,不能新建):
-   `EarningsGap`, `HighVolume`, `GapUp`, `NewHigh52W`, `TopGainers`, `Leaders`, `Shorts`, `RS`, `IPO`(US)。
+   `TheSetup`, `EarningsGap`, `HighVolume`, `GapUp`, `NewHigh52W`, `TopGainers`, `Leaders`, `Shorts`, `RS`, `IPO`(US)。
 
 多数 EOD 分组是 append-only——太满时在客户端手动清空(Futu 上限:非交易户 500/组,活跃交易户 2000)。
 
 ## TradingView 自动同步(可选,`tv_sync.py`)
 
-`[tv_sync]`(默认 **`enabled = false`**)把同一批自选同步到 TradingView 列表,走其**非官方 REST API**,用 `sessionid` cookie 认证。凭证读取顺序:先看环境变量(`TV_SESSIONID`、`TV_SESSIONID_SIGN`),再看 `~/.config/momentum-scanner/tv_cookie.json`。18 个列表须先在 TV 网页手动建好(名字区分大小写、精确匹配),找不到的名字会记 warning 并跳过。软失败契约与 Futu 一致——cookie 过期也绝不阻塞 `.txt` 输出。Append-only 语义走 TV 自己的 `[tv_sync].append_only_lists` 键(与 `[futu].append_only_groups` 同语义;建议两边保持一致,避免行为分裂);注意 TV 把 `MorningGap` 保留为独立列表,而 Futu 那边并入了 `EarningsGap`。
+`[tv_sync]`(默认 **`enabled = false`**)把同一批自选同步到 TradingView 列表,走其**非官方 REST API**,用 `sessionid` cookie 认证。凭证读取顺序:先看环境变量(`TV_SESSIONID`、`TV_SESSIONID_SIGN`),再看 `~/.config/momentum-scanner/tv_cookie.json`。19 个列表须先在 TV 网页手动建好(名字区分大小写、精确匹配),找不到的名字会记 warning 并跳过。软失败契约与 Futu 一致——cookie 过期也绝不阻塞 `.txt` 输出。Append-only 语义走 TV 自己的 `[tv_sync].append_only_lists` 键(与 `[futu].append_only_groups` 同语义;建议两边保持一致,避免行为分裂);注意 TV 把 `MorningGap` 保留为独立列表,而 Futu 那边并入了 `EarningsGap`。
 
 ## 推送通知 (ntfy)
 

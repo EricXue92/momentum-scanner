@@ -12,7 +12,8 @@ def fake_us_dir(tmp_path: Path) -> Path:
     d.mkdir(parents=True)
     # date stem matches "2026_05_07" used by the rest of the pipeline.
     files = {
-        "2026_05_07_EarningsGap.txt": "NASDAQ:AAPL,NASDAQ:NVDA",
+        "2026_05_07_TheSetup.txt": "NASDAQ:AAPL,NYSE:CRWV",
+        "2026_05_07_EarningsGap.txt": "NASDAQ:AAPL,NASDAQ:NVDA",  # AAPL dup
         "2026_05_07_HighVolume.txt": "NASDAQ:NVDA,NASDAQ:TSLA",  # NVDA dup
         "2026_05_07_Leaders.txt": "NASDAQ:META",
         "2026_05_07_GapUp.txt": "",
@@ -52,7 +53,7 @@ def test_collect_market_groups(fake_us_dir):
     result = ranker.collect_market_groups(fake_us_dir, "2026_05_07", "us")
     # Returns dict[group_name -> list[ticker]] in priority order
     assert list(result.keys()) == [
-        "EarningsGap", "HighVolume", "Leaders", "GapUp",
+        "TheSetup", "EarningsGap", "HighVolume", "Leaders", "GapUp",
         "NewHigh52W", "IPO", "TopGainers", "RS",
     ]
     assert result["EarningsGap"] == ["NASDAQ:AAPL", "NASDAQ:NVDA"]
@@ -65,10 +66,12 @@ def test_rank_and_cap_priority_dedup(fake_us_dir):
     tickers_only = [t for t, _ in analyzed]
     # NVDA appears in both EarningsGap and HighVolume; should land in the higher-priority one only.
     assert tickers_only.count("NASDAQ:NVDA") == 1
-    # Order follows priority: EarningsGap first.
-    assert analyzed[0] == ("NASDAQ:AAPL", "EarningsGap")
-    assert analyzed[1] == ("NASDAQ:NVDA", "EarningsGap")
-    assert analyzed[2] == ("NASDAQ:TSLA", "HighVolume")
+    # AAPL appears in TheSetup and EarningsGap; TheSetup is highest priority.
+    assert tickers_only.count("NASDAQ:AAPL") == 1
+    assert analyzed[0] == ("NASDAQ:AAPL", "TheSetup")
+    assert analyzed[1] == ("NYSE:CRWV", "TheSetup")
+    assert analyzed[2] == ("NASDAQ:NVDA", "EarningsGap")
+    assert analyzed[3] == ("NASDAQ:TSLA", "HighVolume")
     assert truncated == []
 
 
@@ -76,10 +79,10 @@ def test_rank_and_cap_truncates_at_limit(fake_us_dir):
     groups = ranker.collect_market_groups(fake_us_dir, "2026_05_07", "us")
     analyzed, truncated = ranker.rank_and_cap(groups, cap=3)
     assert len(analyzed) == 3
-    assert len(truncated) == 5  # 8 unique total - 3 = 5
+    assert len(truncated) == 6  # 9 unique total - 3 = 6
     # Cap honored.
     assert [t for t, _ in analyzed] == [
-        "NASDAQ:AAPL", "NASDAQ:NVDA", "NASDAQ:TSLA",
+        "NASDAQ:AAPL", "NYSE:CRWV", "NASDAQ:NVDA",
     ]
     # Lowest-priority survivors fall into truncated.
     assert ("NYSE:WMT", "RS") in truncated

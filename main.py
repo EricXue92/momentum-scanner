@@ -17,6 +17,7 @@ from zoneinfo import ZoneInfo
 
 os.environ.setdefault("DISABLE_TQDM", "1")
 
+import pandas as pd
 import yfinance as yf
 from finviz import get_stock
 from finviz.helper_functions.error_handling import NoResults
@@ -350,6 +351,16 @@ def _dedup_seen(
     return new
 
 
+def _longs_rs_threshold(screener_cfg: dict, default: float) -> float:
+    """12M RS percentile gate for one `[[longs]]` group: the group's own
+    `min_rs_percentile` when set (0 = no gate), else the global
+    `min_rs_percentile_longs`. TheSetup sets 0 — a heavy-volume 5% gap is
+    the whole signal; demanding a 12M leader on top would hide the names
+    that are only now becoming one."""
+    v = screener_cfg.get("min_rs_percentile")
+    return default if v is None else float(v)
+
+
 def _repeat_hits(label: str, sorted_tickers: list[str], seen: set[str]) -> list[str]:
     """The subset of `sorted_tickers` already in the cross-day master `seen`.
 
@@ -364,10 +375,31 @@ def _repeat_hits(label: str, sorted_tickers: list[str], seen: set[str]) -> list[
 
 
 
+def _flatten_single_ticker_frame(data, tickers):
+    """Normalise a `yf.download(..., group_by="ticker")` result for the
+    single-ticker case. yfinance 1.x returns a (ticker, field) MultiIndex even
+    for one ticker, but every `single` branch below indexes `data["Close"]`
+    flat — so a one-hit screener day dropped its only candidate with
+    "failed to process ..., dropping" (TheSetup → ACVA 2026-09-11).
+    Returns `data[ticker]` (flat field columns) when exactly one ticker was
+    requested and the frame is keyed by it; otherwise returns `data` as-is."""
+    if isinstance(tickers, str):
+        tickers = [tickers]
+    if data is None or len(tickers) != 1:
+        return data
+    cols = getattr(data, "columns", None)
+    if not isinstance(cols, pd.MultiIndex):
+        return data
+    t = tickers[0]
+    if t in cols.get_level_values(0):
+        return data[t]
+    return data
+
+
 def _yf_download_with_retry(tickers, max_retries=3, **kwargs):
     """Download yfinance data with retries on failure."""
     for attempt in range(max_retries):
-        data = yf.download(tickers, **kwargs)
+        data = _flatten_single_ticker_frame(yf.download(tickers, **kwargs), tickers)
         if data is not None and not data.empty:
             return data
         if attempt < max_retries - 1:
@@ -1126,7 +1158,9 @@ def filter_consecutive_up_days(tickers: list[str], min_days: int) -> list[str]:
     if not tickers:
         return []
 
-    data = yf.download(tickers, period="1mo", progress=False, group_by="ticker")
+    data = _flatten_single_ticker_frame(
+        yf.download(tickers, period="1mo", progress=False, group_by="ticker"), tickers
+    )
     result = []
 
     # If US market is still open, today's data is incomplete — exclude it
@@ -1224,7 +1258,10 @@ def filter_dollar_volume_and_adr_yf(
     if not tickers:
         return []
 
-    data = yf.download(tickers, period="2mo", progress=False, group_by="ticker", threads=False)
+    data = _flatten_single_ticker_frame(
+        yf.download(tickers, period="2mo", progress=False, group_by="ticker", threads=False),
+        tickers,
+    )
     _retry_sparse_in_batch(data, tickers, period="2mo", min_rows=max(adr_days, dv_days))
     now_et = datetime.now(ZoneInfo("America/New_York"))
     market_open = 9 <= now_et.hour < 16 and now_et.weekday() < 5
@@ -1708,7 +1745,10 @@ def filter_relative_volume(
     if not tickers:
         return []
 
-    data = yf.download(tickers, period="2mo", progress=False, group_by="ticker", threads=False)
+    data = _flatten_single_ticker_frame(
+        yf.download(tickers, period="2mo", progress=False, group_by="ticker", threads=False),
+        tickers,
+    )
     _retry_sparse_in_batch(data, tickers, period="2mo", min_rows=days + 1)
     result = []
 
@@ -2074,10 +2114,13 @@ def main() -> int:
                     capture_caps=ipo_finviz_caps,
                 )
                 logger.info(f"  Found {len(tickers)} tickers")
-                if min_rs_percentile_longs > 0 and tickers:
+                group_rs_min = _longs_rs_threshold(screener_cfg, min_rs_percentile_longs)
+                if group_rs_min > 0 and tickers:
                     tickers = filter_by_rs(
-                        tickers, rs_table, min_rs_percentile_longs, f"  [Longs/{key}]"
+                        tickers, rs_table, group_rs_min, f"  [Longs/{key}]"
                     )
+                elif min_rs_percentile_longs > 0:
+                    logger.info(f"  [Longs/{key}] 12M RS gate disabled for this group")
                 if (min_dollar_volume > 0 or min_adr_percent > 0) and tickers:
                     tickers = filter_dollar_volume_and_adr_yf(
                         tickers, min_dollar_volume, min_adr_percent, adr_days,

@@ -1267,6 +1267,7 @@ def _render_truncated(truncated: list[tuple[str, str]]) -> str:
 # listed fall back to the raw key (e.g. "Shorts" stays "Shorts"). Keep this
 # in sync with the [futu.groups] keys / Finviz screener names.
 _GROUP_DISPLAY_LABEL: dict[str, str] = {
+    "TheSetup": "The Setup",
     "EarningsGap": "Earnings Gap",
     "HighVolume": "High Volume",
     "GapUp": "Gap Up",

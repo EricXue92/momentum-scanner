@@ -22,7 +22,7 @@ Applied after Finviz screening but before any expensive yfinance computation. Al
 
 | Gate                                            | Scope                                       | Threshold                                                            | Source                                                                                                                                                                                                                                                                                      |
 | ----------------------------------------------- | ------------------------------------------- | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **IBD RS Percentile 12M (event groups)**        | Longs 5 groups                              | ≥ 90 (top 10%; tickers missing from the table are KEPT)              | [Fred6725/rs-log](https://github.com/Fred6725/relative-strength), `RS = 0.4·P3 + 0.2·P6 + 0.2·P9 + 0.2·P12` normalized vs SPY, refreshed weekdays ~01:30 UTC                                                                                                                                |
+| **IBD RS Percentile 12M (event groups)**        | Longs 6 groups                              | ≥ 90 (top 10%; tickers missing from the table are KEPT)              | [Fred6725/rs-log](https://github.com/Fred6725/relative-strength), `RS = 0.4·P3 + 0.2·P6 + 0.2·P9 + 0.2·P12` normalized vs SPY, refreshed weekdays ~01:30 UTC                                                                                                                                |
 | **IBD RS Percentile 3M (Leaders/RS/US Shorts)** | Leaders + RS groups + US Shorts (not Longs) | ≥ 90 (top 10%; missing tickers kept)                                 | `RS_3M = 0.5·R21 + 0.3·R42 + 0.2·R63` vs SPY, universe = Fred6725 ticker list (~6100), **computed in the cloud on GitHub Actions** and published to `data/us_rs_3m/<date>.csv` (with `raw_score` for IPO out-of-universe ranking); fetched by `us_rs_3m.py` (walks back ≤ 3 days on a miss) |
 | **Dollar Volume**                               | Longs + Leaders                             | price × 20-day avg volume ≥ $100M                                    | yfinance daily bars                                                                                                                                                                                                                                                                         |
 | **ADR%**                                        | Longs + Leaders                             | mean(`(High − Low) / Close`) × 100 over last 20 complete bars ≥ 4.0% | yfinance daily bars                                                                                                                                                                                                                                                                         |
@@ -31,7 +31,7 @@ Applied after Finviz screening but before any expensive yfinance computation. Al
 
 | Group                                                               | 12M gate                                                                | 3M gate                                                                     |
 | ------------------------------------------------------------------- | ----------------------------------------------------------------------- | --------------------------------------------------------------------------- |
-| Longs 5 groups (EarningsGap/HighVolume/GapUp/NewHigh52W/TopGainers) | `min_rs_percentile_longs` = **90**                                      | — (no such layer by design)                                                 |
+| Longs 6 groups (TheSetup/EarningsGap/HighVolume/GapUp/NewHigh52W/TopGainers) | `min_rs_percentile_longs` = **90**                                      | — (no such layer by design)                                                 |
 | Leaders                                                             | `min_rs_percentile` = 0 (off)                                           | `min_rs_percentile_3m` = **90**                                             |
 | Conditional RS group                                                | `min_rs_percentile_rs` = 0 (off; inherits the longs key when unset)     | `min_rs_percentile_3m` = **90**                                             |
 | US Shorts                                                           | `min_rs_percentile_shorts` = 0 (off; inherits the longs key when unset) | `min_rs_percentile_3m` = **90**                                             |
@@ -41,23 +41,24 @@ Current doctrine: **event groups check long-term strength (12M ≥ 90); everythi
 
 ADR% replaced the old Finviz `beta > 1.5` filter: beta reflects multi-year correlation with the index and tends to kill mid/large-cap catalyst names that are genuinely in play right now, while ADR% (Kullamägi-style) directly measures a stock's current range.
 
-### Longs (5 strategies, mutually exclusive)
+### Longs (6 strategies, mutually exclusive)
 
 Oliver Kell's momentum/breakout setups. Ordered by priority: earlier strategies win, and each ticker enters at most one Longs file per day.
 
 | Priority | Strategy      | Finviz filters                                                                                           |
 | -------- | ------------- | -------------------------------------------------------------------------------------------------------- |
+| 0        | `TheSetup`    | Small Cap+, Avg Vol > 500K, **Price > $10**, Gap Up 5%+, Above SMA50 & SMA200 + yfinance Rel Vol ≥ 3× 20-day avg (heavy volume + gap; highest priority); **no RS 12M gate** |
 | 1        | `EarningsGap` | Small Cap+, Earnings Today, Avg Vol > 500K, Price > $20, Rel Vol > 1.5, Gap Up 5%+, Above SMA50 & SMA200 |
 | 2        | `HighVolume`  | Small Cap+, Avg Vol > 500K, Price > $20, Day Up, Above SMA50 & SMA200 + yfinance Rel Vol ≥ 3× 20-day avg |
 | 3        | `GapUp`       | Small Cap+, Avg Vol > 500K, Price > $20, Gap Up 3%+, Above SMA50 & SMA200                                |
 | 4        | `NewHigh52W`  | Small Cap+, Avg Vol > 500K, Price > $20, New 52W High, Above SMA50 & SMA200                              |
 | 5        | `TopGainers`  | Small Cap+, Avg Vol > 500K, Price > $20, Above SMA50 & SMA200, Signal: Top Gainers                       |
 
-These 5 groups also pass the global Dollar Volume / ADR% gates and IBD RS 12M ≥ 90. **Longs has no 3M layer** — the event filters themselves select fresh momentum.
+These 6 groups also pass the global Dollar Volume / ADR% gates and IBD RS 12M ≥ 90 (per-group `min_rs_percentile` override; `TheSetup` sets 0 — the heavy-volume 5% gap is the signal, a 12M-leader requirement would hide names only now becoming one). **Longs has no 3M layer** — the event filters themselves select fresh momentum.
 
 ### EOD Repeat (US, read-only sidecar)
 
-Tickers already in the cross-day master that fire one of the 4 _event_ Longs groups again today (`[eod_repeat] keys` = EarningsGap/HighVolume/GapUp/TopGainers; NewHigh52W and Leaders are deliberately excluded — they are persistent states that would re-fire daily) are collected into `<date>_Repeat.txt` for daily re-review. Read-only with respect to the master: no write-back, and each group's own `.txt` keeps its "new names only" meaning. The Futu/TV sync mappings ship commented out (the `Repeat` group/list would have to be hand-created first), so sync is a no-op until enabled.
+Tickers already in the cross-day master that fire one of the 5 _event_ Longs groups again today (`[eod_repeat] keys` = TheSetup/EarningsGap/HighVolume/GapUp/TopGainers; NewHigh52W and Leaders are deliberately excluded — they are persistent states that would re-fire daily) are collected into `<date>_Repeat.txt` for daily re-review. Read-only with respect to the master: no write-back, and each group's own `.txt` keeps its "new names only" meaning. The Futu/TV sync mappings ship commented out (the `Repeat` group/list would have to be hand-created first), so sync is a no-op until enabled.
 
 ### Leaders (5 strategies, merged)
 
@@ -229,9 +230,9 @@ After the US EOD run, `--mode report --market us` reads the day's dated long-sid
 
 | Aspect                   | Details                                                                                                                                                                                                                                                                                                                                                                                            |
 | ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Input (US)**           | 8 dated files: `EarningsGap`, `HighVolume`, `Leaders`, `GapUp`, `NewHigh52W`, `IPO`, `TopGainers`, `RS`                                                                                                                                                                                                                                                                                            |
+| **Input (US)**           | 9 dated files: `TheSetup`, `EarningsGap`, `HighVolume`, `Leaders`, `GapUp`, `NewHigh52W`, `IPO`, `TopGainers`, `RS`                                                                                                                                                                                                                                                                                            |
 | **Input (HK)**           | 6 dated files: `EarningsGap`, `HighVolume`, `Leaders`, `GapUp`, `IPO`, `RS` (no NewHigh52W / TopGainers)                                                                                                                                                                                                                                                                                           |
-| **Cap & priority**       | 30 per market (`MAX_TICKERS_PER_REPORT`); `EarningsGap > HighVolume > Leaders > GapUp > NewHigh52W > IPO > TopGainers > RS`. Overflow is listed in a trailing "Truncated" section.                                                                                                                                                                                                                 |
+| **Cap & priority**       | 30 per market (`MAX_TICKERS_PER_REPORT`); `TheSetup > EarningsGap > HighVolume > Leaders > GapUp > NewHigh52W > IPO > TopGainers > RS`. Overflow is listed in a trailing "Truncated" section.                                                                                                                                                                                                                 |
 | **Structured fields**    | US fundamentals: **SEC EDGAR companyfacts first**, yfinance per-field fallback (cached in `output/state/edgar_cache/`); HK uses yfinance directly. Fields: Market Cap, Price, EPS (latest quarter + YoY), Revenue (latest quarter + YoY), **5-year annual YoY + last-4-quarter YoY trajectory** (both), PE, ROE, Inst. Hold %, latest earnings date. RS percentile from the cached IBD/HSI tables. |
 | **Qualitative sections** | Model-generated, at most 2 web searches per ticker (`web_search_max_uses` / `max_search_calls`): company snapshot, fundamentals/earnings, competitiveness, policy/government support, new products/catalysts, risks, overall verdict.                                                                                                                                                              |
 | **Bilingual**            | Snapshot fields stay in English/numeric; qualitative analysis in Simplified Chinese.                                                                                                                                                                                                                                                                                                               |
@@ -247,7 +248,7 @@ A **standalone** short report. When a pre-market scan finds new US gappers, the 
 
 ## Dedup
 
-- **Within Longs** — the 5 strategies are mutually exclusive (priority `EarningsGap > HighVolume > GapUp > NewHigh52W > TopGainers`).
+- **Within Longs** — the 6 strategies are mutually exclusive (priority `TheSetup > EarningsGap > HighVolume > GapUp > NewHigh52W > TopGainers`).
 - **Cross-group** — long-side priority `Longs > Leaders > RS`.
 - **Cross-day master** — `output/state/eod_seen_{US,HK,IPO,HKIPO}.txt`. Each ticker enters exactly one long-side group on first appearance; subsequent runs emit only _new_ names. Markets are independent; IPO/HKIPO have their own masters, so a graduated name can later appear in the group it belongs to. Delete the file to reset.
 - **SMA50 auto-prune (US only)** — at the top of every `us-eod` run, before the master is loaded, any master ticker whose close has been **below its SMA50 for 2 consecutive completed days** (`[sma50_prune] consecutive_days`) **and whose latest close is below the prior day's close** (still declining — a rebound under the line is kept) is automatically removed from `eod_seen_US.txt`, so it can re-qualify and re-surface on a future EOD run. The master is backed up first (`eod_seen_US.txt.bak.<stamp>`). Soft-fail: a total yfinance failure skips the prune; tickers with missing/short history are kept.
@@ -260,7 +261,7 @@ A **standalone** short report. When a pre-market scan finds new US gappers, the 
 ```
 output/
 ├── TV/                        # comma-separated, for TradingView "Import list..."
-│   ├── US/<date>_{EarningsGap,HighVolume,GapUp,NewHigh52W,TopGainers,Leaders,Shorts,RS,IPO,Repeat,MorningGapPre{20,10,5},MorningGap{5..30}}.txt
+│   ├── US/<date>_{TheSetup,EarningsGap,HighVolume,GapUp,NewHigh52W,TopGainers,Leaders,Shorts,RS,IPO,Repeat,MorningGapPre{20,10,5},MorningGap{5..30}}.txt
 │   ├── US/rs_us_<date>.txt    # daily strongest-RS top-10 snapshot, US (from the scheduled rs-line audit)
 │   └── HK/<date>_{EarningsGap,HighVolume,GapUp,Leaders,Shorts,RS,IPO,HKMorningGap{10..60}}.txt
 ├── Webull/                    # newline-separated mirror, for Webull "Upload as File"
@@ -300,13 +301,13 @@ Configure `[futu]` in `config.toml`. The sync hook fires after every successful 
 
 1. Start [FutuOpenD](https://openapi.futunn.com/futu-api-doc/intro/intro.html) and log in (default `127.0.0.1:11111`).
 2. Manually create these custom groups in the Futu PC client (the API can only modify existing groups, not create them):
-   `EarningsGap`, `HighVolume`, `GapUp`, `NewHigh52W`, `TopGainers`, `Leaders`, `Shorts`, `RS`, `IPO` (US).
+   `TheSetup`, `EarningsGap`, `HighVolume`, `GapUp`, `NewHigh52W`, `TopGainers`, `Leaders`, `Shorts`, `RS`, `IPO` (US).
 
 Most EOD groups are append-only — clear them manually in the client when they get full (Futu limits: 500/group for non-trading accounts, 2000 for active traders).
 
 ## TradingView auto-sync (optional, `tv_sync.py`)
 
-`[tv_sync]` (default **`enabled = false`**) syncs the same watchlists to TradingView lists via its **unofficial REST API**, authenticated with the `sessionid` cookie. Credential lookup order: environment variables (`TV_SESSIONID`, `TV_SESSIONID_SIGN`) first, then `~/.config/momentum-scanner/tv_cookie.json`. The 18 lists must be created manually on the TV website first (names are case-sensitive, exact match); unmatched names log a warning and are skipped. Same soft-fail contract as Futu — an expired cookie never blocks `.txt` output. Append-only semantics use TV's own `[tv_sync].append_only_lists` key (same meaning as `[futu].append_only_groups`; keep the two in step to avoid behavior split); note TV keeps `MorningGap` as a separate list, while on the Futu side it's merged into `EarningsGap`.
+`[tv_sync]` (default **`enabled = false`**) syncs the same watchlists to TradingView lists via its **unofficial REST API**, authenticated with the `sessionid` cookie. Credential lookup order: environment variables (`TV_SESSIONID`, `TV_SESSIONID_SIGN`) first, then `~/.config/momentum-scanner/tv_cookie.json`. The 19 lists must be created manually on the TV website first (names are case-sensitive, exact match); unmatched names log a warning and are skipped. Same soft-fail contract as Futu — an expired cookie never blocks `.txt` output. Append-only semantics use TV's own `[tv_sync].append_only_lists` key (same meaning as `[futu].append_only_groups`; keep the two in step to avoid behavior split); note TV keeps `MorningGap` as a separate list, while on the Futu side it's merged into `EarningsGap`.
 
 ## Push notifications (ntfy)
 

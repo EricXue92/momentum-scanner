@@ -8,6 +8,7 @@ from report import state
 
 def test_priority_order_is_complete():
     assert state.PRIORITY_ORDER == [
+        "TheSetup",
         "EarningsGap",
         "HighVolume",
         "Leaders",
@@ -62,9 +63,9 @@ def test_input_dir_for_market_invalid():
         state.input_dir_for_market("uk")
 
 
-def test_groups_for_us_includes_eight():
+def test_groups_for_us_includes_nine():
     assert state.groups_for_market("us") == [
-        "EarningsGap", "HighVolume", "Leaders", "GapUp",
+        "TheSetup", "EarningsGap", "HighVolume", "Leaders", "GapUp",
         "NewHigh52W", "IPO", "TopGainers", "RS",
     ]
 
