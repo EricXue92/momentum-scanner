@@ -23,10 +23,14 @@ class GapQuote(NamedTuple):
     one. The morning-gap trend gate compares against it instead of the
     previous close, which is blind to the very move that surfaced the ticker.
     ``gap`` is the same percentage the discovery threshold was applied to.
+    ``pre_volume`` is Futu's accumulated pre-market share volume (US
+    pre-market scans only; ``None`` post-open / HK) — the pre-market volume
+    gate uses it to reject gaps printed on a handful of thin trades.
     """
 
     price: float
     gap: float
+    pre_volume: float | None = None
 
 
 def _opend_reachable(host: str, port: int, timeout: float = 1.5) -> bool:
@@ -485,6 +489,10 @@ def discover_morning_gap_candidates(
                         basis = 0.0
                     if basis <= 0:
                         basis = price
+                    survivors[code[len("US."):]] = GapQuote(
+                        price=basis, gap=gap, pre_volume=pre_vol
+                    )
+                    continue
                 else:
                     try:
                         prev_close = float(row.get("prev_close_price", 0) or 0)

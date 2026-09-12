@@ -865,7 +865,19 @@ def run_morning_gap(
     # Pre-market path: discovery already enforced pre_change_rate >= min_gap_pct
     # from the same Futu snapshot, so no re-validation is needed. Skip the
     # cumulative volume gate (no accumulated session volume yet pre-open).
+    # Phase 3e (pre-market only): pre-market volume must be a meaningful
+    # fraction of the 20d average — a 5% gap printed on a few hundred shares
+    # (NVT / WIX 2026-09-11: pre_price above the whole day's range, opened
+    # +1.7% / -0.1%) is noise, not a gap. `min_pre_volume_ratio = 0` disables.
     if offset < 0:
+        pre_vol_ratio = config.get("min_pre_volume_ratio", 0.05)
+        tickers = _filter_pre_market_volume(
+            tickers, daily_data, quotes, pre_vol_ratio, avg_days, today_et
+        )
+        logger.info(
+            f"  {len(tickers)} after pre-market volume filter "
+            f"(pre_volume >= {pre_vol_ratio:.0%} x {avg_days}d avg)"
+        )
         return offset, tickers
 
     # Phase 4: Compute 20-day avg daily volume per ticker
@@ -1564,6 +1576,67 @@ def _filter_avg_volume(
                 )
         except (KeyError, TypeError, ValueError) as e:
             logger.warning(f"  {ticker}: avg vol check failed ({e}), dropping")
+
+    return result
+
+
+def _filter_pre_market_volume(
+    tickers: list[str],
+    daily_data,
+    quotes: dict,
+    min_ratio: float,
+    days: int,
+    today_date,
+    single: bool | None = None,
+) -> list[str]:
+    """Keep tickers whose Futu pre-market volume is >= min_ratio x N-day
+    average daily volume. Pre-market only (negative offsets).
+
+    A pre_change_rate >= 5% printed on a few hundred shares is a thin-tape
+    artifact, not a gap. ``quotes`` is the discovery result
+    (``{ticker: GapQuote}``); a quote without ``pre_volume`` is KEPT (nothing
+    to judge). ``min_ratio <= 0`` disables the gate. Missing / short daily
+    history drops, matching ``_filter_avg_volume`` strictness.
+    """
+    if not tickers:
+        return []
+    if not min_ratio or min_ratio <= 0:
+        return list(tickers)
+    if single is None:
+        single = len(tickers) == 1
+
+    result = []
+    for ticker in tickers:
+        pre_vol = getattr(quotes.get(ticker), "pre_volume", None)
+        if pre_vol is None:
+            result.append(ticker)
+            continue
+        try:
+            if single:
+                volumes = daily_data["Volume"].dropna()
+            else:
+                volumes = daily_data[ticker]["Volume"].dropna()
+            volumes = _trim_today(volumes, True, today_date)
+            if len(volumes) < days:
+                logger.warning(
+                    f"  {ticker}: insufficient daily bars for pre-market vol "
+                    f"ratio ({len(volumes)}<{days}), dropping"
+                )
+                continue
+            avg = float(volumes.iloc[-days:].mean())
+            need = min_ratio * avg
+            if float(pre_vol) >= need:
+                result.append(ticker)
+            else:
+                logger.info(
+                    f"  {ticker}: pre-market vol {float(pre_vol):,.0f} < "
+                    f"{min_ratio:.0%} x {days}d avg {avg:,.0f} "
+                    f"(need {need:,.0f}), dropping"
+                )
+        except (KeyError, TypeError, ValueError) as e:
+            logger.warning(
+                f"  {ticker}: pre-market vol check failed ({e}), dropping"
+            )
 
     return result
 

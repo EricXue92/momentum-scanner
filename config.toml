@@ -172,6 +172,9 @@ min_market_cap = 300_000_000    # USD; = Finviz cap_smallover
 min_price = 20.0                # USD; = Finviz sh_price_o20
 min_avg_volume = 500_000        # 20日股/天; = Finviz sh_avgvol_o500
 avg_volume_days = 20
+# 盘前专用: Futu pre_volume ≥ 此比例 × 20日均量, 否则视为薄盘假 gap 丢弃
+# (NVT/WIX 2026-09-11 盘前 +6%/+5% 只是几笔零星成交, 开盘 +1.7%/-0.1%)。0 = 关闭。
+min_pre_volume_ratio = 0.05
 min_dollar_volume = 100_000_000
 scan_offsets = [-20, -10, -5, 5, 10, 15, 20, 25, 30]
 offset_tolerance_minutes = 2

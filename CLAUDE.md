@@ -77,7 +77,13 @@ mirrored to `output/Webull/{US,HK}/` (newline-sep), then Futu sync.
   gappers**: gap ≥ `adr_bypass_gap_percent` → floor drops from
   `min_adr_percent` to `adr_bypass_min_percent` (US: 10% → 3.0; HK wired but
   off — its base is already 3.0). Morning-gap only; EOD ADR% calls are
-  untouched.
+  untouched. **Pre-market volume gate** (US negative offsets only,
+  `_filter_pre_market_volume`, `[morning_gap].min_pre_volume_ratio` = 0.05,
+  0 = off): Futu `pre_volume` (carried on `GapQuote.pre_volume`) must be ≥
+  ratio × 20d avg volume — a 5% `pre_change_rate` printed on a few hundred
+  shares is a thin-tape artifact (NVT/WIX 2026-09-11 opened +1.7%/-0.1%).
+  Runs after the 20d avg-volume gate on the same yfinance frame; a quote
+  without `pre_volume` is kept.
   Consequence, and it is intended: the gate drifts intraday, but each scan
   writes its own per-offset `.txt` (not cumulative, and morning-gap never
   touches `eod_seen_*`), so drift only affects the one-time ntfy/catalyst
