@@ -621,22 +621,15 @@ def filter_shorts(
     """Run shorts pipeline: finviz Ownership → single yfinance download →
     performance / dollar-volume / consecutive-up-days filters.
     Returns (total_found, filtered_tickers)."""
-    kwargs_own = {"filters": filters, "table": "Ownership"}
-    if signal:
-        kwargs_own["signal"] = signal
-    ownership = Screener(**kwargs_own)
-    total = len(ownership.data)
-
-    tickers = []
+    # Go through run_screener so the finviz>=2.0.0 row-shift correction
+    # (_finviz_row_shift) applies here too — reading stock["Ticker"] /
+    # stock["Market Cap"] raw silently emptied Shorts from 2026-07 to 2026-09.
     market_caps: dict[str, float] = {}
-    for stock in ownership.data:
-        ticker = stock["Ticker"]
-        try:
-            cap = parse_number(stock["Market Cap"])
-            tickers.append(ticker)
-            market_caps[ticker] = cap
-        except (KeyError, ValueError):
-            continue
+    screened = run_screener(filters, signal, capture_caps=market_caps)
+    total = len(screened)
+    # Rows whose Market Cap failed to parse have no cap for the tiered
+    # performance threshold below — drop them, as before.
+    tickers = [t for t in screened if t in market_caps]
 
     if not tickers:
         return total, []
