@@ -7,9 +7,10 @@ the ETF set*, not against the ~6000-stock Fred6725 universe. Computed locally:
 ~50 tickers is a single yfinance batch, well under the home-IP throttle that
 pushed the stock-universe compute to GitHub Actions.
 
-Output: ``output/TV/US/<YYYY_MM_DD>_ETF_rs.txt`` — comma-separated, strongest
-first (TradingView-importable, same convention as the ``rs_us_<date>.txt``
-snapshot). It is a ranking snapshot, NOT a watchlist: same-day rerun
+Output: ``output/TV/US/<YYYY_MM_DD>_ETF_rs.txt`` — one ETF per line,
+strongest at the top, ``TICKER - 中文名`` (name from the ``[etf_rs.tickers]``
+table; a bare list works too and yields bare symbols). Human-readable, not a
+TradingView import. It is a ranking snapshot, NOT a watchlist: same-day rerun
 overwrites, no eod_seen dedup, no Webull mirror, no Futu/TV sync. The scored
 table (rank / 3M relative score / percentile) goes to the log. Aged out by
 the generic ``TV/US`` 5-day cleanup rule.
@@ -40,13 +41,16 @@ def _fetch_klines(tickers: list[str]) -> dict[str, pd.DataFrame]:
     return us_rs_3m.fetch_us_klines_yf(tickers, period="6mo")
 
 
-def _normalise(tickers: list[str]) -> list[str]:
-    """Upper-case, strip, drop blanks and duplicates — config order kept."""
-    out: list[str] = []
-    for t in tickers:
+def _normalise(tickers) -> dict[str, str]:
+    """``{ticker: 中文名}`` from either the ``[etf_rs.tickers]`` table or a
+    plain list (names empty). Upper-case, strip, drop blanks and duplicates
+    (first occurrence wins) — config order kept."""
+    items = tickers.items() if isinstance(tickers, dict) else ((t, "") for t in tickers)
+    out: dict[str, str] = {}
+    for t, name in items:
         t = str(t).strip().upper()
         if t and t not in out:
-            out.append(t)
+            out[t] = str(name or "").strip()
     return out
 
 
@@ -70,24 +74,31 @@ def rank_etfs(
     return table.sort_values("raw_score", ascending=False)
 
 
-def write_ranking(table: pd.DataFrame, output_dir: Path, today: date) -> Path | None:
-    """Write ``TV/US/<YYYY_MM_DD>_ETF_rs.txt`` (comma-separated, strongest
-    first). Empty table → no file (no 0-byte artifacts); returns the path or
-    None."""
+def write_ranking(
+    table: pd.DataFrame,
+    names: dict[str, str],
+    output_dir: Path,
+    today: date,
+) -> Path | None:
+    """Write ``TV/US/<YYYY_MM_DD>_ETF_rs.txt``: one ``TICKER - 中文名`` per
+    line, strongest at the top (bare ticker when unnamed). Empty table → no
+    file (no 0-byte artifacts); returns the path or None."""
     if table is None or table.empty:
         return None
     target = output_dir / "TV" / "US"
     target.mkdir(parents=True, exist_ok=True)
     out = target / f"{today.strftime('%Y_%m_%d')}_{_STEM}.txt"
-    out.write_text(",".join(table.index) + "\n")
+    lines = [f"{t} - {names[t]}" if names.get(t) else t for t in table.index]
+    out.write_text("\n".join(lines) + "\n")
     return out
 
 
-def _log_table(table: pd.DataFrame) -> None:
-    lines = [f"[{_LABEL}] rank  ticker  3M-rel   pct"]
+def _log_table(table: pd.DataFrame, names: dict[str, str]) -> None:
+    lines = [f"[{_LABEL}] rank  ticker  3M-rel   pct  name"]
     for i, (t, row) in enumerate(table.iterrows(), start=1):
         lines.append(
-            f"[{_LABEL}] {i:>4}  {t:<6}  {row['raw_score'] * 100:+6.1f}%  {int(row['rs_percentile']):>3}"
+            f"[{_LABEL}] {i:>4}  {t:<6}  {row['raw_score'] * 100:+6.1f}%  "
+            f"{int(row['rs_percentile']):>3}  {names.get(t, '')}"
         )
     logger.info("\n".join(lines))
 
@@ -99,12 +110,12 @@ def run_etf_rs(cfg: dict, output_dir: Path, today: date) -> Path | None:
     if not cfg.get("enabled", True):
         logger.info(f"[{_LABEL}] disabled in config; skipping")
         return None
-    tickers = _normalise(cfg.get("tickers", []))
+    names = _normalise(cfg.get("tickers", []))
     benchmark = str(cfg.get("benchmark", "SPY")).strip().upper()
-    if not tickers:
+    if not names:
         logger.info(f"[{_LABEL}] no tickers configured; skipping")
         return None
-    etfs = [t for t in tickers if t != benchmark]
+    etfs = [t for t in names if t != benchmark]
 
     logger.info(f"[{_LABEL}] Fetching 6mo closes for {len(etfs)} ETFs + {benchmark}...")
     klines = _fetch_klines(etfs + [benchmark])
@@ -118,10 +129,10 @@ def run_etf_rs(cfg: dict, output_dir: Path, today: date) -> Path | None:
     missing = [t for t in etfs if t not in table.index]
     if missing:
         logger.warning(f"[{_LABEL}] {len(missing)} ETF(s) unscored (no data / < 64 bars): {missing}")
-    out = write_ranking(table, output_dir, today)
+    out = write_ranking(table, names, output_dir, today)
     if out is None:
         logger.warning(f"[{_LABEL}] nothing scored; no file written")
         return None
-    _log_table(table)
+    _log_table(table, names)
     logger.info(f"[{_LABEL}] {len(table)} ETFs ranked -> {out}")
     return out

@@ -138,14 +138,16 @@ local (throttle-prone) k-line fetch.
   currently nowhere active (all knobs remain independently tunable).
 - Not gated: Morning Gap. IPO: conditional 3M only (≥ 64-day history).
 - **ETF 3M RS ranking** (`etf_rs.py`, `[etf_rs]` config): the fixed
-  `tickers` list is scored **locally** with the same 3M algorithm
-  (`compute_us_rs_3m_table`, vs `benchmark` SPY; ~50 tickers = one yfinance
-  batch, no cloud step) and written strongest-first, comma-separated, to
-  `output/TV/US/<date>_ETF_rs.txt`. Percentile is **within the ETF set**, not
-  the stock universe. Ranking snapshot only: same-day rerun overwrites, no
-  `eod_seen` dedup, no Webull mirror, no Futu/TV sync; the report ignores it
-  (unknown group stem). Runs as a soft side-step at the end of us-eod / eod
-  (also `--mode etf-rs`); aged out by the generic `TV/US` 5-day rule.
+  `[etf_rs.tickers]` table (ticker = 中文名, ~65 entries) is scored
+  **locally** with the same 3M algorithm (`compute_us_rs_3m_table`, vs
+  `benchmark` SPY; one yfinance batch, no cloud step) and written to
+  `output/TV/US/<date>_ETF_rs.txt` as **one `TICKER - 中文名` per line,
+  strongest at the top** — human-readable, NOT a TradingView import (the
+  only non-comma `.txt` in `TV/US/`). Percentile is **within the ETF set**,
+  not the stock universe. Ranking snapshot only: same-day rerun overwrites,
+  no `eod_seen` dedup, no Webull mirror, no Futu/TV sync; the report ignores
+  it (unknown group stem). Runs as a soft side-step at the end of us-eod /
+  eod (also `--mode etf-rs`); aged out by the generic `TV/US` 5-day rule.
 - **yfinance single-ticker frames:** `group_by="ticker"` returns a (ticker,
   field) MultiIndex even for ONE ticker (yfinance 1.x); every `single` branch
   indexes `data["Close"]` flat, so each download site wraps the result in

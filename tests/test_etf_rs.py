@@ -22,7 +22,11 @@ def _kline(total_return_pct: float, n: int = 90) -> pd.DataFrame:
 
 
 def _cfg(**over):
-    base = {"enabled": True, "tickers": ["AAA", "BBB", "CCC"], "benchmark": "SPY"}
+    base = {
+        "enabled": True,
+        "tickers": {"AAA": "甲", "BBB": "乙", "CCC": "丙"},
+        "benchmark": "SPY",
+    }
     base.update(over)
     return base
 
@@ -62,18 +66,20 @@ def test_missing_benchmark_falls_back_to_absolute_scores():
 # --- write_ranking ---
 
 
-def test_write_ranking_comma_separated_strongest_first(tmp_path):
+def test_write_ranking_one_per_line_strongest_first_with_names(tmp_path):
     table = pd.DataFrame(
-        {"raw_score": [0.2, 0.1], "rs_percentile": [99, 50]}, index=["BBB", "AAA"]
+        {"raw_score": [0.2, 0.1, 0.0], "rs_percentile": [99, 50, 1]},
+        index=["BBB", "AAA", "CCC"],
     )
-    out = etf_rs.write_ranking(table, tmp_path, date(2026, 9, 15))
+    out = etf_rs.write_ranking(table, {"AAA": "甲", "BBB": "乙"}, tmp_path, date(2026, 9, 15))
     assert out == tmp_path / "TV" / "US" / "2026_09_15_ETF_rs.txt"
-    assert out.read_text() == "BBB,AAA\n"
+    # unnamed ticker → bare symbol line
+    assert out.read_text() == "BBB - 乙\nAAA - 甲\nCCC\n"
 
 
 def test_write_ranking_empty_table_writes_nothing(tmp_path):
     out = etf_rs.write_ranking(pd.DataFrame(columns=["raw_score", "rs_percentile"]),
-                               tmp_path, date(2026, 9, 15))
+                               {}, tmp_path, date(2026, 9, 15))
     assert out is None
     assert not (tmp_path / "TV" / "US").exists()
 
@@ -91,13 +97,13 @@ def test_run_fetches_list_plus_benchmark_and_writes_file(tmp_path, monkeypatch):
     monkeypatch.setattr(etf_rs, "_fetch_klines", fake_fetch)
     out = etf_rs.run_etf_rs(_cfg(), tmp_path, date(2026, 9, 15))
     assert seen == [["AAA", "BBB", "CCC", "SPY"]]
-    assert out is not None and out.read_text() == "BBB,AAA,CCC\n"
+    assert out is not None and out.read_text() == "BBB - 乙\nAAA - 甲\nCCC - 丙\n"
 
 
 def test_run_disabled_is_noop(tmp_path, monkeypatch):
     monkeypatch.setattr(etf_rs, "_fetch_klines", lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not fetch")))
     assert etf_rs.run_etf_rs(_cfg(enabled=False), tmp_path, date(2026, 9, 15)) is None
-    assert etf_rs.run_etf_rs(_cfg(tickers=[]), tmp_path, date(2026, 9, 15)) is None
+    assert etf_rs.run_etf_rs(_cfg(tickers={}), tmp_path, date(2026, 9, 15)) is None
 
 
 def test_run_fetch_failure_soft_fails(tmp_path, monkeypatch):
@@ -114,5 +120,13 @@ def test_run_dedups_and_strips_config_tickers(tmp_path, monkeypatch):
         return {"AAA": _kline(5), "SPY": _kline(1)}
 
     monkeypatch.setattr(etf_rs, "_fetch_klines", fake_fetch)
-    etf_rs.run_etf_rs(_cfg(tickers=["AAA ", "aaa", " SPY"]), tmp_path, date(2026, 9, 15))
+    etf_rs.run_etf_rs(_cfg(tickers={"AAA ": "甲", "aaa": "重复", " SPY": "基准"}),
+                      tmp_path, date(2026, 9, 15))
     assert seen == [["AAA", "SPY"]]
+
+
+def test_run_accepts_plain_list_without_names(tmp_path, monkeypatch):
+    monkeypatch.setattr(etf_rs, "_fetch_klines",
+                        lambda *a, **k: {"AAA": _kline(5), "SPY": _kline(1)})
+    out = etf_rs.run_etf_rs(_cfg(tickers=["AAA"]), tmp_path, date(2026, 9, 15))
+    assert out.read_text() == "AAA\n"

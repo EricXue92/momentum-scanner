@@ -75,19 +75,82 @@ consecutive_days = 2
 
 # ETF 3M RS 排名: 每天 us-eod 末尾对下面固定 ETF 名单跑一遍 3M RS 算法
 # (0.5·R1M + 0.3·R2M + 0.2·R3M, 减去 benchmark 同期得分, 名单内 0-99 百分位),
-# 强→弱写 output/TV/US/<date>_ETF_rs.txt (逗号分隔, 可直接导入 TradingView)。
+# 写 output/TV/US/<date>_ETF_rs.txt: 每行一只 `TICKER - 中文名`, 最强在最上面。
 # 排名快照: 同日重跑覆盖, 不进 eod_seen 去重, 不镜像 Webull, 不同步 Futu/TV。
 # 带分数的完整表在 EOD 日志里。手动重跑: `uv run main.py --mode etf-rs`。
+# 名单在 [etf_rs.tickers] 表里维护: 左边 ticker, 右边中文名 (增删改这里即可)。
 [etf_rs]
 enabled = true
 benchmark = "SPY"
-tickers = [
-  "DRAM", "XBI", "DXYZ", "IBIT", "IGV", "SMH", "MOO", "XLU", "XLV", "IEO",
-  "XLE", "XLP", "XLF", "XLRE", "XLY", "XLC", "XLI", "XLK", "USO", "FFTY",
-  "TAN", "CIBR", "ITA", "ICLN", "JETS", "PAVE", "AIQ", "BOTZ", "XHB", "NASA",
-  "BWET", "URA", "REMX", "COPX", "GDX", "UGL", "NUGT", "AGQ", "GDXU", "ARKK",
-  "NRGU", "UFO", "QTUM", "GLD", "KRE", "EEM", "EFA", "SLV",
-]
+
+[etf_rs.tickers]
+# --- 美股行业 / 主题 ---
+DRAM = "内存与存储芯片"
+XBI  = "生物科技"
+DXYZ = "未上市科技独角兽 (Destiny Tech100)"
+IBIT = "比特币"
+IGV  = "软件"
+SMH  = "半导体"
+MOO  = "农业"
+XLU  = "公用事业"
+XLV  = "医疗保健"
+IEO  = "油气勘探开采"
+XLE  = "能源"
+XLP  = "必需消费"
+XLF  = "金融"
+XLRE = "房地产"
+XLY  = "可选消费"
+XLC  = "通讯服务"
+XLI  = "工业"
+XLK  = "科技"
+USO  = "原油"
+FFTY = "IBD 50 成长股"
+TAN  = "太阳能"
+CIBR = "网络安全"
+ITA  = "航空航天与国防"
+ICLN = "清洁能源"
+JETS = "航空公司"
+PAVE = "基础设施建设"
+AIQ  = "人工智能"
+BOTZ = "机器人与 AI"
+XHB  = "住宅建筑"
+NASA = "太空经济"
+UFO  = "太空产业 (卫星通信)"
+BWET = "油轮运费期货"
+URA  = "铀矿"
+NLR  = "核能与铀"
+REMX = "稀土与战略金属"
+COPX = "铜矿"
+LIT  = "锂电池产业链"
+GDX  = "黄金矿业"
+GLD  = "黄金"
+SLV  = "白银"
+UGL  = "黄金 2 倍做多"
+NUGT = "黄金矿业 2 倍做多"
+GDXU = "黄金矿业 3 倍做多"
+AGQ  = "白银 2 倍做多"
+NRGU = "油气 3 倍做多"
+ARKK = "ARK 创新"
+ARKG = "基因组革命"
+QTUM = "量子计算"
+KRE  = "区域银行"
+FINX = "金融科技"
+DTCR = "数据中心与数字基建"
+GRID = "电网升级与电气化"
+SHLD = "国防科技"
+# --- 全球市场 ---
+EEM  = "新兴市场"
+EFA  = "发达市场 (除美加)"
+EWJ  = "日本"
+EWY  = "韩国"
+EWT  = "台湾"
+INDA = "印度"
+EWG  = "德国"
+EWZ  = "巴西"
+EWW  = "墨西哥"
+VNM  = "越南"
+MCHI = "中国"
+KWEB = "中国互联网"
 
 # ════════════════════════════════════════════════════════════
 #  美股 (US)
