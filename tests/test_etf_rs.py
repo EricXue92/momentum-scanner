@@ -1,0 +1,118 @@
+"""Tests for etf_rs — daily 3M RS ranking of a fixed ETF list vs SPY.
+
+yfinance is never hit: the kline fetch layer is monkeypatched.
+"""
+
+from datetime import date
+from pathlib import Path
+
+import pandas as pd
+
+import etf_rs
+
+
+def _kline(total_return_pct: float, n: int = 90) -> pd.DataFrame:
+    """Flat series that jumps by ``total_return_pct`` on the last bar, so the
+    3M score is exactly (0.5+0.3+0.2) * return."""
+    closes = [100.0] * (n - 1) + [100.0 * (1 + total_return_pct / 100)]
+    return pd.DataFrame({
+        "time_key": pd.bdate_range(end="2026-09-11", periods=n),
+        "close": closes,
+    })
+
+
+def _cfg(**over):
+    base = {"enabled": True, "tickers": ["AAA", "BBB", "CCC"], "benchmark": "SPY"}
+    base.update(over)
+    return base
+
+
+# --- rank_etfs (pure logic) ---
+
+
+def test_ranking_is_strongest_first_and_relative_to_benchmark():
+    klines = {
+        "AAA": _kline(5),
+        "BBB": _kline(20),
+        "CCC": _kline(-3),
+        "SPY": _kline(10),
+    }
+    table = etf_rs.rank_etfs(klines, ["AAA", "BBB", "CCC"], "SPY")
+    assert list(table.index) == ["BBB", "AAA", "CCC"]
+    # raw_score is benchmark-relative: BBB = 0.20 - 0.10
+    assert abs(table.loc["BBB", "raw_score"] - 0.10) < 1e-9
+    assert table.loc["BBB", "rs_percentile"] == 99
+    assert table.loc["CCC", "rs_percentile"] == 33
+    assert "SPY" not in table.index
+
+
+def test_short_history_ticker_is_excluded_not_padded():
+    klines = {"AAA": _kline(5), "BBB": _kline(1, n=40), "SPY": _kline(0)}
+    table = etf_rs.rank_etfs(klines, ["AAA", "BBB"], "SPY")
+    assert list(table.index) == ["AAA"]
+
+
+def test_missing_benchmark_falls_back_to_absolute_scores():
+    klines = {"AAA": _kline(5), "BBB": _kline(2)}
+    table = etf_rs.rank_etfs(klines, ["AAA", "BBB"], "SPY")
+    assert list(table.index) == ["AAA", "BBB"]
+    assert abs(table.loc["AAA", "raw_score"] - 0.05) < 1e-9
+
+
+# --- write_ranking ---
+
+
+def test_write_ranking_comma_separated_strongest_first(tmp_path):
+    table = pd.DataFrame(
+        {"raw_score": [0.2, 0.1], "rs_percentile": [99, 50]}, index=["BBB", "AAA"]
+    )
+    out = etf_rs.write_ranking(table, tmp_path, date(2026, 9, 15))
+    assert out == tmp_path / "TV" / "US" / "2026_09_15_ETF_rs.txt"
+    assert out.read_text() == "BBB,AAA\n"
+
+
+def test_write_ranking_empty_table_writes_nothing(tmp_path):
+    out = etf_rs.write_ranking(pd.DataFrame(columns=["raw_score", "rs_percentile"]),
+                               tmp_path, date(2026, 9, 15))
+    assert out is None
+    assert not (tmp_path / "TV" / "US").exists()
+
+
+# --- run_etf_rs (wiring, soft-fail) ---
+
+
+def test_run_fetches_list_plus_benchmark_and_writes_file(tmp_path, monkeypatch):
+    seen: list[list[str]] = []
+
+    def fake_fetch(tickers, **kw):
+        seen.append(list(tickers))
+        return {"AAA": _kline(5), "BBB": _kline(20), "CCC": _kline(-3), "SPY": _kline(10)}
+
+    monkeypatch.setattr(etf_rs, "_fetch_klines", fake_fetch)
+    out = etf_rs.run_etf_rs(_cfg(), tmp_path, date(2026, 9, 15))
+    assert seen == [["AAA", "BBB", "CCC", "SPY"]]
+    assert out is not None and out.read_text() == "BBB,AAA,CCC\n"
+
+
+def test_run_disabled_is_noop(tmp_path, monkeypatch):
+    monkeypatch.setattr(etf_rs, "_fetch_klines", lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not fetch")))
+    assert etf_rs.run_etf_rs(_cfg(enabled=False), tmp_path, date(2026, 9, 15)) is None
+    assert etf_rs.run_etf_rs(_cfg(tickers=[]), tmp_path, date(2026, 9, 15)) is None
+
+
+def test_run_fetch_failure_soft_fails(tmp_path, monkeypatch):
+    monkeypatch.setattr(etf_rs, "_fetch_klines", lambda *a, **k: {})
+    assert etf_rs.run_etf_rs(_cfg(), tmp_path, date(2026, 9, 15)) is None
+    assert not (tmp_path / "TV" / "US" / "2026_09_15_ETF_rs.txt").exists()
+
+
+def test_run_dedups_and_strips_config_tickers(tmp_path, monkeypatch):
+    seen: list[list[str]] = []
+
+    def fake_fetch(tickers, **kw):
+        seen.append(list(tickers))
+        return {"AAA": _kline(5), "SPY": _kline(1)}
+
+    monkeypatch.setattr(etf_rs, "_fetch_klines", fake_fetch)
+    etf_rs.run_etf_rs(_cfg(tickers=["AAA ", "aaa", " SPY"]), tmp_path, date(2026, 9, 15))
+    assert seen == [["AAA", "SPY"]]

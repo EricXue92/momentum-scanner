@@ -73,6 +73,22 @@ top_n     = 10          # 每日 RS 最强快照条数 (audit 写 output/rs_us_<
 enabled = true
 consecutive_days = 2
 
+# ETF 3M RS 排名: 每天 us-eod 末尾对下面固定 ETF 名单跑一遍 3M RS 算法
+# (0.5·R1M + 0.3·R2M + 0.2·R3M, 减去 benchmark 同期得分, 名单内 0-99 百分位),
+# 强→弱写 output/TV/US/<date>_ETF_rs.txt (逗号分隔, 可直接导入 TradingView)。
+# 排名快照: 同日重跑覆盖, 不进 eod_seen 去重, 不镜像 Webull, 不同步 Futu/TV。
+# 带分数的完整表在 EOD 日志里。手动重跑: `uv run main.py --mode etf-rs`。
+[etf_rs]
+enabled = true
+benchmark = "SPY"
+tickers = [
+  "DRAM", "XBI", "DXYZ", "IBIT", "IGV", "SMH", "MOO", "XLU", "XLV", "IEO",
+  "XLE", "XLP", "XLF", "XLRE", "XLY", "XLC", "XLI", "XLK", "USO", "FFTY",
+  "TAN", "CIBR", "ITA", "ICLN", "JETS", "PAVE", "AIQ", "BOTZ", "XHB", "NASA",
+  "BWET", "URA", "REMX", "COPX", "GDX", "UGL", "NUGT", "AGQ", "GDXU", "ARKK",
+  "NRGU", "UFO", "QTUM", "GLD", "KRE", "EEM", "EFA", "SLV",
+]
+
 # ════════════════════════════════════════════════════════════
 #  美股 (US)
 # ════════════════════════════════════════════════════════════

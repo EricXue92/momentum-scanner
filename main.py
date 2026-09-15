@@ -1854,14 +1854,15 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--mode",
-        choices=["eod", "us-eod", "hk-eod", "morning-gap", "hk-morning-gap", "report", "rs-line-audit"],
+        choices=["eod", "us-eod", "hk-eod", "morning-gap", "hk-morning-gap", "report", "rs-line-audit", "etf-rs"],
         default="eod",
         help="eod: full end-of-day run (US + HK). "
              "us-eod: US only (Longs/Leaders/Shorts/RS/IPO) — for the morning HKT slot when HK market is mid-session. "
              "hk-eod: HK only (Shorts + Longs/Leaders/RS) — for the evening HKT slot after HK market closes. "
              "morning-gap: US intraday gap-up scanner. "
              "hk-morning-gap: HK intraday gap-up scanner (post-open only — Futu does not expose HK pre-auction fields). "
-             "report: generate CANSLIM Markdown+HTML report from today's dated .txt files (requires --market).",
+             "report: generate CANSLIM Markdown+HTML report from today's dated .txt files (requires --market). "
+             "etf-rs: standalone rerun of the daily ETF 3M RS ranking (also runs as a soft step inside us-eod).",
     )
     parser.add_argument(
         "--market", choices=["us", "hk", "both"],
@@ -1898,6 +1899,7 @@ def main() -> int:
         "hk-eod": "End-of-Day (HK only)",
         "morning-gap": "Morning-Gap",
         "hk-morning-gap": "Morning-Gap (HK)",
+        "etf-rs": "ETF 3M RS ranking",
     }.get(args.mode, args.mode)
     banner = f"  RUN {now_hkt.strftime('%Y-%m-%d %A %H:%M %Z')}  |  mode={mode_label}  "
     bar = "═" * (len(banner) + 2)
@@ -1956,6 +1958,10 @@ def main() -> int:
             return 1
         from report.__main__ import run as run_report
         return run_report(args.market, args.date)
+
+    if args.mode == "etf-rs":
+        from etf_rs import run_etf_rs
+        return 0 if run_etf_rs(config.get("etf_rs", {}), output_dir, today_date) else 1
 
     if args.mode == "rs-line-audit":
         from rs_line_audit import run_audit
@@ -2439,6 +2445,16 @@ def main() -> int:
                 )
             except Exception as e:
                 logger.warning(f"[HK EOD] Pipeline failed: {e}")
+
+        # --- ETF 3M RS ranking (US, snapshot, soft side-step) ---
+        # Fixed [etf_rs].tickers list scored with the 3M algorithm vs SPY →
+        # TV/US/<date>_ETF_rs.txt, strongest first. Ranking only: no dedup,
+        # no mirror/sync. Failure must not colour the EOD exit code.
+        try:
+            from etf_rs import run_etf_rs
+            run_etf_rs(config.get("etf_rs", {}), output_dir, today_date)
+        except Exception as e:
+            logger.warning(f"[ETF RS] failed, no ranking written: {e}")
 
         try:
             cleanup_old_outputs(output_dir, today_date)
