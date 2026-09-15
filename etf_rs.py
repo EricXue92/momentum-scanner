@@ -8,8 +8,10 @@ the ETF set*, not against the ~6000-stock Fred6725 universe. Computed locally:
 pushed the stock-universe compute to GitHub Actions.
 
 Output: ``output/TV/US/<YYYY_MM_DD>_ETF_rs.txt`` — one ETF per line,
-strongest at the top, ``TICKER - 中文名`` (name from the ``[etf_rs.tickers]``
-table; a bare list works too and yields bare symbols). Tickers sharing the
+strongest at the top, ``TICKER - 中文名 | 前五大持仓`` (name from the
+``[etf_rs.tickers]`` table — a bare list works too and yields bare symbols;
+holdings from the static ``[etf_rs.holdings]`` table, hand-maintained from
+issuer disclosures, omitted when absent). Tickers sharing the
 same 中文名 (e.g. two leveraged gold-miner ETFs) collapse to the strongest
 one — the name is the "same instrument" key. Human-readable, not a
 TradingView import. It is a ranking snapshot, NOT a watchlist: same-day rerun
@@ -41,6 +43,19 @@ def _fetch_klines(tickers: list[str]) -> dict[str, pd.DataFrame]:
     """6mo daily closes via the shared retrying yfinance fetcher.
     Monkeypatched in tests."""
     return us_rs_3m.fetch_us_klines_yf(tickers, period="6mo")
+
+
+def _holdings(cfg_holdings) -> dict[str, str]:
+    """``{ticker: 持仓字符串}`` from ``[etf_rs.holdings]``; blanks dropped."""
+    if not isinstance(cfg_holdings, dict):
+        return {}
+    out: dict[str, str] = {}
+    for t, h in cfg_holdings.items():
+        t = str(t).strip().upper()
+        h = str(h or "").strip()
+        if t and h:
+            out[t] = h
+    return out
 
 
 def _normalise(tickers) -> dict[str, str]:
@@ -100,21 +115,28 @@ def collapse_same_name(
     return table.loc[keep], dropped
 
 
+def _format_line(ticker: str, name: str, holdings: str) -> str:
+    line = f"{ticker} - {name}" if name else ticker
+    return f"{line} | {holdings}" if holdings else line
+
+
 def write_ranking(
     table: pd.DataFrame,
     names: dict[str, str],
+    holdings: dict[str, str],
     output_dir: Path,
     today: date,
 ) -> Path | None:
-    """Write ``TV/US/<YYYY_MM_DD>_ETF_rs.txt``: one ``TICKER - 中文名`` per
-    line, strongest at the top (bare ticker when unnamed). Empty table → no
-    file (no 0-byte artifacts); returns the path or None."""
+    """Write ``TV/US/<YYYY_MM_DD>_ETF_rs.txt``: one
+    ``TICKER - 中文名 | 前五大持仓`` per line, strongest at the top (name /
+    holdings segments omitted when unknown). Empty table → no file (no
+    0-byte artifacts); returns the path or None."""
     if table is None or table.empty:
         return None
     target = output_dir / "TV" / "US"
     target.mkdir(parents=True, exist_ok=True)
     out = target / f"{today.strftime('%Y_%m_%d')}_{_STEM}.txt"
-    lines = [f"{t} - {names[t]}" if names.get(t) else t for t in table.index]
+    lines = [_format_line(t, names.get(t, ""), holdings.get(t, "")) for t in table.index]
     out.write_text("\n".join(lines) + "\n")
     return out
 
@@ -137,6 +159,7 @@ def run_etf_rs(cfg: dict, output_dir: Path, today: date) -> Path | None:
         logger.info(f"[{_LABEL}] disabled in config; skipping")
         return None
     names = _normalise(cfg.get("tickers", []))
+    holdings = _holdings(cfg.get("holdings", {}))
     benchmark = str(cfg.get("benchmark", "SPY")).strip().upper()
     if not names:
         logger.info(f"[{_LABEL}] no tickers configured; skipping")
@@ -161,7 +184,10 @@ def run_etf_rs(cfg: dict, output_dir: Path, today: date) -> Path | None:
             f"[{_LABEL}] same-name collapse, hidden: "
             + ", ".join(f"{d} (→ {w})" for d, w in collapsed)
         )
-    out = write_ranking(table, names, output_dir, today)
+    no_holdings = [t for t in table.index if t not in holdings]
+    if no_holdings:
+        logger.info(f"[{_LABEL}] no holdings configured for: {no_holdings}")
+    out = write_ranking(table, names, holdings, output_dir, today)
     if out is None:
         logger.warning(f"[{_LABEL}] nothing scored; no file written")
         return None
