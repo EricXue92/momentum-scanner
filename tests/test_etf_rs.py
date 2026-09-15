@@ -63,6 +63,28 @@ def test_missing_benchmark_falls_back_to_absolute_scores():
     assert abs(table.loc["AAA", "raw_score"] - 0.05) < 1e-9
 
 
+# --- collapse_same_name ---
+
+
+def test_collapse_keeps_strongest_of_same_name_only():
+    table = pd.DataFrame(
+        {"raw_score": [0.3, 0.2, 0.1, 0.0], "rs_percentile": [99, 66, 33, 1]},
+        index=["GDXU", "GDX", "NUGT", "ZZZ"],
+    )
+    names = {"GDXU": "黄金矿业 杠杆", "NUGT": "黄金矿业 杠杆", "GDX": "黄金矿业"}
+    kept, dropped = etf_rs.collapse_same_name(table, names)
+    assert list(kept.index) == ["GDXU", "GDX", "ZZZ"]  # ZZZ unnamed → never collapsed
+    assert dropped == [("NUGT", "GDXU")]
+
+
+def test_run_collapses_same_name_in_file(tmp_path, monkeypatch):
+    monkeypatch.setattr(etf_rs, "_fetch_klines", lambda *a, **k: {
+        "AAA": _kline(5), "BBB": _kline(20), "CCC": _kline(-3), "SPY": _kline(10)})
+    cfg = _cfg(tickers={"AAA": "同名", "BBB": "同名", "CCC": "丙"})
+    out = etf_rs.run_etf_rs(cfg, tmp_path, date(2026, 9, 15))
+    assert out.read_text() == "BBB - 同名\nCCC - 丙\n"
+
+
 # --- write_ranking ---
 
 

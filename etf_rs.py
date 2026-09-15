@@ -9,7 +9,9 @@ pushed the stock-universe compute to GitHub Actions.
 
 Output: ``output/TV/US/<YYYY_MM_DD>_ETF_rs.txt`` — one ETF per line,
 strongest at the top, ``TICKER - 中文名`` (name from the ``[etf_rs.tickers]``
-table; a bare list works too and yields bare symbols). Human-readable, not a
+table; a bare list works too and yields bare symbols). Tickers sharing the
+same 中文名 (e.g. two leveraged gold-miner ETFs) collapse to the strongest
+one — the name is the "same instrument" key. Human-readable, not a
 TradingView import. It is a ranking snapshot, NOT a watchlist: same-day rerun
 overwrites, no eod_seen dedup, no Webull mirror, no Futu/TV sync. The scored
 table (rank / 3M relative score / percentile) goes to the log. Aged out by
@@ -74,6 +76,30 @@ def rank_etfs(
     return table.sort_values("raw_score", ascending=False)
 
 
+def collapse_same_name(
+    table: pd.DataFrame,
+    names: dict[str, str],
+) -> tuple[pd.DataFrame, list[tuple[str, str]]]:
+    """Keep only the strongest ticker per 中文名 (table must already be sorted
+    strongest first). Unnamed tickers are never collapsed. Returns
+    ``(kept_table, [(dropped, kept_in_its_place), ...])``."""
+    first_by_name: dict[str, str] = {}
+    keep: list[str] = []
+    dropped: list[tuple[str, str]] = []
+    for t in table.index:
+        name = names.get(t, "")
+        if not name:
+            keep.append(t)
+            continue
+        winner = first_by_name.get(name)
+        if winner is None:
+            first_by_name[name] = t
+            keep.append(t)
+        else:
+            dropped.append((t, winner))
+    return table.loc[keep], dropped
+
+
 def write_ranking(
     table: pd.DataFrame,
     names: dict[str, str],
@@ -129,6 +155,12 @@ def run_etf_rs(cfg: dict, output_dir: Path, today: date) -> Path | None:
     missing = [t for t in etfs if t not in table.index]
     if missing:
         logger.warning(f"[{_LABEL}] {len(missing)} ETF(s) unscored (no data / < 64 bars): {missing}")
+    table, collapsed = collapse_same_name(table, names)
+    if collapsed:
+        logger.info(
+            f"[{_LABEL}] same-name collapse, hidden: "
+            + ", ".join(f"{d} (→ {w})" for d, w in collapsed)
+        )
     out = write_ranking(table, names, output_dir, today)
     if out is None:
         logger.warning(f"[{_LABEL}] nothing scored; no file written")

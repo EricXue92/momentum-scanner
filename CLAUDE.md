@@ -143,7 +143,9 @@ local (throttle-prone) k-line fetch.
   `benchmark` SPY; one yfinance batch, no cloud step) and written to
   `output/TV/US/<date>_ETF_rs.txt` as **one `TICKER - 中文名` per line,
   strongest at the top** — human-readable, NOT a TradingView import (the
-  only non-comma `.txt` in `TV/US/`). Percentile is **within the ETF set**,
+  only non-comma `.txt` in `TV/US/`). Tickers with an **identical 中文名**
+  collapse to the strongest one (`collapse_same_name`; the name is the
+  same-instrument key, e.g. GDXU/NUGT) — the log still lists what was hidden. Percentile is **within the ETF set**,
   not the stock universe. Ranking snapshot only: same-day rerun overwrites,
   no `eod_seen` dedup, no Webull mirror, no Futu/TV sync; the report ignores
   it (unknown group stem). Runs as a soft side-step at the end of us-eod /

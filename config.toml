@@ -79,6 +79,8 @@ consecutive_days = 2
 # 排名快照: 同日重跑覆盖, 不进 eod_seen 去重, 不镜像 Webull, 不同步 Futu/TV。
 # 带分数的完整表在 EOD 日志里。手动重跑: `uv run main.py --mode etf-rs`。
 # 名单在 [etf_rs.tickers] 表里维护: 左边 ticker, 右边中文名 (增删改这里即可)。
+# 中文名完全相同的几只视为同一品种, 文件里只显示排名最高的那一只
+# (如 GDXU / NUGT 同为"黄金矿业 杠杆做多"); 想让两只都显示就把名字写得不同。
 [etf_rs]
 enabled = true
 benchmark = "SPY"
@@ -126,8 +128,8 @@ GDX  = "黄金矿业"
 GLD  = "黄金"
 SLV  = "白银"
 UGL  = "黄金 2 倍做多"
-NUGT = "黄金矿业 2 倍做多"
-GDXU = "黄金矿业 3 倍做多"
+NUGT = "黄金矿业 杠杆做多"
+GDXU = "黄金矿业 杠杆做多"
 AGQ  = "白银 2 倍做多"
 NRGU = "油气 3 倍做多"
 ARKK = "ARK 创新"
