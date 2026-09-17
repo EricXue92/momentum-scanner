@@ -89,7 +89,11 @@ mirrored to `output/Webull/{US,HK}/` (newline-sep), then Futu sync.
   touches `eod_seen_*`), so drift only affects the one-time ntfy/catalyst
   gate (`morning_gap_seen_{pre,post}_<date>.txt`), not what's written. Spec:
   `docs/superpowers/specs/2026-08-13-morning-gap-live-price-trend-gate-design.md`.
-- **Report** is soft-fail (wrapper exit code reflects only the EOD step). Shorts /
+- **Report — daily LLM generation is OFF since 2026-09-17** (both the post-market
+  CANSLIM step in `run_eod.sh`, commented out, and the pre-market catalyst report,
+  `[morning_gap_catalyst].enabled = false`). Code paths kept for manual use
+  (`--mode report --market us`). The rest of this bullet describes the wiring.
+  Soft-fail (wrapper exit code reflects only the EOD step). Shorts /
   HK Shorts / Morning Gap are excluded from it. **US only** — `run_hk_eod.sh`
   no longer runs the report step (HK code path kept for manual use). Output is
   **HTML only**: `output/Reports/PostMarket/<date>_us.html` (no `.md`).

@@ -195,6 +195,15 @@ async def test_run_async_writes_report_and_pushes_notification(
     fake_backend.model_label = MagicMock(return_value="dsv4 (DeepSeek)")
 
     from report import morning
+    # Production config.toml has the catalyst report switched OFF since
+    # 2026-09-17; this test exercises the enabled path, so inject its own cfg.
+    monkeypatch.setattr(
+        morning,
+        "_load_catalyst_cfg",
+        lambda: {"enabled": True, "max_tickers_per_run": 10, "concurrency": 3,
+                 "max_search_calls": 3, "deepseek_model": "deepseek-v4-pro",
+                 "thinking": False},
+    )
     monkeypatch.setattr(morning, "_build_deepseek_backend", lambda cfg: fake_backend)
     monkeypatch.setattr(morning, "PREMARKET_DIR", out_dir)
     monkeypatch.setattr(morning, "OUTPUT_STATE_DIR", state_dir)

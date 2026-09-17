@@ -651,7 +651,8 @@ timeout_seconds = 20
 # Pre-market catalyst report. Runs as detached subprocess after the
 # morning-gap scan finds fresh US pre-market gappers. Independent from
 # the EOD [report] backend selection — always uses DeepSeek + Tavily.
-enabled = true
+# 2026-09-17 关闭:停止每天由大模型生成报告(盘后 CANSLIM 报告同日在 run_eod.sh 里注释掉)。
+enabled = false
 max_tickers_per_run = 10
 concurrency = 3
 max_search_calls = 3

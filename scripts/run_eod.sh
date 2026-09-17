@@ -64,10 +64,12 @@ kill "$WATCHDOG_PID" 2>/dev/null
 wait "$WATCHDOG_PID" 2>/dev/null
 set -e
 
-# Report is a soft side-effect; failures here must not turn the EOD run red.
-set +e
-"$UV" run --directory "$PROJECT" main.py --mode report --market us
-set -e
+# CANSLIM report step DISABLED 2026-09-17 (operator request: stop the daily
+# LLM report). Run `main.py --mode report --market us` by hand if one is
+# ever needed. Re-enable by uncommenting the block below.
+# set +e
+# "$UV" run --directory "$PROJECT" main.py --mode report --market us
+# set -e
 
 # Daily strongest-RS snapshot (output/rs_us_<date>.txt): the rs-line audit in
 # report-only mode. --dry-run is load-bearing — it skips the y/N prompt AND
