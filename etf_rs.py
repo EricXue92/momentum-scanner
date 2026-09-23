@@ -8,7 +8,9 @@ the ETF set*, not against the ~6000-stock Fred6725 universe. Computed locally:
 pushed the stock-universe compute to GitHub Actions.
 
 Output: ``output/TV/US/<YYYY_MM_DD>_ETF_rs.txt`` — one ETF per line,
-strongest at the top, ``TICKER - 中文名 | 前五大持仓`` (name from the
+strongest at the top, ``TICKER ↑N - 中文名 | 前五大持仓`` (``↑N`` / ``↓N`` /
+``=`` / ``新`` = rank change vs the latest earlier snapshot in the same
+folder, see ``read_previous_ranks``; omitted when none exists; name from the
 ``[etf_rs.tickers]`` table — a bare list works too and yields bare symbols;
 holdings from the static ``[etf_rs.holdings]`` table, hand-maintained from
 issuer disclosures, omitted when absent). Tickers sharing the
@@ -26,7 +28,8 @@ warning and leaves the EOD exit code untouched.
 from __future__ import annotations
 
 import logging
-from datetime import date
+import re
+from datetime import date, datetime
 from pathlib import Path
 
 import pandas as pd
@@ -115,8 +118,59 @@ def collapse_same_name(
     return table.loc[keep], dropped
 
 
-def _format_line(ticker: str, name: str, holdings: str) -> str:
-    line = f"{ticker} - {name}" if name else ticker
+_FILE_RE = re.compile(rf"^(\d{{4}}_\d{{2}}_\d{{2}})_{_STEM}\.txt$")
+
+
+def read_previous_ranks(output_dir: Path, today: date) -> dict[str, int] | None:
+    """``{ticker: 1-based rank}`` from the most recent ``TV/US/<date>_ETF_rs.txt``
+    dated strictly before ``today`` (so a same-day rerun compares against the
+    same prior snapshot, not its own earlier output). The ticker is the first
+    whitespace token of each line — works on both bare and already-annotated
+    lines. None when no earlier snapshot exists (long weekend past the 5-day
+    retention, first run) or the file cannot be read."""
+    target = output_dir / "TV" / "US"
+    if not target.is_dir():
+        return None
+    candidates: list[tuple[date, Path]] = []
+    for p in target.iterdir():
+        m = _FILE_RE.match(p.name)
+        if not m:
+            continue
+        try:
+            d = datetime.strptime(m.group(1), "%Y_%m_%d").date()
+        except ValueError:
+            continue
+        if d < today:
+            candidates.append((d, p))
+    if not candidates:
+        return None
+    _, prev = max(candidates)
+    try:
+        lines = prev.read_text().splitlines()
+    except OSError as e:
+        logger.warning(f"[{_LABEL}] cannot read previous snapshot {prev}: {e}")
+        return None
+    ranks: dict[str, int] = {}
+    for line in lines:
+        parts = line.split()
+        if parts and parts[0] not in ranks:
+            ranks[parts[0]] = len(ranks) + 1
+    return ranks
+
+
+def rank_delta_marker(prev_rank: int | None, rank: int) -> str:
+    """``↑N`` moved up N places, ``↓N`` moved down, ``=`` unchanged, ``新``
+    absent from the previous snapshot."""
+    if prev_rank is None:
+        return "新"
+    if prev_rank == rank:
+        return "="
+    return f"↑{prev_rank - rank}" if prev_rank > rank else f"↓{rank - prev_rank}"
+
+
+def _format_line(ticker: str, name: str, holdings: str, marker: str = "") -> str:
+    head = f"{ticker} {marker}" if marker else ticker
+    line = f"{head} - {name}" if name else head
     return f"{line} | {holdings}" if holdings else line
 
 
@@ -126,27 +180,35 @@ def write_ranking(
     holdings: dict[str, str],
     output_dir: Path,
     today: date,
+    prev_ranks: dict[str, int] | None = None,
 ) -> Path | None:
     """Write ``TV/US/<YYYY_MM_DD>_ETF_rs.txt``: one
-    ``TICKER - 中文名 | 前五大持仓`` per line, strongest at the top (name /
-    holdings segments omitted when unknown). Empty table → no file (no
-    0-byte artifacts); returns the path or None."""
+    ``TICKER ↑N - 中文名 | 前五大持仓`` per line, strongest at the top (name /
+    holdings segments omitted when unknown). The rank-change marker
+    (``rank_delta_marker`` vs ``prev_ranks``) is omitted entirely when there
+    is no previous snapshot. Empty table → no file (no 0-byte artifacts);
+    returns the path or None."""
     if table is None or table.empty:
         return None
     target = output_dir / "TV" / "US"
     target.mkdir(parents=True, exist_ok=True)
     out = target / f"{today.strftime('%Y_%m_%d')}_{_STEM}.txt"
-    lines = [_format_line(t, names.get(t, ""), holdings.get(t, "")) for t in table.index]
+    lines = []
+    for i, t in enumerate(table.index, start=1):
+        marker = rank_delta_marker(prev_ranks.get(t), i) if prev_ranks is not None else ""
+        lines.append(_format_line(t, names.get(t, ""), holdings.get(t, ""), marker))
     out.write_text("\n".join(lines) + "\n")
     return out
 
 
-def _log_table(table: pd.DataFrame, names: dict[str, str]) -> None:
-    lines = [f"[{_LABEL}] rank  ticker  3M-rel   pct  name"]
+def _log_table(table: pd.DataFrame, names: dict[str, str],
+               prev_ranks: dict[str, int] | None = None) -> None:
+    lines = [f"[{_LABEL}] rank  ticker  3M-rel   pct  Δ     name"]
     for i, (t, row) in enumerate(table.iterrows(), start=1):
+        marker = rank_delta_marker(prev_ranks.get(t), i) if prev_ranks is not None else "-"
         lines.append(
             f"[{_LABEL}] {i:>4}  {t:<6}  {row['raw_score'] * 100:+6.1f}%  "
-            f"{int(row['rs_percentile']):>3}  {names.get(t, '')}"
+            f"{int(row['rs_percentile']):>3}  {marker:<4}  {names.get(t, '')}"
         )
     logger.info("\n".join(lines))
 
@@ -187,10 +249,13 @@ def run_etf_rs(cfg: dict, output_dir: Path, today: date) -> Path | None:
     no_holdings = [t for t in table.index if t not in holdings]
     if no_holdings:
         logger.info(f"[{_LABEL}] no holdings configured for: {no_holdings}")
-    out = write_ranking(table, names, holdings, output_dir, today)
+    prev_ranks = read_previous_ranks(output_dir, today)
+    if prev_ranks is None:
+        logger.info(f"[{_LABEL}] no earlier snapshot before {today}; rank-change markers omitted")
+    out = write_ranking(table, names, holdings, output_dir, today, prev_ranks)
     if out is None:
         logger.warning(f"[{_LABEL}] nothing scored; no file written")
         return None
-    _log_table(table, names)
+    _log_table(table, names, prev_ranks)
     logger.info(f"[{_LABEL}] {len(table)} ETFs ranked -> {out}")
     return out

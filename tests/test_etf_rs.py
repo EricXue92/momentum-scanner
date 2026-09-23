@@ -171,3 +171,67 @@ def test_run_accepts_plain_list_without_names(tmp_path, monkeypatch):
                         lambda *a, **k: {"AAA": _kline(5), "SPY": _kline(1)})
     out = etf_rs.run_etf_rs(_cfg(tickers=["AAA"]), tmp_path, date(2026, 9, 15))
     assert out.read_text() == "AAA\n"
+
+
+# --- rank change vs previous snapshot ---
+
+
+def _write_prev(tmp_path: Path, stamp: str, text: str) -> Path:
+    d = tmp_path / "TV" / "US"
+    d.mkdir(parents=True, exist_ok=True)
+    p = d / f"{stamp}_ETF_rs.txt"
+    p.write_text(text)
+    return p
+
+
+def test_rank_delta_marker():
+    assert etf_rs.rank_delta_marker(None, 1) == "新"
+    assert etf_rs.rank_delta_marker(3, 3) == "="
+    assert etf_rs.rank_delta_marker(5, 2) == "↑3"
+    assert etf_rs.rank_delta_marker(2, 7) == "↓5"
+
+
+def test_read_previous_ranks_uses_latest_file_before_today(tmp_path):
+    _write_prev(tmp_path, "2026_09_10", "OLD - 旧\n")
+    _write_prev(tmp_path, "2026_09_14", "BBB - 乙 | X、Y\nAAA - 甲\nCCC\n")
+    _write_prev(tmp_path, "2026_09_15", "TODAY - 今天\n")  # same-day rerun: ignored
+    assert etf_rs.read_previous_ranks(tmp_path, date(2026, 9, 15)) == {"BBB": 1, "AAA": 2, "CCC": 3}
+
+
+def test_read_previous_ranks_none_when_no_earlier_file(tmp_path):
+    _write_prev(tmp_path, "2026_09_15", "TODAY - 今天\n")
+    assert etf_rs.read_previous_ranks(tmp_path, date(2026, 9, 15)) is None
+    assert etf_rs.read_previous_ranks(tmp_path / "nowhere", date(2026, 9, 15)) is None
+
+
+def test_read_previous_ranks_parses_already_annotated_lines(tmp_path):
+    _write_prev(tmp_path, "2026_09_14", "BBB ↑2 - 乙 | X、Y\nAAA = - 甲\nCCC 新\n\n")
+    assert etf_rs.read_previous_ranks(tmp_path, date(2026, 9, 15)) == {"BBB": 1, "AAA": 2, "CCC": 3}
+
+
+def test_write_ranking_annotates_rank_change_after_ticker(tmp_path):
+    table = pd.DataFrame(
+        {"raw_score": [0.2, 0.1, 0.0], "rs_percentile": [99, 50, 1]},
+        index=["BBB", "AAA", "CCC"],
+    )
+    prev = {"AAA": 1, "BBB": 3}  # CCC absent → 新
+    out = etf_rs.write_ranking(table, {"AAA": "甲", "BBB": "乙"}, {"BBB": "X、Y"},
+                               tmp_path, date(2026, 9, 15), prev_ranks=prev)
+    assert out.read_text() == "BBB ↑2 - 乙 | X、Y\nAAA ↓1 - 甲\nCCC 新\n"
+
+
+def test_write_ranking_no_previous_means_no_markers(tmp_path):
+    table = pd.DataFrame({"raw_score": [0.2], "rs_percentile": [99]}, index=["BBB"])
+    out = etf_rs.write_ranking(table, {"BBB": "乙"}, {}, tmp_path, date(2026, 9, 15), prev_ranks=None)
+    assert out.read_text() == "BBB - 乙\n"
+
+
+def test_run_annotates_against_previous_day_file(tmp_path, monkeypatch):
+    _write_prev(tmp_path, "2026_09_14", "AAA - 甲\nBBB - 乙\n")
+    monkeypatch.setattr(etf_rs, "_fetch_klines", lambda *a, **k: {
+        "AAA": _kline(5), "BBB": _kline(20), "CCC": _kline(-3), "SPY": _kline(10)})
+    out = etf_rs.run_etf_rs(_cfg(), tmp_path, date(2026, 9, 15))
+    assert out.read_text() == "BBB ↑1 - 乙\nAAA ↓1 - 甲\nCCC 新 - 丙\n"
+    # same-day rerun compares against 09_14 again, not against today's own file
+    out2 = etf_rs.run_etf_rs(_cfg(), tmp_path, date(2026, 9, 15))
+    assert out2.read_text() == "BBB ↑1 - 乙\nAAA ↓1 - 甲\nCCC 新 - 丙\n"

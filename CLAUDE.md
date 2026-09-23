@@ -145,18 +145,28 @@ local (throttle-prone) k-line fetch.
   `[etf_rs.tickers]` table (ticker = 中文名, ~65 entries) is scored
   **locally** with the same 3M algorithm (`compute_us_rs_3m_table`, vs
   `benchmark` SPY; one yfinance batch, no cloud step) and written to
-  `output/TV/US/<date>_ETF_rs.txt` as **one `TICKER - 中文名 | 前五大持仓`
+  `output/TV/US/<date>_ETF_rs.txt` as **one `TICKER ↑N - 中文名 | 前五大持仓`
   per line, strongest at the top** — human-readable, NOT a TradingView
-  import (the only non-comma `.txt` in `TV/US/`). Holdings come from the
+  import (the only non-comma `.txt` in `TV/US/`). The **rank-change marker**
+  after the ticker (`↑N` / `↓N` / `=` / `新`, `rank_delta_marker`) compares
+  against the latest `*_ETF_rs.txt` in the same folder dated strictly
+  **before** today (`read_previous_ranks`; ticker = first whitespace token
+  of each line, so annotated files re-parse) — a same-day rerun keeps
+  comparing to the prior day, and with no earlier snapshot (first run,
+  retention gap) the marker is omitted altogether. No extra state file; the
+  5-day `TV/US` retention IS the lookback window. Holdings come from the
   **static** `[etf_rs.holdings]` table (hand-transcribed from issuer
   disclosures, dated in its comment; no API refresh — update by hand;
   missing entry → segment omitted). Tickers with an **identical 中文名**
   collapse to the strongest one (`collapse_same_name`; the name is the
-  same-instrument key, e.g. GDXU/NUGT) — the log still lists what was hidden. Percentile is **within the ETF set**,
-  not the stock universe. Ranking snapshot only: same-day rerun overwrites,
-  no `eod_seen` dedup, no Webull mirror, no Futu/TV sync; the report ignores
-  it (unknown group stem). Runs as a soft side-step at the end of us-eod /
-  eod (also `--mode etf-rs`); aged out by the generic `TV/US` 5-day rule.
+  same-instrument key — the former GDXU/NUGT pair was the motivating case;
+  NUGT and 12 global-market ETFs were dropped 2026-09-23, so no duplicate
+  names remain today, rule kept) — the log still lists what was hidden.
+  Percentile is **within the ETF set**, not the stock universe. Ranking
+  snapshot only: same-day rerun overwrites, no `eod_seen` dedup, no Webull
+  mirror, no Futu/TV sync; the report ignores it (unknown group stem). Runs
+  as a soft side-step at the end of us-eod / eod (also `--mode etf-rs`);
+  aged out by the generic `TV/US` 5-day rule.
 - **yfinance single-ticker frames:** `group_by="ticker"` returns a (ticker,
   field) MultiIndex even for ONE ticker (yfinance 1.x); every `single` branch
   indexes `data["Close"]` flat, so each download site wraps the result in
