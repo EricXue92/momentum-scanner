@@ -138,3 +138,62 @@ def test_missing_master_is_noop(tmp_path, monkeypatch):
     drops = sma50_prune.prune_us_master(seen, {"enabled": True})
     assert drops == []
     assert not seen.exists()
+
+
+# --- fill_missing_last_close (Yahoo daily Close lag; CF 2026-09-22) ---
+
+
+def _series_nan_last(closes: list[float]) -> pd.Series:
+    """Daily closes whose latest row is NaN (Yahoo published OHLV but no Close)."""
+    idx = pd.bdate_range(end="2026-09-22", periods=len(closes) + 1)
+    return pd.Series(closes + [float("nan")], index=idx, dtype=float)
+
+
+def test_fill_uses_intraday_close_for_trailing_nan_only():
+    calls = []
+
+    def fake_intraday(tickers, day):
+        calls.append((sorted(tickers), day))
+        return {"CF": 120.59}
+
+    closes = {"CF": _series_nan_last([123.27]), "OK": _series([100.0, 101.0])}
+    out = sma50_prune.fill_missing_last_close(closes, fetch_intraday=fake_intraday)
+    assert calls == [(["CF"], pd.Timestamp("2026-09-22").date())]
+    assert out["CF"].iloc[-1] == 120.59 and out["CF"].index[-1] == pd.Timestamp("2026-09-22")
+    assert out["OK"].equals(closes["OK"])
+
+
+def test_fill_drops_the_day_when_intraday_has_nothing():
+    closes = {"CF": _series_nan_last([123.27])}
+    out = sma50_prune.fill_missing_last_close(closes, fetch_intraday=lambda t, d: {})
+    assert list(out["CF"]) == [123.27]
+    assert out["CF"].index[-1] == pd.Timestamp("2026-09-21")
+
+
+def test_fill_skips_fetch_when_no_close_is_missing():
+    def boom(t, d):
+        raise AssertionError("must not fetch intraday")
+
+    closes = {"OK": _series([100.0, 101.0])}
+    out = sma50_prune.fill_missing_last_close(closes, fetch_intraday=boom)
+    assert out["OK"].equals(closes["OK"])
+
+
+def test_fetch_daily_closes_fills_nan_close_then_rule_drops(monkeypatch):
+    """CF 2026-09-22: batch daily frame has OHLV but NaN Close on the last row;
+    with the intraday fill the ticker sees 2 declining closes below SMA50."""
+    import main
+
+    idx = pd.bdate_range(end="2026-09-22", periods=60)
+    closes = [100.0] * 58 + [92.0, float("nan")]
+    frame = pd.DataFrame(
+        {("CF", "Close"): closes, ("CF", "Volume"): [1e6] * 60,
+         ("ZZ", "Close"): [100.0] * 60, ("ZZ", "Volume"): [1e6] * 60},
+        index=idx,
+    )
+    monkeypatch.setattr(main, "_yf_download_with_retry", lambda *a, **k: frame)
+    monkeypatch.setattr(sma50_prune, "_fetch_intraday_last_close",
+                        lambda tickers, day: {"CF": 90.0})
+    got = sma50_prune._fetch_daily_closes(["CF", "ZZ"])
+    assert got["CF"].iloc[-1] == 90.0 and len(got["CF"]) == 60
+    assert sma50_prune.find_sma50_drops(got) == ["CF"]

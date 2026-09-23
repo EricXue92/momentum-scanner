@@ -48,7 +48,13 @@ mirrored to `output/Webull/{US,HK}/` (newline-sep), then Futu sync.
   close (still declining; a rebound under the line is kept) → removed, can
   re-qualify later.
   Soft-fail: total yfinance failure skips the prune; missing/short-history
-  tickers are KEPT. US only.
+  tickers are KEPT. US only. **Trailing-NaN Close fill**
+  (`fill_missing_last_close`): Yahoo sometimes publishes the latest session's
+  daily row with OHLV but NaN Close for hours (all tickers, 2026-09-22 — CF
+  was kept one day stale). The prune fills such a row from one batch of that
+  day's 1h bars (last bar's close), warns, and only falls back to the stale
+  day when intraday has nothing either. The rest of us-eod still `dropna`s
+  and runs a day stale on such days.
 - **EOD Repeat (US):** tickers the master would drop that still fired an
   _event_ Longs group today are collected by `_repeat_hits` **before**
   `_dedup_seen` (which mutates `us_seen`) and written to
