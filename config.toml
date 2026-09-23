@@ -282,8 +282,8 @@ filters = ["ind_stocksonly","cap_smallover","sh_avgvol_o500","sh_price_o20","ta_
 # Shorts: 基于 Kristjan Kullamägi 的做空筛选，输出 Shorts.txt。
 [shorts]
 name = "Short Candidates"
-filters = ["ind_stocksonly", "ta_sma20_pa20", "ta_sma50_pa", "sh_avgvol_o1000", "cap_microover"]
-min_dollar_volume = 100_000_000
+filters = ["ind_stocksonly", "ta_sma20_pa20", "ta_sma50_pa", "sh_avgvol_o1000", "sh_price_o5", "cap_microover"]
+min_dollar_volume = 50_000_000   # Shorts 专用: 比全局 $100M 宽松 (2026-09-23)
 min_consecutive_up_days = 3
 # 按市值分级的月涨幅阈值 (%)
 perf_large_cap = 50     # ≥ $10B
@@ -364,7 +364,7 @@ name = "HK Short Candidates"
 min_rs_percentile_3m = 90
 min_avg_volume = 1_000_000             # 日均成交量 (股) — Shorts 独有
 min_market_cap = 50_000_000            # HKD
-min_dollar_volume = 100_000_000        # HKD; 对齐美股 Shorts $100M
+min_dollar_volume = 50_000_000         # HKD; 对齐美股 Shorts $50M (2026-09-23 放宽)
 min_consecutive_up_days = 3
 # 按市值分级的月涨幅阈值 (%)
 perf_large_cap = 50                    # ≥ 100亿 HKD

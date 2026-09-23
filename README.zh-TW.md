@@ -73,7 +73,7 @@ Finviz 選股之後,基於 yfinance 日線套用。閾值在 `[settings]`。
 
 | 閘門          | 閾值                                                            | 適用範圍                                     |
 | ------------- | --------------------------------------------------------------- | -------------------------------------------- |
-| Dollar Volume | 價 × 20 日均量 ≥ $100M                                          | Longs、Leaders、RS、Shorts、IPO、Morning Gap |
+| Dollar Volume | 價 × 20 日均量 ≥ $100M(Shorts 為 ≥ $50M)                       | Longs、Leaders、RS、Shorts、IPO、Morning Gap |
 | ADR%          | 最近 20 根完整 bar 的 mean(`(High − Low) / Close`) × 100 ≥ 4.0% | 同上                                         |
 
 ADR%(Kullamägi 式)衡量一隻股票**當下**的波動幅度;它取代了過去的 Finviz `beta > 1.5` 過濾——後者容易誤殺正活躍的中大盤票。
@@ -125,13 +125,13 @@ Oliver Kell 的動量/突破 setup。6 組互斥——靠前的組優先,每隻 
 
 Kullamägi 的拋物線衝頂做空 setup。每天重新檢出(不參與任何去重)。
 
-1. **Finviz:** 價格高於 SMA20 20%+、站上 SMA50、Avg Vol > 1M、市值 > $50M → 再用 **RS 3M ≥ 90** 縮小名單。
+1. **Finviz:** 價格高於 SMA20 20%+、站上 SMA50、Avg Vol > 1M、價格 > $5、市值 > $50M → 再用 **RS 3M ≥ 90** 縮小名單。
 2. **yfinance + Futu 市值**,依次過:
 
 | 過濾                | 閾值                                                                               |
 | ------------------- | ---------------------------------------------------------------------------------- |
 | 漲幅                | 2、3 或 4 週內上漲:**50%+**(市值 ≥ $10B)/ **200%+**($2B–$10B)/ **300%+**($50M–$2B) |
-| Dollar Volume、ADR% | ≥ $100M、≥ 4.0%                                                                    |
+| Dollar Volume、ADR% | ≥ $50M(`[shorts].min_dollar_volume`,比全局 $100M 寬鬆)、≥ 4.0%                   |
 | 連續上漲天數        | ≥ 3 天(不含當天未走完的 bar)                                                       |
 
 市值取自 Futu 快照(精確值;Finviz 的 `"1.23B"` 這類字符串在分級邊界附近容易分錯檔),取不到再回落 Finviz。
@@ -239,7 +239,7 @@ Kullamägi 的拋物線衝頂做空 setup。每天重新檢出(不參與任何�
 
 ### 港股 Shorts
 
-與美股 Shorts 相同,換成 HKD:RS 3M ≥ 90(對 HSI,先篩 universe)、市值 ≥ HK$50M、日均量 ≥ 1M 股/天、dollar volume ≥ HK$100M、ADR% ≥ 4.0%、漲幅按市值分級 50% / 200% / 300%(≥ HK$10B / HK$2B–10B / HK$50M–2B)、連續上漲 ≥ 3 天。配置:`[hk_shorts]`。
+與美股 Shorts 相同,換成 HKD:RS 3M ≥ 90(對 HSI,先篩 universe)、市值 ≥ HK$50M、日均量 ≥ 1M 股/天、dollar volume ≥ HK$50M、ADR% ≥ 4.0%、漲幅按市值分級 50% / 200% / 300%(≥ HK$10B / HK$2B–10B / HK$50M–2B)、連續上漲 ≥ 3 天。配置:`[hk_shorts]`。
 
 ### 港股 IPO
 

@@ -73,7 +73,7 @@ Applied after Finviz discovery, on yfinance daily bars. Thresholds live in `[set
 
 | Gate          | Threshold                                                        | Applies to                                   |
 | ------------- | ---------------------------------------------------------------- | -------------------------------------------- |
-| Dollar Volume | price × 20-day avg volume ≥ $100M                                | Longs, Leaders, RS, Shorts, IPO, Morning Gap |
+| Dollar Volume | price × 20-day avg volume ≥ $100M (Shorts: ≥ $50M)               | Longs, Leaders, RS, Shorts, IPO, Morning Gap |
 | ADR%          | mean(`(High − Low) / Close`) × 100 over 20 completed bars ≥ 4.0% | same                                         |
 
 ADR% (Kullamägi-style) measures how much a stock moves _now_; it replaced the old Finviz `beta > 1.5` filter, which penalised in-play mid/large caps.
@@ -125,13 +125,13 @@ Stocks holding up in a weak tape. **Runs only when SPY and QQQ are both down ≥
 
 Kullamägi's parabolic blow-off setup. Re-detected daily (excluded from all dedup).
 
-1. **Finviz:** price 20%+ above SMA20, above SMA50, Avg Vol > 1M, Cap > $50M → then **RS 3M ≥ 90** prunes the list.
+1. **Finviz:** price 20%+ above SMA20, above SMA50, Avg Vol > 1M, price > $5, Cap > $50M → then **RS 3M ≥ 90** prunes the list.
 2. **yfinance + Futu market cap**, in order:
 
 | Filter              | Threshold                                                                                       |
 | ------------------- | ----------------------------------------------------------------------------------------------- |
 | Performance         | up within 2, 3, or 4 weeks: **50%+** (cap ≥ $10B) / **200%+** ($2B–$10B) / **300%+** ($50M–$2B) |
-| Dollar Volume, ADR% | ≥ $100M, ≥ 4.0%                                                                                 |
+| Dollar Volume, ADR% | ≥ $50M (`[shorts].min_dollar_volume`, looser than the global $100M), ≥ 4.0%                     |
 | Consecutive up days | ≥ 3 (today's incomplete bar excluded)                                                           |
 
 Market cap comes from the Futu snapshot (exact value; Finviz strings like `"1.23B"` mis-bucket names near the tier boundaries), falling back to Finviz.
@@ -239,7 +239,7 @@ Priority-ordered; each ticker enters at most one file per day.
 
 ### HK Shorts
 
-Same as US Shorts in HKD: RS 3M ≥ 90 (vs HSI, universe pre-filter), cap ≥ HK$50M, avg vol ≥ 1M shares/day, dollar volume ≥ HK$100M, ADR% ≥ 4.0%, performance 50% / 200% / 300% by cap tier (≥ HK$10B / HK$2B–10B / HK$50M–2B), ≥ 3 consecutive up days. Config: `[hk_shorts]`.
+Same as US Shorts in HKD: RS 3M ≥ 90 (vs HSI, universe pre-filter), cap ≥ HK$50M, avg vol ≥ 1M shares/day, dollar volume ≥ HK$50M, ADR% ≥ 4.0%, performance 50% / 200% / 300% by cap tier (≥ HK$10B / HK$2B–10B / HK$50M–2B), ≥ 3 consecutive up days. Config: `[hk_shorts]`.
 
 ### HK IPO
 
