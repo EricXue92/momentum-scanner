@@ -148,7 +148,7 @@ local (throttle-prone) k-line fetch.
   currently nowhere active (all knobs remain independently tunable).
 - Not gated: Morning Gap. IPO: conditional 3M only (≥ 64-day history).
 - **ETF 3M RS ranking** (`etf_rs.py`, `[etf_rs]` config): the fixed
-  `[etf_rs.tickers]` table (ticker = 中文名, ~65 entries) is scored
+  `[etf_rs.tickers]` table (ticker = 中文名, ~50 entries) is scored
   **locally** with the same 3M algorithm (`compute_us_rs_3m_table`, vs
   `benchmark` SPY; one yfinance batch, no cloud step) and written to
   `output/TV/US/<date>_ETF_rs.txt` as **one `TICKER ↑N - 中文名 | 前五大持仓`

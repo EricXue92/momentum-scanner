@@ -161,7 +161,7 @@ Names already in the cross-day master that **re-fire an event group today** (The
 
 ### ETF Strength Ranking
 
-A daily sector / theme rotation view: a fixed list of ~65 ETFs (US sectors and themes, commodities, leveraged products, global markets) ranked by 3-month relative strength.
+A daily sector / theme rotation view: a fixed list of ~50 ETFs (US sectors and themes, commodities, leveraged products) ranked by 3-month relative strength.
 
 - **Scoring:** the same 3M RS formula as stocks (`0.5·R21 + 0.3·R42 + 0.2·R63`, relative to SPY). The percentile is **within the ETF list**, not the stock universe.
 - **When:** a soft step at the end of every `us-eod` run (a failure never affects EOD); rerun alone with `--mode etf-rs`. Computed locally — one yfinance batch, no cloud step.
