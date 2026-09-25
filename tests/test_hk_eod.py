@@ -409,3 +409,37 @@ def test_rs_gate_shorts_universe_code_format_mapping():
     # 若映射错误, 表内低分票会因 "missing" 被误保留。
     table = _shorts_rs_table({"HK.00700": 10})
     assert _rs_gate_shorts_universe(["0700"], table, 90) == []
+
+
+# --- fetch_hsi_kline_yf ---
+
+
+def _hsi_grid(n=3):
+    idx = pd.date_range(end="2026-09-24", periods=n, freq="B")
+    return pd.DataFrame({
+        "Open": [100.0] * n, "High": [101.0] * n, "Low": [99.0] * n,
+        "Close": [100.0, 101.0, 102.0][:n], "Volume": [1_000] * n,
+    }, index=idx)
+
+
+def test_fetch_hsi_kline_yf_accepts_flat_single_ticker_frame(monkeypatch):
+    # _yf_download_with_retry flattens the (ticker, field) MultiIndex for a
+    # single ticker (main._flatten_single_ticker_frame), so the frame arrives
+    # with plain field columns — indexing data["^HSI"] used to KeyError here,
+    # leaving the rs-line audit + cloud HK RS without an HSI benchmark.
+    import main
+    from hk_eod import fetch_hsi_kline_yf
+    monkeypatch.setattr(main, "_yf_download_with_retry", lambda *a, **k: _hsi_grid())
+    df = fetch_hsi_kline_yf(period="2y")
+    assert df is not None and list(df["close"]) == [100.0, 101.0, 102.0]
+    assert list(df.columns) == ["time_key", "open", "high", "low", "close", "volume"]
+
+
+def test_fetch_hsi_kline_yf_still_accepts_multiindex_frame(monkeypatch):
+    import main
+    from hk_eod import fetch_hsi_kline_yf
+    grid = _hsi_grid()
+    multi = pd.concat({"^HSI": grid}, axis=1)  # (ticker, field) columns
+    monkeypatch.setattr(main, "_yf_download_with_retry", lambda *a, **k: multi)
+    df = fetch_hsi_kline_yf(period="2y")
+    assert df is not None and list(df["close"]) == [100.0, 101.0, 102.0]

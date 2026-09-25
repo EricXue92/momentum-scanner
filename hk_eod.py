@@ -451,9 +451,13 @@ def fetch_hsi_kline_yf(period: str = "2y") -> pd.DataFrame | None:
     """Fetch HSI daily k-line via yfinance (`^HSI`). Returns DataFrame with
     the same columns as ``fetch_hk_klines_yf`` rows, or ``None`` on failure.
 
-    Note: yfinance with ``group_by="ticker"`` returns a MultiIndex DataFrame
-    even when the input is a single-element list, so we index via
-    ``data["^HSI"]`` to get the OHLCV grid directly.
+    Note: ``_yf_download_with_retry`` flattens the single-ticker
+    ``(ticker, field)`` MultiIndex that yfinance returns for a one-element
+    list (``_flatten_single_ticker_frame``), so the grid normally arrives
+    with plain field columns. Indexing ``data["^HSI"]`` unconditionally
+    KeyError'd on every run after that flattener landed (2026-09-12) and
+    silently left the rs-line audit + cloud HK RS without a benchmark, so
+    accept both shapes.
     """
     from main import _yf_download_with_retry
 
@@ -464,7 +468,8 @@ def fetch_hsi_kline_yf(period: str = "2y") -> pd.DataFrame | None:
         logger.warning("[HK Longs] HSI yfinance fetch returned empty")
         return None
     try:
-        sub = data["^HSI"]
+        cols = data.columns
+        sub = data["^HSI"] if isinstance(cols, pd.MultiIndex) and "^HSI" in cols.get_level_values(0) else data
         df = pd.DataFrame({
             "time_key": pd.to_datetime(sub.index),
             "open": sub["Open"].values,

@@ -179,6 +179,10 @@ local (throttle-prone) k-line fetch.
   indexes `data["Close"]` flat, so each download site wraps the result in
   `_flatten_single_ticker_frame`. Without it a one-hit screener day drops its
   only candidate ("failed to process ..., dropping" — ACVA 2026-09-11).
+  Corollary: anything going through `_yf_download_with_retry` with ONE
+  ticker gets a flat frame back — `fetch_hsi_kline_yf` indexed `data["^HSI"]`
+  and KeyError'd on every run 2026-09-12 → 09-25 (HK rs-line audit scored
+  0/37, cloud HK RS shipped without `rs_below_ma`); it now accepts both shapes.
 - **Do NOT make fetch failure hard-fail:** walk back ≤ 3 days of stale cache, then
   pass through (no gate) with a warning. Tickers **missing** from the table are
   KEPT, not dropped.
