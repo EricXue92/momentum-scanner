@@ -187,8 +187,8 @@ def _write_prev(tmp_path: Path, stamp: str, text: str) -> Path:
 def test_rank_delta_marker():
     assert etf_rs.rank_delta_marker(None, 1) == "新"
     assert etf_rs.rank_delta_marker(3, 3) == "="
-    assert etf_rs.rank_delta_marker(5, 2) == "↑3"
-    assert etf_rs.rank_delta_marker(2, 7) == "↓5"
+    assert etf_rs.rank_delta_marker(5, 2) == "🟢↑3"
+    assert etf_rs.rank_delta_marker(2, 7) == "🔴↓5"
 
 
 def test_read_previous_ranks_uses_latest_file_before_today(tmp_path):
@@ -205,7 +205,7 @@ def test_read_previous_ranks_none_when_no_earlier_file(tmp_path):
 
 
 def test_read_previous_ranks_parses_already_annotated_lines(tmp_path):
-    _write_prev(tmp_path, "2026_09_14", "BBB ↑2 - 乙 | X、Y\nAAA = - 甲\nCCC 新\n\n")
+    _write_prev(tmp_path, "2026_09_14", "BBB 🟢↑2 - 乙 | X、Y\nAAA = - 甲\nCCC 新\n\n")
     assert etf_rs.read_previous_ranks(tmp_path, date(2026, 9, 15)) == {"BBB": 1, "AAA": 2, "CCC": 3}
 
 
@@ -217,7 +217,7 @@ def test_write_ranking_annotates_rank_change_after_ticker(tmp_path):
     prev = {"AAA": 1, "BBB": 3}  # CCC absent → 新
     out = etf_rs.write_ranking(table, {"AAA": "甲", "BBB": "乙"}, {"BBB": "X、Y"},
                                tmp_path, date(2026, 9, 15), prev_ranks=prev)
-    assert out.read_text() == "BBB ↑2 - 乙 | X、Y\nAAA ↓1 - 甲\nCCC 新\n"
+    assert out.read_text() == "BBB 🟢↑2 - 乙 | X、Y\nAAA 🔴↓1 - 甲\nCCC 新\n"
 
 
 def test_write_ranking_no_previous_means_no_markers(tmp_path):
@@ -231,7 +231,7 @@ def test_run_annotates_against_previous_day_file(tmp_path, monkeypatch):
     monkeypatch.setattr(etf_rs, "_fetch_klines", lambda *a, **k: {
         "AAA": _kline(5), "BBB": _kline(20), "CCC": _kline(-3), "SPY": _kline(10)})
     out = etf_rs.run_etf_rs(_cfg(), tmp_path, date(2026, 9, 15))
-    assert out.read_text() == "BBB ↑1 - 乙\nAAA ↓1 - 甲\nCCC 新 - 丙\n"
+    assert out.read_text() == "BBB 🟢↑1 - 乙\nAAA 🔴↓1 - 甲\nCCC 新 - 丙\n"
     # same-day rerun compares against 09_14 again, not against today's own file
     out2 = etf_rs.run_etf_rs(_cfg(), tmp_path, date(2026, 9, 15))
-    assert out2.read_text() == "BBB ↑1 - 乙\nAAA ↓1 - 甲\nCCC 新 - 丙\n"
+    assert out2.read_text() == "BBB 🟢↑1 - 乙\nAAA 🔴↓1 - 甲\nCCC 新 - 丙\n"

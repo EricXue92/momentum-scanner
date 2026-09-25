@@ -8,7 +8,7 @@ the ETF set*, not against the ~6000-stock Fred6725 universe. Computed locally:
 pushed the stock-universe compute to GitHub Actions.
 
 Output: ``output/TV/US/<YYYY_MM_DD>_ETF_rs.txt`` — one ETF per line,
-strongest at the top, ``TICKER ↑N - 中文名 | 前五大持仓`` (``↑N`` / ``↓N`` /
+strongest at the top, ``TICKER 🟢↑N - 中文名 | 前五大持仓`` (``🟢↑N`` / ``🔴↓N`` /
 ``=`` / ``新`` = rank change vs the latest earlier snapshot in the same
 folder, see ``read_previous_ranks``; omitted when none exists; name from the
 ``[etf_rs.tickers]`` table — a bare list works too and yields bare symbols;
@@ -159,13 +159,14 @@ def read_previous_ranks(output_dir: Path, today: date) -> dict[str, int] | None:
 
 
 def rank_delta_marker(prev_rank: int | None, rank: int) -> str:
-    """``↑N`` moved up N places, ``↓N`` moved down, ``=`` unchanged, ``新``
-    absent from the previous snapshot."""
+    """``🟢↑N`` moved up N places, ``🔴↓N`` moved down, ``=`` unchanged, ``新``
+    absent from the previous snapshot. The colored dot is the only way to
+    tint a plain-text arrow (green = up, red = down)."""
     if prev_rank is None:
         return "新"
     if prev_rank == rank:
         return "="
-    return f"↑{prev_rank - rank}" if prev_rank > rank else f"↓{rank - prev_rank}"
+    return f"🟢↑{prev_rank - rank}" if prev_rank > rank else f"🔴↓{rank - prev_rank}"
 
 
 def _format_line(ticker: str, name: str, holdings: str, marker: str = "") -> str:
@@ -183,7 +184,7 @@ def write_ranking(
     prev_ranks: dict[str, int] | None = None,
 ) -> Path | None:
     """Write ``TV/US/<YYYY_MM_DD>_ETF_rs.txt``: one
-    ``TICKER ↑N - 中文名 | 前五大持仓`` per line, strongest at the top (name /
+    ``TICKER 🟢↑N - 中文名 | 前五大持仓`` per line, strongest at the top (name /
     holdings segments omitted when unknown). The rank-change marker
     (``rank_delta_marker`` vs ``prev_ranks``) is omitted entirely when there
     is no previous snapshot. Empty table → no file (no 0-byte artifacts);
