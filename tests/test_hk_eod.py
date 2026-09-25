@@ -443,3 +443,50 @@ def test_fetch_hsi_kline_yf_still_accepts_multiindex_frame(monkeypatch):
     monkeypatch.setattr(main, "_yf_download_with_retry", lambda *a, **k: multi)
     df = fetch_hsi_kline_yf(period="2y")
     assert df is not None and list(df["close"]) == [100.0, 101.0, 102.0]
+
+
+# --- filter_hk_shorts: sparse tickers inside a batch get retried ---
+
+
+def _shorts_grid(n_rows=60, ramp=15):
+    """OHLCV grid that passes every HK Shorts gate for a large cap: flat, then a
+    steep 15-day ramp (SMA20 +20%, > SMA50, 2-week perf > 50%, ADR 10%, 3+ up days)."""
+    closes = [10.0] * (n_rows - ramp) + [12.0 + 2.0 * i for i in range(ramp)]
+    idx = pd.date_range(end="2026-09-24", periods=n_rows, freq="B")
+    return pd.DataFrame({
+        "Open": closes, "High": [c * 1.05 for c in closes], "Low": [c * 0.95 for c in closes],
+        "Close": closes, "Volume": [2_000_000] * n_rows,
+    }, index=idx)
+
+
+def test_filter_hk_shorts_retries_sparse_tickers_in_batch(monkeypatch):
+    # 0002.HK comes back all-NaN from the batch download (transient Yahoo
+    # "possibly delisted" — 20/25 such tickers had full data on retry,
+    # 2026-09-25). The batch retry helper must be invoked so it is recovered
+    # instead of silently dropped at phase 1.
+    import main, hk_eod
+    good = _shorts_grid()
+    nan = good.astype(float) * float("nan")  # all-NaN columns, ticker still present
+    batch_frame = pd.concat({"0001.HK": good, "0002.HK": nan}, axis=1)
+
+    calls = []
+    def fake_retry(data, tickers, period, min_rows):
+        calls.append((list(tickers), period, min_rows))
+        for f in ("Open", "High", "Low", "Close", "Volume"):
+            data[("0002.HK", f)] = good[f]
+        return False
+
+    monkeypatch.setattr(hk_eod, "fetch_hkex_equities", lambda: ["0001", "0002"])
+    monkeypatch.setattr(main, "_yf_download_with_retry", lambda *a, **k: batch_frame)
+    monkeypatch.setattr(main, "_retry_sparse_in_batch", fake_retry)
+    monkeypatch.setattr(main, "_get_market_cap", lambda t, **k: 20_000_000_000.0)
+    monkeypatch.setattr(hk_eod.time, "sleep", lambda s: None)
+
+    cfg = {"min_avg_volume": 1_000_000, "min_market_cap": 50_000_000,
+           "min_dollar_volume": 50_000_000, "min_consecutive_up_days": 3,
+           "min_adr_percent": 4.0, "adr_days": 20}
+    universe, tv = hk_eod.filter_hk_shorts(cfg, futu_cfg=None, rs_table_3m=None)
+
+    assert universe == 2
+    assert calls == [(["0001.HK", "0002.HK"], "3mo", 50)]
+    assert sorted(tv) == ["HKEX:1", "HKEX:2"]

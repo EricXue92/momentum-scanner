@@ -108,6 +108,7 @@ def filter_hk_shorts(
     filters. Returns (universe_size, filtered_tickers_in_tv_format)."""
     from main import (
         _yf_download_with_retry,
+        _retry_sparse_in_batch,
         _get_market_cap,
         _get_closes_volumes,
         _get_ohlc,
@@ -159,6 +160,14 @@ def filter_hk_shorts(
         if batch_data is None or batch_data.empty:
             logger.warning(f"  Batch failed after retries, skipping")
             continue
+
+        # A batch download routinely reports a handful of legitimate tickers
+        # as "possibly delisted" (all-NaN) — 20 of 25 such names on
+        # 2026-09-25 had full 3mo history on a single-ticker retry. Without
+        # this pass they fall out silently at the len(closes) < 50 check
+        # below (US Shorts / Longs already do this). min_rows=50 matches
+        # the SMA50 requirement of phase 1.
+        _retry_sparse_in_batch(batch_data, batch, period="3mo", min_rows=50)
 
         single = len(batch) == 1
         for ticker in batch:
