@@ -165,12 +165,12 @@ A daily sector / theme rotation view: a fixed list of ~50 ETFs (US sectors and t
 
 - **Scoring:** the same 3M RS formula as stocks (`0.5·R21 + 0.3·R42 + 0.2·R63`, relative to SPY). The percentile is **within the ETF list**, not the stock universe.
 - **When:** a soft step at the end of every `us-eod` run (a failure never affects EOD); rerun alone with `--mode etf-rs`. Computed locally — one yfinance batch, no cloud step.
-- **Output:** `output/TV/US/<date>_ETF_rs.txt`, one ETF per line, **strongest first**, as `TICKER - name | top-5 holdings`:
+- **Output:** `output/TV/US/<date>_ETF_rs.txt`, one ETF per line, **strongest first**, as `N. TICKER - name | top-5 holdings` (`N.` = rank):
 
   ```
-  NRGU - 油气 3 倍做多 | VLO、MPC、PSX、CVX、DVN (ETN 挂钩指数前五成分股)
-  ARKG - 基因组革命 | TXG、TWST、TEM、CRSP、PSNL
-  USO - 原油 | 不适用: 原油期货及现金 / 国债抵押品
+  1. IBIT - 比特币 | 不适用: 主要资产为比特币
+  2. ARKG - 基因组革命 | TXG、TWST、TEM、CRSP、PSNL
+  3. USO - 原油 | 不适用: 原油期货及现金 / 国债抵押品
   ```
 
 - **Human-readable, not a TradingView import** — the only non-comma `.txt` in `TV/US/`. The full scored table (rank / score / percentile) goes to the EOD log.

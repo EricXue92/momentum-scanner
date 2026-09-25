@@ -82,7 +82,7 @@ def test_run_collapses_same_name_in_file(tmp_path, monkeypatch):
         "AAA": _kline(5), "BBB": _kline(20), "CCC": _kline(-3), "SPY": _kline(10)})
     cfg = _cfg(tickers={"AAA": "同名", "BBB": "同名", "CCC": "丙"})
     out = etf_rs.run_etf_rs(cfg, tmp_path, date(2026, 9, 15))
-    assert out.read_text() == "BBB - 同名\nCCC - 丙\n"
+    assert out.read_text() == "1. BBB - 同名\n2. CCC - 丙\n"
 
 
 # --- write_ranking ---
@@ -96,7 +96,7 @@ def test_write_ranking_one_per_line_strongest_first_with_names(tmp_path):
     out = etf_rs.write_ranking(table, {"AAA": "甲", "BBB": "乙"}, {}, tmp_path, date(2026, 9, 15))
     assert out == tmp_path / "TV" / "US" / "2026_09_15_ETF_rs.txt"
     # unnamed ticker → bare symbol line
-    assert out.read_text() == "BBB - 乙\nAAA - 甲\nCCC\n"
+    assert out.read_text() == "1. BBB - 乙\n2. AAA - 甲\n3. CCC\n"
 
 
 def test_write_ranking_appends_top_holdings(tmp_path):
@@ -106,7 +106,7 @@ def test_write_ranking_appends_top_holdings(tmp_path):
     )
     holdings = {"BBB": "X、Y、Z", "CCC": "不适用: 期货"}  # AAA has none
     out = etf_rs.write_ranking(table, {"AAA": "甲", "BBB": "乙"}, holdings, tmp_path, date(2026, 9, 15))
-    assert out.read_text() == "BBB - 乙 | X、Y、Z\nAAA - 甲\nCCC | 不适用: 期货\n"
+    assert out.read_text() == "1. BBB - 乙 | X、Y、Z\n2. AAA - 甲\n3. CCC | 不适用: 期货\n"
 
 
 def test_write_ranking_empty_table_writes_nothing(tmp_path):
@@ -129,7 +129,7 @@ def test_run_fetches_list_plus_benchmark_and_writes_file(tmp_path, monkeypatch):
     monkeypatch.setattr(etf_rs, "_fetch_klines", fake_fetch)
     out = etf_rs.run_etf_rs(_cfg(), tmp_path, date(2026, 9, 15))
     assert seen == [["AAA", "BBB", "CCC", "SPY"]]
-    assert out is not None and out.read_text() == "BBB - 乙\nAAA - 甲\nCCC - 丙\n"
+    assert out is not None and out.read_text() == "1. BBB - 乙\n2. AAA - 甲\n3. CCC - 丙\n"
 
 
 def test_run_reads_holdings_from_config(tmp_path, monkeypatch):
@@ -138,7 +138,7 @@ def test_run_reads_holdings_from_config(tmp_path, monkeypatch):
     cfg = _cfg(tickers={"AAA": "甲", "BBB": "乙"},
                holdings={"aaa ": " P、Q、R、S、T ", "BBB": ""})
     out = etf_rs.run_etf_rs(cfg, tmp_path, date(2026, 9, 15))
-    assert out.read_text() == "BBB - 乙\nAAA - 甲 | P、Q、R、S、T\n"
+    assert out.read_text() == "1. BBB - 乙\n2. AAA - 甲 | P、Q、R、S、T\n"
 
 
 def test_run_disabled_is_noop(tmp_path, monkeypatch):
@@ -170,7 +170,7 @@ def test_run_accepts_plain_list_without_names(tmp_path, monkeypatch):
     monkeypatch.setattr(etf_rs, "_fetch_klines",
                         lambda *a, **k: {"AAA": _kline(5), "SPY": _kline(1)})
     out = etf_rs.run_etf_rs(_cfg(tickers=["AAA"]), tmp_path, date(2026, 9, 15))
-    assert out.read_text() == "AAA\n"
+    assert out.read_text() == "1. AAA\n"
 
 
 # --- rank change vs previous snapshot ---
@@ -209,6 +209,12 @@ def test_read_previous_ranks_parses_already_annotated_lines(tmp_path):
     assert etf_rs.read_previous_ranks(tmp_path, date(2026, 9, 15)) == {"BBB": 1, "AAA": 2, "CCC": 3}
 
 
+def test_read_previous_ranks_skips_leading_rank_number(tmp_path):
+    # numbered snapshot (current format) and un-numbered legacy lines both parse
+    _write_prev(tmp_path, "2026_09_14", "1. BBB 🟢↑2 - 乙 | X、Y\n2. AAA = - 甲\nCCC 新\n")
+    assert etf_rs.read_previous_ranks(tmp_path, date(2026, 9, 15)) == {"BBB": 1, "AAA": 2, "CCC": 3}
+
+
 def test_write_ranking_annotates_rank_change_after_ticker(tmp_path):
     table = pd.DataFrame(
         {"raw_score": [0.2, 0.1, 0.0], "rs_percentile": [99, 50, 1]},
@@ -217,13 +223,13 @@ def test_write_ranking_annotates_rank_change_after_ticker(tmp_path):
     prev = {"AAA": 1, "BBB": 3}  # CCC absent → 新
     out = etf_rs.write_ranking(table, {"AAA": "甲", "BBB": "乙"}, {"BBB": "X、Y"},
                                tmp_path, date(2026, 9, 15), prev_ranks=prev)
-    assert out.read_text() == "BBB 🟢↑2 - 乙 | X、Y\nAAA 🔴↓1 - 甲\nCCC 新\n"
+    assert out.read_text() == "1. BBB 🟢↑2 - 乙 | X、Y\n2. AAA 🔴↓1 - 甲\n3. CCC 新\n"
 
 
 def test_write_ranking_no_previous_means_no_markers(tmp_path):
     table = pd.DataFrame({"raw_score": [0.2], "rs_percentile": [99]}, index=["BBB"])
     out = etf_rs.write_ranking(table, {"BBB": "乙"}, {}, tmp_path, date(2026, 9, 15), prev_ranks=None)
-    assert out.read_text() == "BBB - 乙\n"
+    assert out.read_text() == "1. BBB - 乙\n"
 
 
 def test_run_annotates_against_previous_day_file(tmp_path, monkeypatch):
@@ -231,7 +237,7 @@ def test_run_annotates_against_previous_day_file(tmp_path, monkeypatch):
     monkeypatch.setattr(etf_rs, "_fetch_klines", lambda *a, **k: {
         "AAA": _kline(5), "BBB": _kline(20), "CCC": _kline(-3), "SPY": _kline(10)})
     out = etf_rs.run_etf_rs(_cfg(), tmp_path, date(2026, 9, 15))
-    assert out.read_text() == "BBB 🟢↑1 - 乙\nAAA 🔴↓1 - 甲\nCCC 新 - 丙\n"
+    assert out.read_text() == "1. BBB 🟢↑1 - 乙\n2. AAA 🔴↓1 - 甲\n3. CCC 新 - 丙\n"
     # same-day rerun compares against 09_14 again, not against today's own file
     out2 = etf_rs.run_etf_rs(_cfg(), tmp_path, date(2026, 9, 15))
-    assert out2.read_text() == "BBB 🟢↑1 - 乙\nAAA 🔴↓1 - 甲\nCCC 新 - 丙\n"
+    assert out2.read_text() == "1. BBB 🟢↑1 - 乙\n2. AAA 🔴↓1 - 甲\n3. CCC 新 - 丙\n"

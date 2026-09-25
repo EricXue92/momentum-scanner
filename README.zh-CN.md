@@ -165,12 +165,12 @@ Kullamägi 的抛物线冲顶做空 setup。每天重新检出(不参与任何�
 
 - **打分:** 与个股相同的 3M RS 公式(`0.5·R21 + 0.3·R42 + 0.2·R63`,相对 SPY)。百分位是**在 ETF 名单内部**排的,不是对个股 universe。
 - **何时跑:** 每次 `us-eod` 末尾的 soft 步骤(失败不影响 EOD);也可用 `--mode etf-rs` 单独重跑。本地计算——一次 yfinance 批量下载,不走云端。
-- **输出:** `output/TV/US/<date>_ETF_rs.txt`,每行一只 ETF,**最强的在最上面**,格式 `TICKER - 中文名 | 前五大持仓`:
+- **输出:** `output/TV/US/<date>_ETF_rs.txt`,每行一只 ETF,**最强的在最上面**,格式 `N. TICKER - 中文名 | 前五大持仓`(`N.` 为名次):
 
   ```
-  NRGU - 油气 3 倍做多 | VLO、MPC、PSX、CVX、DVN (ETN 挂钩指数前五成分股)
-  ARKG - 基因组革命 | TXG、TWST、TEM、CRSP、PSNL
-  USO - 原油 | 不适用: 原油期货及现金 / 国债抵押品
+  1. IBIT - 比特币 | 不适用: 主要资产为比特币
+  2. ARKG - 基因组革命 | TXG、TWST、TEM、CRSP、PSNL
+  3. USO - 原油 | 不适用: 原油期货及现金 / 国债抵押品
   ```
 
 - **给人看的,不是 TradingView 导入文件**——它是 `TV/US/` 里唯一非逗号分隔的 `.txt`。带分数的完整表(排名 / 分数 / 百分位)在 EOD 日志里。

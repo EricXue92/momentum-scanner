@@ -119,14 +119,15 @@ def collapse_same_name(
 
 
 _FILE_RE = re.compile(rf"^(\d{{4}}_\d{{2}}_\d{{2}})_{_STEM}\.txt$")
+_RANK_PREFIX_RE = re.compile(r"^\d+\.$")  # leading "12." rank number on each output line
 
 
 def read_previous_ranks(output_dir: Path, today: date) -> dict[str, int] | None:
     """``{ticker: 1-based rank}`` from the most recent ``TV/US/<date>_ETF_rs.txt``
     dated strictly before ``today`` (so a same-day rerun compares against the
     same prior snapshot, not its own earlier output). The ticker is the first
-    whitespace token of each line — works on both bare and already-annotated
-    lines. None when no earlier snapshot exists (long weekend past the 5-day
+    whitespace token of each line after an optional ``N.`` rank prefix — works
+    on numbered, bare and already-annotated lines. None when no earlier snapshot exists (long weekend past the 5-day
     retention, first run) or the file cannot be read."""
     target = output_dir / "TV" / "US"
     if not target.is_dir():
@@ -153,6 +154,8 @@ def read_previous_ranks(output_dir: Path, today: date) -> dict[str, int] | None:
     ranks: dict[str, int] = {}
     for line in lines:
         parts = line.split()
+        if parts and _RANK_PREFIX_RE.match(parts[0]):
+            parts = parts[1:]  # "12." rank prefix (current format); legacy lines have none
         if parts and parts[0] not in ranks:
             ranks[parts[0]] = len(ranks) + 1
     return ranks
@@ -169,8 +172,11 @@ def rank_delta_marker(prev_rank: int | None, rank: int) -> str:
     return f"🟢↑{prev_rank - rank}" if prev_rank > rank else f"🔴↓{rank - prev_rank}"
 
 
-def _format_line(ticker: str, name: str, holdings: str, marker: str = "") -> str:
+def _format_line(ticker: str, name: str, holdings: str, marker: str = "",
+                 rank: int | None = None) -> str:
     head = f"{ticker} {marker}" if marker else ticker
+    if rank is not None:
+        head = f"{rank}. {head}"
     line = f"{head} - {name}" if name else head
     return f"{line} | {holdings}" if holdings else line
 
@@ -184,7 +190,8 @@ def write_ranking(
     prev_ranks: dict[str, int] | None = None,
 ) -> Path | None:
     """Write ``TV/US/<YYYY_MM_DD>_ETF_rs.txt``: one
-    ``TICKER 🟢↑N - 中文名 | 前五大持仓`` per line, strongest at the top (name /
+    ``N. TICKER 🟢↑N - 中文名 | 前五大持仓`` per line (``N.`` = 1-based rank),
+    strongest at the top (name /
     holdings segments omitted when unknown). The rank-change marker
     (``rank_delta_marker`` vs ``prev_ranks``) is omitted entirely when there
     is no previous snapshot. Empty table → no file (no 0-byte artifacts);
@@ -197,7 +204,7 @@ def write_ranking(
     lines = []
     for i, t in enumerate(table.index, start=1):
         marker = rank_delta_marker(prev_ranks.get(t), i) if prev_ranks is not None else ""
-        lines.append(_format_line(t, names.get(t, ""), holdings.get(t, ""), marker))
+        lines.append(_format_line(t, names.get(t, ""), holdings.get(t, ""), marker, rank=i))
     out.write_text("\n".join(lines) + "\n")
     return out
 

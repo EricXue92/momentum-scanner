@@ -151,13 +151,13 @@ local (throttle-prone) k-line fetch.
   `[etf_rs.tickers]` table (ticker = 中文名, ~50 entries) is scored
   **locally** with the same 3M algorithm (`compute_us_rs_3m_table`, vs
   `benchmark` SPY; one yfinance batch, no cloud step) and written to
-  `output/TV/US/<date>_ETF_rs.txt` as **one `TICKER 🟢↑N - 中文名 | 前五大持仓`
+  `output/TV/US/<date>_ETF_rs.txt` as **one `N. TICKER 🟢↑N - 中文名 | 前五大持仓`
   per line, strongest at the top** — human-readable, NOT a TradingView
   import (the only non-comma `.txt` in `TV/US/`). The **rank-change marker**
   after the ticker (`🟢↑N` / `🔴↓N` / `=` / `新`, `rank_delta_marker`; the
   colored dot is the only way to tint an arrow in plain text) compares
   against the latest `*_ETF_rs.txt` in the same folder dated strictly
-  **before** today (`read_previous_ranks`; ticker = first whitespace token
+  **before** today (`read_previous_ranks`; ticker = first whitespace token after the `N.` prefix
   of each line, so annotated files re-parse) — a same-day rerun keeps
   comparing to the prior day, and with no earlier snapshot (first run,
   retention gap) the marker is omitted altogether. No extra state file; the
