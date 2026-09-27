@@ -322,12 +322,15 @@ def _persist_seen(path: Path, seen: set[str]) -> None:
         logger.warning(f"[EOD seen] could not write {path}: {e}")
 
 
-def _sort_seen_by_rs_3m(path: Path, table) -> None:
+def _sort_seen_by_rs_3m(path: Path, table, key=None) -> None:
     """Rewrite the master at `path` ordered by 3M RS strength, strongest first
     (`raw_score`, falling back to `rs_percentile`). Tickers missing from the
     table (or with a NaN score) go last, alphabetically. Order only — the
     ticker set is unchanged and `_load_seen` reads a set, so dedup is
-    unaffected. Soft: no table / no file / any error leaves the file as is."""
+    unaffected. Soft: no table / no file / any error leaves the file as is.
+
+    `key` maps a master entry to the table's index when they differ (HK:
+    `HKEX:522` → `HK.00522`); an entry it cannot map counts as missing."""
     if table is None or table.empty or not path.exists():
         return
     try:
@@ -335,8 +338,12 @@ def _sort_seen_by_rs_3m(path: Path, table) -> None:
         seen = _load_seen(path)
         scores: dict[str, float] = {}
         for t in seen:
-            if t in table.index:
-                v = float(table.loc[t, col])
+            try:
+                k = key(t) if key else t
+            except (ValueError, TypeError):
+                continue
+            if k in table.index:
+                v = float(table.loc[k, col])
                 if v == v:  # not NaN
                     scores[t] = v
         ranked = sorted(scores, key=lambda t: (-scores[t], t))
@@ -2050,6 +2057,7 @@ def main() -> int:
                 persist_seen=_persist_seen,
                 eod_seen_path=_eod_seen_path,
                 dedup_seen=_dedup_seen,
+                sort_seen=_sort_seen_by_rs_3m,
             )
         except Exception as e:
             logger.warning(f"[HK EOD] Pipeline failed: {e}")
@@ -2364,7 +2372,7 @@ def main() -> int:
         # scores move daily, so this runs every us-eod even with no new names.
         _sort_seen_by_rs_3m(us_seen_path, rs_table_3m)
 
-        # --- Write Repeat(old names that re-fired an event group today) ---
+        # --- Write Repeat (old names that re-fired an event group today) ---
         # These are already in the cross-day master, so they were dropped from
         # their own group's .txt above. Read-only w.r.t. us_seen — writing them
         # here neither consults nor mutates the master again.
@@ -2477,6 +2485,7 @@ def main() -> int:
                     persist_seen=_persist_seen,
                     eod_seen_path=_eod_seen_path,
                     dedup_seen=_dedup_seen,
+                    sort_seen=_sort_seen_by_rs_3m,
                 )
             except Exception as e:
                 logger.warning(f"[HK EOD] Pipeline failed: {e}")

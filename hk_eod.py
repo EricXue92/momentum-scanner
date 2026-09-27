@@ -911,6 +911,7 @@ def run_hk_eod(
     persist_seen,            # callable from main.py (_persist_seen)
     eod_seen_path,           # callable from main.py (_eod_seen_path)
     dedup_seen,              # callable from main.py (_dedup_seen)
+    sort_seen=None,          # callable from main.py (_sort_seen_by_rs_3m)
 ) -> None:
     """Top-level HK EOD pipeline. Runs the existing HK Shorts (unchanged)
     plus the new long-side strategies (EarningsGap, HighVolume, GapUp,
@@ -1165,6 +1166,13 @@ def run_hk_eod(
         tag = f"[HK {name}]"
         tv = dedup_seen(tag, tv, seen, seen_path)
         final[name] = tv
+
+    # Re-sort the HK master by 3M RS (strongest first) after the last
+    # dedup_seen — persist_seen writes alphabetically and scores move daily.
+    # The cloud HK table carries percentiles only, so ties stay alphabetical.
+    if sort_seen is not None:
+        from rs_line_audit import _hk_master_to_futu
+        sort_seen(seen_path, rs_table_3m, key=_hk_master_to_futu)
 
     # --- Write outputs + Futu sync ---
     futu_key = {

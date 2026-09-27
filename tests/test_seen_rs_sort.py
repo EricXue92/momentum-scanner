@@ -69,3 +69,28 @@ def test_ticker_set_is_preserved(tmp_path):
     _sort_seen_by_rs_3m(p, _table({"AAA": (0.1, 80), "CCC": (0.5, 95)}))
     assert _load_seen(p) == before
     assert _lines(p) == ["CCC", "AAA", "BBB"]
+
+
+def _hk_table(rows: dict[str, int]) -> pd.DataFrame:
+    # Shape of hk_rs._split_combined's 3M frame: Futu-code index, percentile only.
+    return pd.DataFrame({"rs_percentile": rows})
+
+
+def test_hk_master_maps_tv_ticker_to_futu_code(tmp_path):
+    from rs_line_audit import _hk_master_to_futu
+
+    p = tmp_path / "eod_seen_HK.txt"
+    p.write_text("HKEX:1138\nHKEX:522\nHKEX:9988\n")
+    table = _hk_table({"HK.01138": 70, "HK.00522": 99, "HK.09988": 85})
+    _sort_seen_by_rs_3m(p, table, key=_hk_master_to_futu)
+    assert _lines(p) == ["HKEX:522", "HKEX:9988", "HKEX:1138"]
+
+
+def test_unparseable_entry_goes_last_instead_of_aborting(tmp_path):
+    from rs_line_audit import _hk_master_to_futu
+
+    p = tmp_path / "eod_seen_HK.txt"
+    p.write_text("HKEX:abc\nHKEX:522\nHKEX:700\n")
+    table = _hk_table({"HK.00522": 60, "HK.00700": 90})
+    _sort_seen_by_rs_3m(p, table, key=_hk_master_to_futu)
+    assert _lines(p) == ["HKEX:700", "HKEX:522", "HKEX:abc"]

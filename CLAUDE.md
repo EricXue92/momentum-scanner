@@ -40,9 +40,12 @@ mirrored to `output/Webull/{US,HK}/` (newline-sep), then Futu sync.
   `output/state/eod_seen_{US,HK,IPO,HKIPO}.txt` (`_dedup_seen`) — daily output = within-day
   survivors minus master, survivors append. Markets independent; IPO/HKIPO have
   own masters. **RS and Shorts are excluded from all dedup** (re-detect by design).
-  Reset masters only by deleting the file. **US master line order = 3M RS,
-  strongest first** (`_sort_seen_by_rs_3m`, re-sorted every us-eod after the
-  last `_dedup_seen`; no-score tickers last; no table → order left as is).
+  Reset masters only by deleting the file. **US and HK master line order = 3M RS,
+  strongest first** (`_sort_seen_by_rs_3m`, re-sorted every us-eod / hk-eod
+  after the last `_dedup_seen`; no-score tickers last; no table → order left
+  as is). US ranks by `raw_score`; the HK cloud table has percentiles only,
+  so HK ties stay alphabetical, and HK entries are mapped `HKEX:522` →
+  `HK.00522` for the lookup. IPO/HKIPO masters stay alphabetical.
   Order is cosmetic — `_load_seen` reads a set; `_persist_seen` still writes
   alphabetically mid-run and the pruners preserve order. Two pruners may shrink the US master
   (both back up as `.bak.<stamp>` first): manual `rs-line-audit`, and the
