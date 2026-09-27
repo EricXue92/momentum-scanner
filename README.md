@@ -285,6 +285,8 @@ Two pruners can shrink the US master so weakened names may re-qualify later; bot
 - **SMA50 auto-prune** — at the top of every `us-eod`: a close below SMA50 for 2 consecutive completed days **and** a latest close below the prior close (still declining; a rebound under the line is kept) → removed. Soft-fail: a yfinance outage skips the prune; missing/short-history tickers are kept. Config: `[sma50_prune]`.
 - **RS-line audit** — manual, see [above](#rs-line-audit-and-daily-top-10).
 
+**US master line order:** `eod_seen_US.txt` is re-sorted by **3M RS, strongest first**, at the end of every `us-eod` (after the last group writes to it), so the top of the file is the strongest of the names already surfaced. Tickers without a 3M score go last, alphabetically. Order is cosmetic — dedup reads the file as a set, and both pruners preserve line order. If the 3M table is unavailable the file is left as is. The HK / IPO / HKIPO masters stay alphabetical.
+
 Old names that re-fire an event group are surfaced separately in [EOD Repeat](#eod-repeat).
 
 ## Output
