@@ -40,7 +40,11 @@ mirrored to `output/Webull/{US,HK}/` (newline-sep), then Futu sync.
   `output/state/eod_seen_{US,HK,IPO,HKIPO}.txt` (`_dedup_seen`) — daily output = within-day
   survivors minus master, survivors append. Markets independent; IPO/HKIPO have
   own masters. **RS and Shorts are excluded from all dedup** (re-detect by design).
-  Reset masters only by deleting the file. Two pruners may shrink the US master
+  Reset masters only by deleting the file. **US master line order = 3M RS,
+  strongest first** (`_sort_seen_by_rs_3m`, re-sorted every us-eod after the
+  last `_dedup_seen`; no-score tickers last; no table → order left as is).
+  Order is cosmetic — `_load_seen` reads a set; `_persist_seen` still writes
+  alphabetically mid-run and the pruners preserve order. Two pruners may shrink the US master
   (both back up as `.bak.<stamp>` first): manual `rs-line-audit`, and the
   automatic **SMA50 prune** (`sma50_prune.py`, `[sma50_prune]` config) that runs
   at the top of every us-eod before the master is loaded — close below SMA50 for

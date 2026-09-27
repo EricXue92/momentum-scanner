@@ -322,6 +322,36 @@ def _persist_seen(path: Path, seen: set[str]) -> None:
         logger.warning(f"[EOD seen] could not write {path}: {e}")
 
 
+def _sort_seen_by_rs_3m(path: Path, table) -> None:
+    """Rewrite the master at `path` ordered by 3M RS strength, strongest first
+    (`raw_score`, falling back to `rs_percentile`). Tickers missing from the
+    table (or with a NaN score) go last, alphabetically. Order only — the
+    ticker set is unchanged and `_load_seen` reads a set, so dedup is
+    unaffected. Soft: no table / no file / any error leaves the file as is."""
+    if table is None or table.empty or not path.exists():
+        return
+    try:
+        col = "raw_score" if "raw_score" in table.columns else "rs_percentile"
+        seen = _load_seen(path)
+        scores: dict[str, float] = {}
+        for t in seen:
+            if t in table.index:
+                v = float(table.loc[t, col])
+                if v == v:  # not NaN
+                    scores[t] = v
+        ranked = sorted(scores, key=lambda t: (-scores[t], t))
+        ordered = ranked + sorted(seen - scores.keys())
+        with path.open("w", encoding="utf-8") as f:
+            for t in ordered:
+                f.write(f"{t}\n")
+        logger.info(
+            f"[EOD seen] {path.name} sorted by 3M RS: {len(ranked)} ranked, "
+            f"{len(ordered) - len(ranked)} without a score (last)"
+        )
+    except Exception as e:
+        logger.warning(f"[EOD seen] could not sort {path} by 3M RS: {e}")
+
+
 def _dedup_seen(
     label: str,
     sorted_tickers: list[str],
@@ -2329,7 +2359,12 @@ def main() -> int:
             _futu_sync(config, "leaders", sorted_leaders, "US")
             _tv_sync(config, "leaders", sorted_leaders, "US")
 
-        # --- Write Repeat (old names that re-fired an event group today) ---
+        # --- Re-sort the US master by 3M RS (strongest first) ---
+        # After the last _dedup_seen: _persist_seen writes alphabetically, and
+        # scores move daily, so this runs every us-eod even with no new names.
+        _sort_seen_by_rs_3m(us_seen_path, rs_table_3m)
+
+        # --- Write Repeat(old names that re-fired an event group today) ---
         # These are already in the cross-day master, so they were dropped from
         # their own group's .txt above. Read-only w.r.t. us_seen — writing them
         # here neither consults nor mutates the master again.
