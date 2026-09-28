@@ -1279,12 +1279,19 @@ def filter_dollar_volume_and_adr_yf(
     adr_days: int = 20,
     dv_days: int = 20,
     ipo_drops: set[str] | None = None,
+    adr_bypass_gap_pct: float | None = None,
+    adr_bypass_min_pct: float | None = None,
 ) -> list[str]:
     """Apply dollar-volume and ADR% filters via a single yfinance download.
     Either filter is skipped when its threshold is 0. Strict: tickers with
     insufficient data are dropped. If `ipo_drops` is provided, tickers
     dropped due to missing/insufficient yfinance history are recorded there
-    (likely IPOs)."""
+    (likely IPOs).
+
+    `adr_bypass_gap_pct` / `adr_bypass_min_pct` (per-group `[[longs]]` knobs,
+    both unset = off): a ticker whose latest completed bar gapped
+    >= `adr_bypass_gap_pct` is judged against the relaxed floor — CRM
+    2026-08-27 gapped +11.9% on earnings with ADR% 3.74 and was dropped."""
     if not tickers:
         return []
 
@@ -1307,12 +1314,44 @@ def filter_dollar_volume_and_adr_yf(
         return []
 
     if min_adr_percent > 0:
+        gaps = (
+            _daily_gaps(tickers, data, market_open, today_et, single)
+            if adr_bypass_gap_pct
+            else None
+        )
         tickers = _filter_adr_percent(
             tickers, data, min_adr_percent, adr_days, today_et,
             market_open=market_open, single=single, ipo_drops=ipo_drops,
+            gaps=gaps,
+            bypass_gap_pct=adr_bypass_gap_pct, bypass_min_pct=adr_bypass_min_pct,
         )
 
     return tickers
+
+
+def _daily_gaps(
+    tickers: list[str],
+    data,
+    market_open: bool,
+    today_date,
+    single: bool,
+) -> dict[str, float]:
+    """Opening gap % of each ticker's latest completed daily bar: that bar's
+    Open vs the prior bar's Close. Same trimming basis as ADR%. Tickers
+    without two usable bars are omitted (→ strict ADR% floor)."""
+    gaps: dict[str, float] = {}
+    for ticker in tickers:
+        try:
+            frame = data if single else data[ticker]
+            bars = frame[["Open", "Close"]].dropna()
+            bars = _trim_today(bars, market_open, today_date)
+            if len(bars) < 2:
+                continue
+            prev_close = float(bars["Close"].iloc[-2])
+            gaps[ticker] = (float(bars["Open"].iloc[-1]) - prev_close) / prev_close * 100
+        except (KeyError, TypeError, ValueError, ZeroDivisionError):
+            continue
+    return gaps
 
 
 def _filter_dollar_volume_from_data(
@@ -1437,12 +1476,13 @@ def _filter_adr_percent(
     there (real ADR% < min_pct rejections are NOT recorded — that's a
     legitimate filter, not a data gap).
 
-    Morning-gap only: a ticker whose live gap (from `gaps`) is
+    Big-gap bypass: a ticker whose gap (from `gaps` — live for morning-gap,
+    latest daily bar for EOD Longs groups that opt in) is
     >= `bypass_gap_pct` is judged against the relaxed `bypass_min_pct` floor
     instead of `min_pct` — ADR% is a static 20d property that a
     low-volatility large cap's earnings gap can never move, so the gap itself
-    stands in as the volatility evidence. EOD call sites pass none of the
-    three and are unaffected."""
+    stands in as the volatility evidence. Other EOD call sites pass none of
+    the three and are unaffected."""
     if not tickers:
         return []
     if single is None:
@@ -2159,13 +2199,22 @@ def main() -> int:
                 elif min_rs_percentile_longs > 0:
                     logger.info(f"  [Longs/{key}] 12M RS gate disabled for this group")
                 if (min_dollar_volume > 0 or min_adr_percent > 0) and tickers:
+                    adr_bypass_pct = screener_cfg.get("adr_bypass_gap_percent", 0)
+                    adr_bypass_min = screener_cfg.get("adr_bypass_min_percent", 0)
                     tickers = filter_dollar_volume_and_adr_yf(
                         tickers, min_dollar_volume, min_adr_percent, adr_days,
                         ipo_drops=ipo_drops,
+                        adr_bypass_gap_pct=adr_bypass_pct,
+                        adr_bypass_min_pct=adr_bypass_min,
+                    )
+                    bypass_note = (
+                        f", floor {adr_bypass_min}% at gap>={adr_bypass_pct}%"
+                        if adr_bypass_pct else ""
                     )
                     logger.info(
                         f"  {len(tickers)} after dollar volume "
-                        f"(>= ${min_dollar_volume:,.0f}) + ADR% (>= {min_adr_percent}%) filter"
+                        f"(>= ${min_dollar_volume:,.0f}) + ADR% "
+                        f"(>= {min_adr_percent}%{bypass_note}) filter"
                     )
                 min_rvol = screener_cfg.get("min_relative_volume")
                 if min_rvol and tickers:

@@ -220,11 +220,20 @@ filters = ["ind_stocksonly","cap_smallover","sh_avgvol_o500","sh_price_o10","ta_
 min_relative_volume = 3
 relative_volume_days = 20
 min_rs_percentile = 0
+# 大 gap ADR% 旁路 (同 [morning_gap]): 当日开盘 gap ≥ adr_bypass_gap_percent 时,
+# ADR% 门槛从 [settings].min_adr_percent 放宽到 adr_bypass_min_percent。
+# 低波动大盘股财报跳空 — 如 CRM 2026-08-27 gap +11.9% / 收盘 +22.6%, 但
+# ADR% 3.74 < 4.0 — 否则 EOD 永远扫不出来。仅 TheSetup / EarningsGap 启用;
+# 删掉这两行 (或 gap_percent 设 0) 即关闭。
+adr_bypass_gap_percent = 10.0
+adr_bypass_min_percent = 3.0
 
 [[longs]]
 key = "earnings_gap"
 name = "Earnings Gap"
 filters = ["ind_stocksonly","cap_smallover","earningsdate_today","sh_avgvol_o500","sh_price_o20","sh_relvol_o1.5","ta_gap_u5","ta_sma50_pa","ta_sma200_pa"]
+adr_bypass_gap_percent = 10.0   # 大 gap ADR% 旁路, 说明见 TheSetup
+adr_bypass_min_percent = 3.0
 
 [[longs]]
 key = "high_volume"

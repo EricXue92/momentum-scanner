@@ -78,6 +78,8 @@ Finviz 选股之后,基于 yfinance 日线套用。阈值在 `[settings]`。
 
 ADR%(Kullamägi 式)衡量一只股票**当下**的波动幅度;它取代了过去的 Finviz `beta > 1.5` 过滤——后者容易误杀正活跃的中大盘票。
 
+**大 gap 旁路(仅 TheSetup / EarningsGap):**当日开盘 gap ≥ 10% 时,ADR% 门槛放宽到 3.0%——否则低波动大盘股的财报跳空(CRM 2026-08-27:gap +11.9%,ADR% 3.74)永远扫不出来。在 `[[longs]]` 对应组内用 `adr_bypass_gap_percent` / `adr_bypass_min_percent` 配置;删掉即关闭。
+
 ### 各组 RS 闸
 
 口径:**事件组看长期强度(12M ≥ 90),其余看近期强度(3M ≥ 90)。** 每组一个独立旋钮,设 `0` 即关闭该层。

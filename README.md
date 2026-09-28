@@ -78,6 +78,8 @@ Applied after Finviz discovery, on yfinance daily bars. Thresholds live in `[set
 
 ADR% (Kullamägi-style) measures how much a stock moves _now_; it replaced the old Finviz `beta > 1.5` filter, which penalised in-play mid/large caps.
 
+**Big-gap bypass (TheSetup / EarningsGap only):** when the day's opening gap is ≥ 10%, the ADR% floor relaxes to 3.0% — a low-volatility large cap's earnings gap (CRM 2026-08-27: gap +11.9%, ADR% 3.74) would otherwise never surface. Per-group keys `adr_bypass_gap_percent` / `adr_bypass_min_percent` in `[[longs]]`; remove them to disable.
+
 ### RS Gates by Group
 
 Doctrine: **event groups check long-term strength (12M ≥ 90); everything else checks recent strength (3M ≥ 90).** One independent knob per group; `0` disables a layer.

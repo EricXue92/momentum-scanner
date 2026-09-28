@@ -89,8 +89,13 @@ mirrored to `output/Webull/{US,HK}/` (newline-sep), then Futu sync.
   restores the old basis. Separately, the **ADR% floor relaxes for big
   gappers**: gap ≥ `adr_bypass_gap_percent` → floor drops from
   `min_adr_percent` to `adr_bypass_min_percent` (US: 10% → 3.0; HK wired but
-  off — its base is already 3.0). Morning-gap only; EOD ADR% calls are
-  untouched. **Pre-market volume gate** (US negative offsets only,
+  off — its base is already 3.0). **EOD carries the same bypass for US Longs
+  `the_setup` + `earnings_gap` only** (per-group `[[longs]]` keys
+  `adr_bypass_gap_percent` / `adr_bypass_min_percent`, 10% → 3.0; gap =
+  latest completed daily bar's Open vs prior Close, `_daily_gaps`) — CRM
+  2026-08-27 gapped +11.9% on earnings at ADR% 3.74 and no EOD group could
+  emit it. Every other EOD ADR% call (other Longs groups, Leaders, RS,
+  Shorts) is untouched. **Pre-market volume gate** (US negative offsets only,
   `_filter_pre_market_volume`, `[morning_gap].min_pre_volume_ratio` = 0.05,
   0 = off): Futu `pre_volume` (carried on `GapQuote.pre_volume`) must be ≥
   ratio × 20d avg volume — a 5% `pre_change_rate` printed on a few hundred
