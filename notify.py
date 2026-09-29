@@ -23,7 +23,8 @@ def _format_body(tickers: list[str], max_in_body: int, total: int) -> str:
     return " ".join(parts)
 
 
-def _ntfy_post(server: str, topic: str, title: str, body: str, priority: str) -> None:
+def _ntfy_post(server: str, topic: str, title: str, body: str, priority: str) -> bool:
+    """POST one message. Returns True when ntfy accepted it, False otherwise."""
     url = f"{server}/{topic}"
     req = Request(
         url,
@@ -34,10 +35,12 @@ def _ntfy_post(server: str, topic: str, title: str, body: str, priority: str) ->
     try:
         with urlopen(req, timeout=_TIMEOUT_SEC) as resp:
             logger.info(f"[Notify] pushed: {title} (HTTP {resp.status})")
+            return True
     except (URLError, TimeoutError, OSError) as e:
         logger.warning(f"[Notify] ntfy POST failed: {e}")
     except Exception as e:
         logger.warning(f"[Notify] unexpected error: {e}")
+    return False
 
 
 def notify_morning_gap(
@@ -152,3 +155,47 @@ def notify_scan_skipped(mode: str, reason: str, config: dict) -> None:
     server = notify_cfg.get("ntfy_server", "https://ntfy.sh").rstrip("/")
     title = f"SKIPPED: {mode} scan"
     _ntfy_post(server, topic, title, reason, priority="high")
+
+
+def notify_opend_down(
+    mode: str, host: str, port: int, config: dict, output_dir: Path, today: str
+) -> None:
+    """Push a high-priority ntfy alert when Futu OpenD is unreachable.
+
+    Every Futu consumer soft-fails, so a dead OpenD only leaves WARNINGs in
+    the log while scans come back empty (2026-09-28: OpenD died in the
+    afternoon; HK EOD, all 9 US morning-gap scans and the next day's runs
+    went by silently). Fires **once per day** across all modes — the marker
+    `state/opend_down_alerted_<today>.txt` is written only after a
+    successful POST, so a failed push is retried by the next scan.
+    """
+    notify_cfg = config.get("notify") or {}
+    if not notify_cfg.get("enabled", False):
+        return
+
+    topic = notify_cfg.get("ntfy_topic")
+    if not topic:
+        logger.warning("[Notify] ntfy_topic missing for OpenD-down alert")
+        return
+
+    marker = output_dir / "state" / f"opend_down_alerted_{today}.txt"
+    try:
+        if marker.exists():
+            return
+    except OSError:
+        pass
+
+    server = notify_cfg.get("ntfy_server", "https://ntfy.sh").rstrip("/")
+    title = "OpenD DOWN: Futu scans are failing"
+    body = (
+        f"{mode}: OpenD not reachable at {host}:{port}. "
+        "Morning-gap scans / HK data / Futu sync are skipped until it is "
+        "started and logged in."
+    )
+    if not _ntfy_post(server, topic, title, body, priority="high"):
+        return
+    try:
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text(f"{mode}\n")
+    except OSError as e:
+        logger.warning(f"[Notify] could not write {marker.name}: {e}")

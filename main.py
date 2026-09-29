@@ -37,7 +37,7 @@ from futu_sync import (
 from tv_sync import sync_to_tv
 from cleanup import cleanup_old_outputs
 from hk_eod import fetch_hkex_equities, filter_hk_shorts, run_hk_eod
-from notify import notify_morning_gap
+from notify import notify_morning_gap, notify_opend_down
 from rs_rating import fetch_rs_table, filter_by_rs
 
 logger = logging.getLogger(__name__)
@@ -95,6 +95,26 @@ def _tv_sync(config: dict, key: str, tickers: list[str], market: str) -> None:
         market,  # type: ignore[arg-type]
         append_only=list_name in append_only_lists,
     )
+
+
+def _alert_if_opend_down(
+    mode: str, config: dict, output_dir: Path, today: str
+) -> None:
+    """Probe OpenD once and ntfy (once per day) when it is unreachable.
+
+    Pure side-effect: never raises and never changes the run — every Futu
+    consumer keeps its own soft-fail. Only called for runs that actually
+    execute (EOD modes, in-window morning-gap scans), so out-of-window
+    launchd fires stay silent."""
+    try:
+        futu_cfg = config.get("futu") or {}
+        host = futu_cfg.get("host", "127.0.0.1")
+        port = futu_cfg.get("port", 11111)
+        if _opend_reachable(host, port):
+            return
+        notify_opend_down(mode, host, port, config, output_dir, today)
+    except Exception as e:
+        logger.warning(f"[Notify] OpenD-down check failed: {e}")
 
 
 def _morning_gap_seen_path(
@@ -2084,6 +2104,7 @@ def main() -> int:
         # RS fetch, IPO collection) and run only run_hk_eod. Intended for the
         # evening HKT launchd slot, after HK market has closed and k-line data
         # is finalized.
+        _alert_if_opend_down(args.mode, config, output_dir, today)
         try:
             run_hk_eod(
                 config=config,
@@ -2109,6 +2130,7 @@ def main() -> int:
         return 0
 
     if args.mode in ("eod", "us-eod"):
+        _alert_if_opend_down(args.mode, config, output_dir, today)
         # --- Cross-day master 'seen' files (per market) ---
         # Each EOD group's daily output is filtered against this master so a
         # ticker only ever appears once across all days/groups. Master grows
@@ -2575,6 +2597,7 @@ def main() -> int:
 
         if offset is None:
             return 0  # Outside scan window — not an error
+        _alert_if_opend_down(args.mode, config, output_dir, today)
 
         # Pre-market and post-open scans write to separate files / Futu groups
         # so each gets its own drop-guard baseline (filter strictness differs).
@@ -2643,6 +2666,7 @@ def main() -> int:
 
         if offset is None:
             return 0  # Outside scan window — not an error
+        _alert_if_opend_down(args.mode, config, output_dir, today)
 
         # Convert yfinance format "0700.HK" → TradingView "HKEX:700"
         # (leading zeros stripped — TradingView rejects HKEX:0148 imports).

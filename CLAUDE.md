@@ -238,6 +238,15 @@ groups must be created by hand in the client (API can't create groups).
 
 - TCP probe `_opend_reachable` (1.5s) before `OpenQuoteContext` — without it the
   SDK retries forever on `ECONNREFUSED`. **Do not remove.**
+- **OpenD-down ntfy** (`main._alert_if_opend_down` → `notify.notify_opend_down`):
+  every Futu consumer soft-fails, so a dead OpenD used to leave only WARNINGs
+  while scans came back empty (2026-09-28: HK EOD, all 9 US morning-gap scans
+  and the next day's runs; KOD's pre-market gap never scanned). One probe at
+  the top of us-eod / hk-eod and of each **in-window** morning-gap scan
+  (out-of-window fires stay silent); high-priority push **once per HKT day**
+  across all modes (`state/opend_down_alerted_<date>.txt`, written only after
+  a successful POST so a failed push retries on the next scan; 2-day cleanup).
+  Alert only — it never changes the run.
 - `get_market_snapshot` has no `change_rate` — derive from `(last_price -
 prev_close_price) / prev_close_price`. `pre_/after_change_rate` do exist.
 - `suspension` is a string (`"N/A"`), not bool — use bool `delisting` instead.
