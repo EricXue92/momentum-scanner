@@ -69,6 +69,8 @@ top_n     = 10          # 每日 RS 最强快照条数 (audit 写 output/rs_us_<
 # 且最新收盘低于前一日收盘 (仍在下跌, 线下反弹的票保留) 的股票从 master 移除
 # (先备份 .bak.<stamp>), 走弱票未来重新走强可再入选。
 # 软失败: yfinance 整体失败则跳过; 单票数据缺失/历史不足 50 根 → 保留。仅 US。
+# 当天被剔除的票写入 output/TV/US/<date>_SMA50Pruned.txt (逗号分隔, 可导入 TradingView);
+# 没有剔除则不写文件; 同日重跑合并而不覆盖。不镜像 Webull, 不同步 Futu/TV。
 [sma50_prune]
 enabled = true
 consecutive_days = 2

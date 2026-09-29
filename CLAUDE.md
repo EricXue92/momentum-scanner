@@ -55,7 +55,11 @@ mirrored to `output/Webull/{US,HK}/` (newline-sep), then Futu sync.
   close (still declining; a rebound under the line is kept) → removed, can
   re-qualify later.
   Soft-fail: total yfinance failure skips the prune; missing/short-history
-  tickers are KEPT. US only. **Trailing-NaN Close fill**
+  tickers are KEPT. US only. The day's removed names are written to
+  `output/TV/US/<date>_SMA50Pruned.txt` (comma-sep; absent when nothing was
+  pruned; a same-day rerun **merges** into it, since the rerun no longer sees
+  names the first run removed; no Webull mirror / Futu / TV sync; aged out by
+  the `TV/US` 5-day rule; write failure is soft). **Trailing-NaN Close fill**
   (`fill_missing_last_close`): Yahoo sometimes publishes the latest session's
   daily row with OHLV but NaN Close for hours (all tickers, 2026-09-22 — CF
   was kept one day stale). The prune fills such a row from one batch of that

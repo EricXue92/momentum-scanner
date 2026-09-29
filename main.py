@@ -2145,7 +2145,11 @@ def main() -> int:
         # later. Soft-fail: any error skips the prune, EOD proceeds.
         try:
             from sma50_prune import prune_us_master
-            prune_us_master(us_seen_path, config.get("sma50_prune", {}))
+            prune_us_master(
+                us_seen_path,
+                config.get("sma50_prune", {}),
+                pruned_path=us_output_dir / f"{today}_SMA50Pruned.txt",
+            )
         except Exception as e:
             logger.warning(f"[sma50-prune] failed, master untouched: {e}")
 

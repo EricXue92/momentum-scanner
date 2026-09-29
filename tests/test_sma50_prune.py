@@ -197,3 +197,64 @@ def test_fetch_daily_closes_fills_nan_close_then_rule_drops(monkeypatch):
     got = sma50_prune._fetch_daily_closes(["CF", "ZZ"])
     assert got["CF"].iloc[-1] == 90.0 and len(got["CF"]) == 60
     assert sma50_prune.find_sma50_drops(got) == ["CF"]
+
+
+# --- dated pruned-list file (<date>_SMA50Pruned.txt) ---
+
+
+def _patch_closes(monkeypatch, weak_tickers: list[str], strong_tickers: list[str]):
+    weak = [100.0] * 58 + [92.0, 90.0]
+    strong = [100.0] * 60
+    table = {t: _series(weak) for t in weak_tickers}
+    table.update({t: _series(strong) for t in strong_tickers})
+    monkeypatch.setattr(
+        sma50_prune, "_fetch_daily_closes",
+        lambda tickers: {t: table[t] for t in tickers if t in table},
+    )
+
+
+def test_pruned_tickers_written_to_dated_file(tmp_path, monkeypatch):
+    seen = _write_master(tmp_path, ["CCC", "AAA", "BBB"])
+    _patch_closes(monkeypatch, ["CCC", "AAA"], ["BBB"])
+    out = tmp_path / "TV" / "2026_09_29_SMA50Pruned.txt"
+    out.parent.mkdir()
+    sma50_prune.prune_us_master(seen, {"enabled": True}, pruned_path=out)
+    assert out.read_text() == "AAA,CCC\n"
+
+
+def test_no_drops_writes_no_file(tmp_path, monkeypatch):
+    seen = _write_master(tmp_path, ["AAA", "BBB"])
+    _patch_closes(monkeypatch, [], ["AAA", "BBB"])
+    out = tmp_path / "2026_09_29_SMA50Pruned.txt"
+    sma50_prune.prune_us_master(seen, {"enabled": True}, pruned_path=out)
+    assert not out.exists()
+
+
+def test_same_day_rerun_keeps_earlier_prunes(tmp_path, monkeypatch):
+    """The first run already removed AAA from the master, so a rerun can only
+    find new names — it must add to the day's list, never replace it."""
+    seen = _write_master(tmp_path, ["AAA", "BBB", "CCC"])
+    out = tmp_path / "2026_09_29_SMA50Pruned.txt"
+    _patch_closes(monkeypatch, ["AAA"], ["BBB", "CCC"])
+    sma50_prune.prune_us_master(seen, {"enabled": True}, pruned_path=out)
+    _patch_closes(monkeypatch, ["BBB"], ["CCC"])
+    sma50_prune.prune_us_master(seen, {"enabled": True}, pruned_path=out)
+    assert out.read_text() == "AAA,BBB\n"
+
+
+def test_rerun_with_no_new_drops_leaves_file_untouched(tmp_path, monkeypatch):
+    seen = _write_master(tmp_path, ["AAA", "BBB"])
+    out = tmp_path / "2026_09_29_SMA50Pruned.txt"
+    _patch_closes(monkeypatch, ["AAA"], ["BBB"])
+    sma50_prune.prune_us_master(seen, {"enabled": True}, pruned_path=out)
+    sma50_prune.prune_us_master(seen, {"enabled": True}, pruned_path=out)
+    assert out.read_text() == "AAA\n"
+
+
+def test_unwritable_pruned_path_does_not_undo_the_prune(tmp_path, monkeypatch):
+    seen = _write_master(tmp_path, ["AAA", "BBB"])
+    _patch_closes(monkeypatch, ["AAA"], ["BBB"])
+    out = tmp_path / "no_such_dir" / "2026_09_29_SMA50Pruned.txt"
+    drops = sma50_prune.prune_us_master(seen, {"enabled": True}, pruned_path=out)
+    assert drops == ["AAA"]
+    assert seen.read_text().split() == ["BBB"]

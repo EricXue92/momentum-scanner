@@ -147,11 +147,37 @@ def find_sma50_drops(
     return sorted(drops)
 
 
-def prune_us_master(seen_path: Path, cfg: dict) -> list[str]:
+def _write_pruned_list(pruned_path: Path, drops: list[str]) -> None:
+    """Record today's pruned tickers in ``<date>_SMA50Pruned.txt`` (comma-sep,
+    TradingView-importable). Merges with an existing file: a same-day rerun
+    only sees names the earlier run left in the master, so overwriting would
+    lose the earlier prunes. Nothing pruned -> nothing written. Soft-fail —
+    the master prune has already happened and the log lists the names."""
+    if not drops:
+        return
+    try:
+        earlier = (
+            [t.strip() for t in pruned_path.read_text().split(",") if t.strip()]
+            if pruned_path.exists() else []
+        )
+        merged = sorted(set(earlier) | set(drops))
+        pruned_path.write_text(",".join(merged) + "\n")
+        logger.info(
+            f"[{_LABEL}] {len(drops)} pruned today ({len(merged)} total) "
+            f"-> {pruned_path}"
+        )
+    except OSError as e:
+        logger.warning(f"[{_LABEL}] could not write {pruned_path}: {e}")
+
+
+def prune_us_master(
+    seen_path: Path, cfg: dict, pruned_path: Path | None = None
+) -> list[str]:
     """Prune SMA50 breakdowns from the US master. Returns the dropped tickers.
 
     No-op when disabled, when the master is missing/empty, or when the batch
-    download fails (warned, master untouched).
+    download fails (warned, master untouched). ``pruned_path``, when given,
+    receives the day's dropped tickers (see ``_write_pruned_list``).
     """
     if not cfg.get("enabled", False):
         return []
@@ -181,4 +207,6 @@ def prune_us_master(seen_path: Path, cfg: dict) -> list[str]:
         + (f" -> {','.join(drops)}" if drops else "")
     )
     _prune_master(seen_path, drops, label=_LABEL)
+    if pruned_path is not None:
+        _write_pruned_list(pruned_path, drops)
     return drops
