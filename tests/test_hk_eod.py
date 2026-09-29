@@ -490,3 +490,19 @@ def test_filter_hk_shorts_retries_sparse_tickers_in_batch(monkeypatch):
     assert universe == 2
     assert calls == [(["0001.HK", "0002.HK"], "3mo", 50)]
     assert sorted(tv) == ["HKEX:1", "HKEX:2"]
+
+
+# --- fetch_hk_klines_yf: a one-ticker batch arrives as a flat frame ---
+
+
+def test_fetch_hk_klines_yf_accepts_flat_single_ticker_frame(monkeypatch):
+    # Same shape trap as fetch_hsi_kline_yf / us_rs_3m.fetch_us_klines_yf: a
+    # one-ticker batch is flattened by _yf_download_with_retry, so the ticker
+    # is not a column level and used to be counted as "missing".
+    import main
+    from hk_eod import fetch_hk_klines_yf
+    monkeypatch.setattr(main, "_yf_download_with_retry", lambda *a, **k: _shorts_grid())
+    monkeypatch.setattr(main, "_retry_sparse_in_batch", lambda *a, **k: False)
+    klines = fetch_hk_klines_yf(["0700"], period="2y")
+    assert list(klines) == ["HK.00700"]
+    assert len(klines["HK.00700"]) == 60

@@ -235,3 +235,52 @@ def test_fetch_us_klines_yf_with_ohlcv(monkeypatch):
     for t, df in klines.items():
         assert set(df.columns) == expected_cols, f"{t}: columns mismatch {set(df.columns)}"
         assert len(df) == 80
+
+
+def _fake_download_runtime_shape(tickers, **kwargs):
+    """What main._yf_download_with_retry really hands back: MultiIndex for 2+
+    tickers, but a FLAT field-column frame for one ticker (it runs
+    _flatten_single_ticker_frame on every download)."""
+    idx = pd.date_range(end="2026-05-21", periods=80, freq="B")
+    fields = ["Open", "High", "Low", "Close", "Volume"]
+    if len(tickers) == 1:
+        return pd.DataFrame(100.0, index=idx, columns=fields)
+    return pd.DataFrame(
+        100.0, index=idx, columns=pd.MultiIndex.from_product([tickers, fields])
+    )
+
+
+def test_fetch_us_klines_yf_single_ticker_flat_frame(monkeypatch):
+    """The SPY benchmark fetch is a one-ticker batch. It came back empty on
+    every run since 2026-09-12, so the US rs-line audit scored 0/118 and the
+    daily strongest-RS snapshot was never written."""
+    import us_rs_3m
+
+    monkeypatch.setattr("us_rs_3m._yf_download_with_retry", _fake_download_runtime_shape, raising=False)
+    monkeypatch.setattr("us_rs_3m._retry_sparse_in_batch", lambda *a, **kw: None, raising=False)
+    klines = us_rs_3m.fetch_us_klines_yf(["SPY"], period="6mo", batch_size=1)
+    assert list(klines) == ["SPY"]
+    assert list(klines["SPY"].columns) == ["time_key", "close"]
+    assert len(klines["SPY"]) == 80
+
+
+def test_fetch_us_klines_yf_single_ticker_flat_frame_ohlcv(monkeypatch):
+    import us_rs_3m
+
+    monkeypatch.setattr("us_rs_3m._yf_download_with_retry", _fake_download_runtime_shape, raising=False)
+    monkeypatch.setattr("us_rs_3m._retry_sparse_in_batch", lambda *a, **kw: None, raising=False)
+    klines = us_rs_3m.fetch_us_klines_yf(["SPY"], period="6mo", include_ohlcv=True)
+    assert list(klines["SPY"].columns) == [
+        "time_key", "open", "high", "low", "close", "volume",
+    ]
+
+
+def test_fetch_us_klines_yf_trailing_batch_of_one_is_kept(monkeypatch):
+    """A universe of N*batch_size + 1 tickers ends on a one-ticker batch."""
+    import us_rs_3m
+
+    monkeypatch.setattr("us_rs_3m._yf_download_with_retry", _fake_download_runtime_shape, raising=False)
+    monkeypatch.setattr("us_rs_3m._retry_sparse_in_batch", lambda *a, **kw: None, raising=False)
+    monkeypatch.setattr("us_rs_3m.time.sleep", lambda s: None)
+    klines = us_rs_3m.fetch_us_klines_yf(["AAA", "BBB", "CCC"], period="6mo", batch_size=2)
+    assert sorted(klines) == ["AAA", "BBB", "CCC"]

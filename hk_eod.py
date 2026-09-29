@@ -413,12 +413,20 @@ def fetch_hk_klines_yf(
         # Build OHLCV per ticker by reading directly from the batch_data
         # MultiIndex (rather than calling _get_closes_volumes / _get_ohlc
         # which each do their own .dropna() and risk shape mismatch).
+        # A one-ticker batch comes back with flat field columns
+        # (_yf_download_with_retry flattens it) — the frame IS that ticker.
+        flat_single = (
+            len(batch) == 1 and not isinstance(batch_data.columns, pd.MultiIndex)
+        )
         for ticker in batch:
             try:
-                if ticker not in batch_data.columns.get_level_values(0).unique():
+                if flat_single:
+                    sub = batch_data
+                elif ticker not in batch_data.columns.get_level_values(0).unique():
                     drop_buckets["missing"] += 1
                     continue
-                sub = batch_data[ticker]
+                else:
+                    sub = batch_data[ticker]
                 df = pd.DataFrame({
                     "time_key": pd.to_datetime(sub.index),
                     "open": sub["Open"].values,

@@ -264,9 +264,14 @@ def fetch_us_klines_yf(
         # into a 5+ hour spiral. _score_from_kline enforces the real 64-row
         # cut at scoring time.
         throttled = _retry_sparse_in_batch(batch_data, batch, period=period, min_rows=20)
+        # A one-ticker batch (the SPY benchmark fetch, or the tail of an
+        # N*batch_size+1 universe) comes back with flat field columns —
+        # _yf_download_with_retry flattens it — so there is no batch_data[t].
+        flat = not isinstance(batch_data.columns, pd.MultiIndex)
         for t in batch:
             try:
-                closes = batch_data[t]["Close"].dropna()
+                frame = batch_data if flat and len(batch) == 1 else batch_data[t]
+                closes = frame["Close"].dropna()
             except (KeyError, TypeError, ValueError, AttributeError):
                 continue
             if closes.empty:
@@ -275,11 +280,11 @@ def fetch_us_klines_yf(
                 try:
                     row = {
                         "time_key": closes.index,
-                        "open": batch_data[t]["Open"].reindex(closes.index).values,
-                        "high": batch_data[t]["High"].reindex(closes.index).values,
-                        "low": batch_data[t]["Low"].reindex(closes.index).values,
+                        "open": frame["Open"].reindex(closes.index).values,
+                        "high": frame["High"].reindex(closes.index).values,
+                        "low": frame["Low"].reindex(closes.index).values,
                         "close": closes.values,
-                        "volume": batch_data[t]["Volume"].reindex(closes.index).values,
+                        "volume": frame["Volume"].reindex(closes.index).values,
                     }
                 except (KeyError, TypeError, ValueError, AttributeError):
                     continue

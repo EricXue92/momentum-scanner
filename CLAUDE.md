@@ -199,6 +199,15 @@ local (throttle-prone) k-line fetch.
   ticker gets a flat frame back — `fetch_hsi_kline_yf` indexed `data["^HSI"]`
   and KeyError'd on every run 2026-09-12 → 09-25 (HK rs-line audit scored
   0/37, cloud HK RS shipped without `rs_below_ma`); it now accepts both shapes.
+  Same trap, found 2026-09-29: `us_rs_3m.fetch_us_klines_yf` indexed
+  `batch_data[t]` on the one-ticker SPY benchmark fetch (`_fetch_spy_kline`,
+  also any trailing batch of one) → no benchmark since 2026-09-12: US rs-line
+  audit scored 0/118 (no `rs_us_<date>.txt`), cloud US 3M CSVs shipped
+  absolute scores without the `rs_*_ma` columns (percentile order unaffected —
+  the benchmark score is a constant offset). `hk_eod.fetch_hk_klines_yf` had
+  the same latent bug. Both accept flat frames now. **Test fakes must mimic
+  the runtime shape** (flat for one ticker) — the old MultiIndex-only fake is
+  why the single-ticker test stayed green.
 - **Do NOT make fetch failure hard-fail:** walk back ≤ 3 days of stale cache, then
   pass through (no gate) with a warning. Tickers **missing** from the table are
   KEPT, not dropped.
