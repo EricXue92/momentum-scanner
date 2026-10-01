@@ -2497,7 +2497,8 @@ def main() -> int:
         # Tickers dropped by yfinance across the long-side pipeline are
         # passed through a depth-conditional ladder (mirror of HK's
         # filter_hk_ipo_candidates): 20-day floor, cap/price/vol/dv/ADR,
-        # SMA50/200, 3M RS ≥ 90. Guard: tickers in the 12M RS table cannot
+        # SMA50/200, perf_4w > ipo_min_perf_4w below 64 rows, 3M RS ≥ 90
+        # from 64. Guard: tickers in the 12M RS table cannot
         # be fresh IPOs (need ≥12mo history) — those drops are transient
         # yfinance gaps and excluded before the ladder.
         if rs_table and ipo_drops:

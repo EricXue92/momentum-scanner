@@ -2,6 +2,7 @@ import math
 
 import numpy as np
 import pandas as pd
+import pytest
 
 
 def _make_kline(closes: list[float], highs=None, lows=None, volumes=None) -> pd.DataFrame:
@@ -318,3 +319,82 @@ def test_filter_passes_when_rs_threshold_is_zero():
     )
     assert kept == ["X"]
     assert drops["rs_3m"] == 0
+
+
+def test_build_ipo_metrics_perf_4w_is_20_sessions_back():
+    from us_ipo import _build_ipo_metrics
+    # 21 行: 20 个交易日前收 20, 现价 25 → +25%
+    klines = {"UP": _make_kline([20.0] + [22.0] * 19 + [25.0])}
+    row = _build_ipo_metrics(klines, {"UP": 5e9}).loc["UP"]
+    assert abs(row["perf_4w"] - 25.0) < 1e-9
+
+
+def test_build_ipo_metrics_perf_4w_nan_at_exactly_20_rows():
+    from us_ipo import _build_ipo_metrics
+    klines = {"D20": _make_kline([20.0] * 19 + [25.0])}
+    row = _build_ipo_metrics(klines, {"D20": 5e9}).loc["D20"]
+    assert math.isnan(row["perf_4w"])
+
+
+def _ipo_kline(closes):
+    # 宽 H/L + 大成交量: 其余闸门全过, 只留方向闸可拦
+    return _make_kline(closes, highs=[c * 1.08 for c in closes],
+                       lows=[c * 0.92 for c in closes],
+                       volumes=[10_000_000.0] * len(closes))
+
+
+@pytest.mark.parametrize(
+    "closes, want_kept",
+    [
+        ([30.0] * 10 + [25.0] * 20, []),           # 30 行, 4 周 -16.7%
+        ([25.0] * 30, []),                         # 持平: 严格大于才放行
+        ([25.0] * 10 + [25.5] * 20, ["T"]),        # 4 周 +2%
+        # 63 行: 现价 28 在 SMA50 (24.4) 之上, 但 20 日前收 30 → 4 周 -6.7%
+        ([20.0] * 38 + [30.0] * 10 + [28.0] * 15, []),
+        ([20.0] * 19 + [25.0], []),                # 20 行算不出 perf_4w → 等 21 行
+    ],
+)
+def test_filter_direction_gate_below_64_days(closes, want_kept):
+    from us_ipo import filter_us_ipo_candidates
+    kept, drops = filter_us_ipo_candidates(
+        klines={"T": _ipo_kline(closes)}, finviz_caps={"T": 5e9},
+        rs_table_3m_full=None, spy_kline=None,
+        settings={**_us_settings_default(), "ipo_min_perf_4w": 0.0},
+    )
+    assert kept == want_kept
+    assert sum(drops.values()) == (0 if want_kept else 1)
+
+
+def test_filter_direction_gate_drop_lands_in_perf_4w_bucket():
+    from us_ipo import filter_us_ipo_candidates
+    _, drops = filter_us_ipo_candidates(
+        klines={"T": _ipo_kline([30.0] * 10 + [25.0] * 20)}, finviz_caps={"T": 5e9},
+        rs_table_3m_full=None, spy_kline=None,
+        settings={**_us_settings_default(), "ipo_min_perf_4w": 0.0},
+    )
+    assert drops["perf_4w"] == 1
+
+
+def test_filter_direction_gate_not_applied_from_64_days():
+    from us_ipo import filter_us_ipo_candidates
+    # 70 行: 现价 28 在 SMA50 (24.4) 之上, 但 20 日前收 30 → 4 周 -6.7%。
+    # ≥64 行由 3M RS 接管 (此处表为 None → 放行)。
+    closes = [20.0] * 45 + [30.0] * 10 + [28.0] * 15
+    kept, drops = filter_us_ipo_candidates(
+        klines={"OLD": _ipo_kline(closes)}, finviz_caps={"OLD": 5e9},
+        rs_table_3m_full=None, spy_kline=None,
+        settings={**_us_settings_default(), "ipo_min_perf_4w": 0.0},
+    )
+    assert kept == ["OLD"]
+    assert drops["perf_4w"] == 0
+
+
+def test_filter_direction_gate_off_when_key_unset():
+    from us_ipo import filter_us_ipo_candidates
+    kept, drops = filter_us_ipo_candidates(
+        klines={"T": _ipo_kline([30.0] * 10 + [25.0] * 20)}, finviz_caps={"T": 5e9},
+        rs_table_3m_full=None, spy_kline=None,
+        settings=_us_settings_default(),
+    )
+    assert kept == ["T"]
+    assert drops["perf_4w"] == 0

@@ -23,7 +23,7 @@ def _build_ipo_metrics(
     """Compute IPO-ladder metrics frame from k-lines.
 
     Columns: market_cap, last_price, avg_vol_20d, avg_dollar_vol_20d,
-    adr_pct, sma50, sma200, above_sma50, above_sma200, n_rows.
+    adr_pct, sma50, sma200, above_sma50, above_sma200, perf_4w, n_rows.
 
     Tickers shorter than the relevant window get NaN for that window's
     metrics (matching hk_eod.build_metrics_frame semantics). Caller checks
@@ -53,6 +53,9 @@ def _build_ipo_metrics(
         sma200 = float(closes[-200:].mean()) if n >= 200 else float("nan")
         above_sma50 = bool(n >= 50 and last > sma50)
         above_sma200 = bool(n >= 200 and last > sma200)
+        # 20 sessions back, same window as hk_eod.build_metrics_frame's _perf(20)
+        past = float(closes[-21]) if n > 20 else float("nan")
+        perf_4w = (last - past) / past * 100.0 if past > 0 else float("nan")
 
         rows.append({
             "ticker": t,
@@ -65,6 +68,7 @@ def _build_ipo_metrics(
             "sma200": sma200,
             "above_sma50": above_sma50,
             "above_sma200": above_sma200,
+            "perf_4w": perf_4w,
             "n_rows": n,
         })
 
@@ -97,6 +101,9 @@ def filter_us_ipo_candidates(
           adr_pct < min_adr_percent                    → drops['adr']
       - if n >= 50: not above SMA50                    → drops['sma50']
       - if n >= 200: not above SMA200                  → drops['sma200']
+      - if n < 64 and ipo_min_perf_4w is set:          (direction gate)
+          not perf_4w > ipo_min_perf_4w                → drops['perf_4w']
+          (NaN drops too: 20 rows can't yield a 4-week return)
       - if n >= 64 and rs_table_3m_full and threshold>0:
           compute IPO 3M score vs SPY; rank against
           rs_table_3m_full['raw_score'] distribution;
@@ -108,12 +115,14 @@ def filter_us_ipo_candidates(
     min_dvol = float(settings.get("min_dollar_volume", 100_000_000))
     min_adr = float(settings.get("min_adr_percent", 4.0))
     rs_threshold = int(settings.get("min_rs_percentile_3m", 0))
+    min_perf_4w = settings.get("ipo_min_perf_4w")  # unset = direction gate off
 
     drops: dict[str, int] = {
         "min_history": 0,
         "cap": 0, "price": 0,
         "avg_vol": 0, "dvol": 0, "adr": 0,
         "sma50": 0, "sma200": 0,
+        "perf_4w": 0,
         "rs_3m": 0,
     }
 
@@ -172,6 +181,17 @@ def filter_us_ipo_candidates(
             continue
         if pd.notna(row["sma200"]) and not bool(row["above_sma200"]):
             drops["sma200"] += 1
+            continue
+        # Direction gate — below 64 rows there is no 3M RS (and mostly no
+        # SMA50 either), so nothing else in the ladder looks at strength.
+        # NaN (exactly 20 rows) compares False → drop; the ticker isn't in
+        # the master yet, so it can still surface on a later scan.
+        if (
+            len(df) < 64
+            and min_perf_4w is not None
+            and not row["perf_4w"] > min_perf_4w
+        ):
+            drops["perf_4w"] += 1
             continue
         # 3M RS gate — only fires for n >= 64 with a usable table.
         if rs_gate_ready and len(df) >= 64:

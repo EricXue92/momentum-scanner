@@ -190,6 +190,7 @@ def _ipo_metrics_row(
     sma200=20.0,
     above_sma50=True,
     above_sma200=True,
+    perf_4w=10.0,
 ):
     """Returns a metrics-frame row dict that PASSES all baseline gates.
 
@@ -206,6 +207,7 @@ def _ipo_metrics_row(
         sma200=sma200,
         above_sma50=above_sma50,
         above_sma200=above_sma200,
+        perf_4w=perf_4w,
     )
 
 
@@ -217,6 +219,7 @@ def _hk_settings_default():
         "min_dollar_volume": 100_000_000,
         "min_adr_percent": 3.5,
         "min_rs_percentile_longs_3m": 90,
+        "ipo_min_perf_4w": 0.0,
     }
 
 
@@ -332,6 +335,63 @@ def test_filter_hk_ipo_threshold_zero_disables_entire_3m_gate():
     assert set(kept) == {"HK.LOW", "HK.MISS"}
     assert drops["rs_3m"] == 0
     assert drops["rs_3m_missing"] == 0
+
+
+def _short_history_ipo(n_rows, perf_4w):
+    # < 50 行: SMA50/SMA200 为 NaN (与 build_metrics_frame 一致), 只剩方向闸可拦
+    return pd.DataFrame.from_dict(
+        {"HK.NEW": _ipo_metrics_row(
+            n_rows=n_rows, perf_4w=perf_4w,
+            sma50=float("nan"), sma200=float("nan"),
+            above_sma50=False, above_sma200=False,
+        )},
+        orient="index",
+    )
+
+
+@pytest.mark.parametrize(
+    "n_rows, perf_4w, want_kept",
+    [
+        (21, -35.05, []),            # HKEX:625 2026-09-29: 上市 21 天, 4 周 -35%
+        (63, -0.01, []),             # 64 天线以下最后一天仍受闸
+        (30, 0.0, []),               # 严格大于: 持平不算
+        (30, 0.01, ["HK.NEW"]),
+        (20, float("nan"), []),      # 20 行算不出 perf_4w → 等到 21 行再评估
+    ],
+)
+def test_filter_hk_ipo_direction_gate_below_64_days(n_rows, perf_4w, want_kept):
+    kept, drops = filter_hk_ipo_candidates(
+        _short_history_ipo(n_rows, perf_4w),
+        rs_table_3m=None, hk_settings=_hk_settings_default(),
+    )
+    assert kept == want_kept
+    assert drops["perf_4w"] == (0 if want_kept else 1)
+
+
+def test_filter_hk_ipo_direction_gate_not_applied_from_64_days():
+    # n_rows=64 起由 3M RS 接管 — 4 周为负但 RS=95 的票保留
+    metrics = pd.DataFrame.from_dict(
+        {"HK.A": _ipo_metrics_row(
+            n_rows=64, perf_4w=-5.0, sma200=float("nan"), above_sma200=False,
+        )},
+        orient="index",
+    )
+    rs_table = pd.DataFrame({"rs_percentile": [95]}, index=["HK.A"])
+    kept, drops = filter_hk_ipo_candidates(
+        metrics, rs_table_3m=rs_table, hk_settings=_hk_settings_default()
+    )
+    assert kept == ["HK.A"]
+    assert drops["perf_4w"] == 0
+
+
+def test_filter_hk_ipo_direction_gate_off_when_key_unset():
+    settings = _hk_settings_default()
+    del settings["ipo_min_perf_4w"]
+    kept, drops = filter_hk_ipo_candidates(
+        _short_history_ipo(21, -35.05), rs_table_3m=None, hk_settings=settings
+    )
+    assert kept == ["HK.NEW"]
+    assert drops["perf_4w"] == 0
 
 
 def test_hk_rs_line_group_note():

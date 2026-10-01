@@ -23,6 +23,7 @@ adr_days = 20
 #   条件 RS 组    → 12M (min_rs_percentile_rs, 缺省继承 min_rs_percentile_longs) + 3M
 #   US Shorts    → 12M (min_rs_percentile_shorts, 缺省继承 min_rs_percentile_longs) + 3M
 #   US IPO(≥64天) → 仅 3M
+#   US IPO(<64天) → 无 RS, 改用方向闸 ipo_min_perf_4w
 min_rs_percentile        = 0   # Leaders 12M (≥80 = top 20%) # 80
 min_rs_percentile_longs  = 90    # Longs 6 组 12M (≥90 = top 10%); TheSetup 组内覆盖为 0
 min_rs_percentile_rs     = 0     # 条件 RS 组 12M 层已关闭; 只走下方 3M 单闸
@@ -34,6 +35,10 @@ min_market_cap = 300_000_000     # USD; = Finviz cap_smallover
 min_price      = 20.0            # USD; = Finviz sh_price_o20
 min_avg_volume = 500_000         # 20日股/天; = Finviz sh_avgvol_o500
 # min_dollar_volume / min_adr_percent 复用上方 [settings] 值
+# 方向闸: 不足 64 天的新股 (还没有 3M RS) 要求 perf_4w 严格大于此值 (%)。
+# 20 行时 perf_4w 算不出 → 当天不出, 21 行起评估。删除/注释此键 = 关闭。
+# 港股同名键在 [hk_settings]。
+ipo_min_perf_4w = 0.0
 
 # RS line 趋势 (TraderLion 式 RS line = 价/指数, vs 它自己的 EMA)。
 # 两条判据路径共用本段参数:
@@ -362,10 +367,14 @@ min_price               = 20.0            # HKD
 #   事件组 EarningsGap/HighVolume/GapUp → 仅 12M (min_rs_percentile_longs, ≙ 美股 Longs)
 #   Leaders / 条件 RS 组                → 仅 3M  (min_rs_percentile_longs_3m, ≙ 美股 Leaders/RS)
 #   HK IPO (≥64天)                      → 仅 3M (复用 min_rs_percentile_longs_3m)
+#   HK IPO (<64天)                      → 无 RS, 改用方向闸 ipo_min_perf_4w
 #   HK Shorts                           → 仅 3M ([hk_shorts].min_rs_percentile_3m, ≙ 美股 Shorts)
 # 任一键设 0 关闭对应层。
 min_rs_percentile_longs    = 90           # 事件组 12M (≥90 = top 10%)
 min_rs_percentile_longs_3m = 90           # Leaders/RS/IPO 3M (≥90 = top 10%)
+# HK IPO 方向闸: 不足 64 天的新股 (还没有 3M RS) 要求 perf_4w 严格大于此值 (%)。
+# 20 行时 perf_4w 算不出 → 当天不出, 21 行起评估。删除/注释此键 = 关闭。
+ipo_min_perf_4w         = 0.0
 hsi_rs_trigger          = -1.0            # HSI 当日跌幅 ≤ 此值则触发 RS 组
 
 # HK Shorts: 基于 HKEX 数据的做空筛选，输出 output/TV/HK/<date>_Shorts.txt。

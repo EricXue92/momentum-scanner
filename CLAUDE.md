@@ -143,6 +143,14 @@ local (throttle-prone) k-line fetch.
   yfinance batch in `filter_hk_shorts`). The 12M∩3M double gate is thus
   currently nowhere active (all knobs remain independently tunable).
 - Not gated: Morning Gap. IPO: conditional 3M only (≥ 64-day history).
+  **An IPO below 64 rows has no RS at all**, so both ladders carry a
+  direction gate instead: `perf_4w > ipo_min_perf_4w` (0.0, strict;
+  `drops['perf_4w']`; key in `[hk_settings]` for HK, `[settings]` for US) —
+  HKEX:625 2026-09-29 was emitted 21 days after listing at 4w -35%. NaN
+  `perf_4w` (exactly 20 rows) is **dropped, not kept**: the name isn't in the
+  master yet, and keeping it would let every IPO through ungated on its first
+  eligible day. HK re-evaluates it at 21 rows; a US name only comes back if it
+  passes a Finviz long-side screener again. Key unset = gate off.
 - **ETF 3M RS ranking** (`etf_rs.py`, `[etf_rs]` config): the fixed
   `[etf_rs.tickers]` table (ticker = 中文名, ~50 entries) is scored
   **locally** with the same 3M algorithm (`compute_us_rs_3m_table`, vs

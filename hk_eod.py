@@ -780,6 +780,9 @@ def filter_hk_ipo_candidates(
           ADR%   < min_adr_percent       → drops['adr']
       - if has SMA50: not above SMA50    → drops['sma50']
       - if has SMA200: not above SMA200  → drops['sma200']
+      - if n_rows < 64 and ipo_min_perf_4w is set:          (方向闸)
+          not perf_4w > ipo_min_perf_4w  → drops['perf_4w']
+          (NaN 也 drop: 20 行算不出 4 周涨幅, 等 21 行再评估)
       - if n_rows >= 64 and rs_table_3m is not None:        (3M RS 闸门)
           ticker not in rs_table_3m      → drops['rs_3m_missing']
           rs_percentile < threshold      → drops['rs_3m']
@@ -797,6 +800,7 @@ def filter_hk_ipo_candidates(
     ipo_min_dvol = hk_settings.get("min_dollar_volume", 100_000_000)
     ipo_min_adr = hk_settings.get("min_adr_percent", 3.5)
     rs_3m_threshold = int(hk_settings.get("min_rs_percentile_longs_3m", 90))
+    ipo_min_perf_4w = hk_settings.get("ipo_min_perf_4w")  # 未设 = 关闭方向闸
 
     kept: list[str] = []
     drops: dict[str, int] = {
@@ -804,6 +808,7 @@ def filter_hk_ipo_candidates(
         "cap": 0, "price": 0,
         "avg_vol": 0, "dvol": 0, "adr": 0,
         "sma50": 0, "sma200": 0,
+        "perf_4w": 0,
         "rs_3m": 0, "rs_3m_missing": 0,
     }
 
@@ -837,6 +842,16 @@ def filter_hk_ipo_candidates(
             continue
         if pd.notna(row["sma200"]) and not bool(row["above_sma200"]):
             drops["sma200"] += 1
+            continue
+        # 方向闸 — < 64 行的票没有 3M RS (多数连 SMA50 也没有), 阶梯里再无
+        # 任何强弱判断: HKEX:625 2026-09-29 上市 21 天、4 周 -35% 照样放行。
+        # NaN (n_rows=20) 比较为 False → drop; 未进 master, 次日重新评估。
+        if (
+            n < 64
+            and ipo_min_perf_4w is not None
+            and not row["perf_4w"] > ipo_min_perf_4w
+        ):
+            drops["perf_4w"] += 1
             continue
         # 3M RS gate — 仅当 n_rows >= 64 (即 3M RS 算法可计算)、表存在、且
         # 阈值 > 0 时触发。threshold=0 关闭整个闸门 (与 filter_by_rs 行为一致)。
@@ -1207,8 +1222,9 @@ def run_hk_eod(
     # enough history (the long-side master eod_seen_HK.txt is separate).
     #
     # 2026-05-21 tightening: added (1) hard minimum 20 trading days, and
-    # (2) 3M RS >= min_rs_percentile_longs_3m at len(df) >= 64. See
-    # filter_hk_ipo_candidates for the full ladder.
+    # (2) 3M RS >= min_rs_percentile_longs_3m at len(df) >= 64.
+    # 2026-10-01: direction gate perf_4w > ipo_min_perf_4w below 64 rows.
+    # See filter_hk_ipo_candidates for the full ladder.
     ipo_codes, ipo_dropped = filter_hk_ipo_candidates(
         metrics, rs_table_3m, hk_settings
     )
@@ -1217,12 +1233,16 @@ def run_hk_eod(
     ipo_seen = load_seen(ipo_seen_path)
     ipo_tv = sorted(_to_tv(c) for c in ipo_codes)
     rs_3m_threshold = int(hk_settings.get("min_rs_percentile_longs_3m", 90))
+    ipo_min_perf_4w = hk_settings.get("ipo_min_perf_4w")
+    perf_4w_note = (
+        f"+if <64d: perf_4w>{ipo_min_perf_4w}, " if ipo_min_perf_4w is not None else ""
+    )
     logger.info(
         f"[HK IPO] {len(ipo_codes)} candidates after conditional filters "
         f"(>=20d hist; cap>={hk_settings.get('min_market_cap', 300_000_000):,.0f}, "
         f"price>={hk_settings.get('min_price', 20.0)}, "
         f"+if 20d: avg_vol/dvol/ADR, +if 50d: SMA50, +if 200d: SMA200, "
-        f"+if 64d: RS_3M>={rs_3m_threshold}); "
+        f"{perf_4w_note}+if 64d: RS_3M>={rs_3m_threshold}); "
         f"raw metrics<253: {int((metrics['n_rows'] < 253).sum())}; "
         f"dropped: {ipo_dropped}"
     )
