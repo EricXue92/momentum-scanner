@@ -82,16 +82,16 @@ ADR%(Kullamägi 式)衡量一只股票**当下**的波动幅度;它取代了过�
 
 ### 各组 RS 闸
 
-口径:**事件组看长期强度(12M ≥ 90),其余看近期强度(3M ≥ 90)。** 每组一个独立旋钮,设 `0` 即关闭该层。
+口径:**事件组看长期强度(12M ≥ 90),其余看近期强度(3M ≥ 95)。** 每组一个独立旋钮,设 `0` 即关闭该层。
 
 | 分组                                                              | 12M 闸                             | 3M 闸                           |
 | ----------------------------------------------------------------- | ---------------------------------- | ------------------------------- |
 | Longs: EarningsGap / HighVolume / GapUp / NewHigh52W / TopGainers | `min_rs_percentile_longs` = **90** | —                               |
 | Longs: TheSetup                                                   | 关(组内 `min_rs_percentile = 0`)   | —                               |
-| Leaders                                                           | `min_rs_percentile` = 0(关)        | `min_rs_percentile_3m` = **90** |
-| 条件 RS 组                                                        | `min_rs_percentile_rs` = 0(关)     | **90**                          |
-| 美股 Shorts                                                       | `min_rs_percentile_shorts` = 0(关) | **90**                          |
-| 美股 IPO(历史 ≥ 64 天)                                            | —                                  | **90**                          |
+| Leaders                                                           | `min_rs_percentile` = 0(关)        | `min_rs_percentile_3m` = **95** |
+| 条件 RS 组                                                        | `min_rs_percentile_rs` = 0(关)     | **95**                          |
+| 美股 Shorts                                                       | `min_rs_percentile_shorts` = 0(关) | **95**                          |
+| 美股 IPO(历史 ≥ 64 天)                                            | —                                  | **95**                          |
 | Morning Gap、ETF 排名                                             | —                                  | —                               |
 
 - RS 表里**查不到**的 ticker 保留,不丢弃。
@@ -113,7 +113,7 @@ Oliver Kell 的动量/突破 setup。6 组互斥——靠前的组优先,每只 
 
 ### Leaders
 
-长期趋势领头羊:Small Cap+、Avg Vol > 500K、Price > $20、站上 SMA50 与 SMA200、共用闸门、RS 3M ≥ 90。5 个涨幅窗口合并写入同一个 `Leaders.txt`:
+长期趋势领头羊:Small Cap+、Avg Vol > 500K、Price > $20、站上 SMA50 与 SMA200、共用闸门、RS 3M ≥ 95。5 个涨幅窗口合并写入同一个 `Leaders.txt`:
 
 | 4 周   | 13 周  | 26 周   | YTD     | 52 周   |
 | ------ | ------ | ------- | ------- | ------- |
@@ -121,13 +121,13 @@ Oliver Kell 的动量/突破 setup。6 组互斥——靠前的组优先,每只 
 
 ### 条件 RS 组
 
-弱市里扛得住的股票。**仅当 SPY 与 QQQ 当日都跌 ≥ 1.0% 时才运行。** 过滤:Small Cap+、Avg Vol > 500K、Price > $20、Day Up、站上 SMA50 与 SMA200、共用闸门、RS 3M ≥ 90。
+弱市里扛得住的股票。**仅当 SPY 与 QQQ 当日都跌 ≥ 1.0% 时才运行。** 过滤:Small Cap+、Avg Vol > 500K、Price > $20、Day Up、站上 SMA50 与 SMA200、共用闸门、RS 3M ≥ 95。
 
 ### 美股 Shorts
 
 Kullamägi 的抛物线冲顶做空 setup。每天重新检出(不参与任何去重)。
 
-1. **Finviz:** 价格高于 SMA20 20%+、站上 SMA50、Avg Vol > 1M、价格 > $5、市值 > $50M → 再用 **RS 3M ≥ 90** 缩小名单。
+1. **Finviz:** 价格高于 SMA20 20%+、站上 SMA50、Avg Vol > 1M、价格 > $5、市值 > $50M → 再用 **RS 3M ≥ 95** 缩小名单。
 2. **yfinance + Futu 市值**,依次过:
 
 | 过滤                | 阈值                                                                               |
@@ -150,7 +150,7 @@ Kullamägi 的抛物线冲顶做空 setup。每天重新检出(不参与任何�
 | 日均量 / Dollar Volume | ≥ 500K / ≥ $100M | ≥ 500K / ≥ HK$100M | ≥ 20 天  |
 | ADR%                   | ≥ 4.0%           | ≥ 3.0%             | ≥ 20 天  |
 | 站上 SMA50             | ✓                | ✓                  | ≥ 50 天  |
-| RS 3M                  | ≥ 90(对 SPY)     | ≥ 90(对 HSI)       | ≥ 64 天  |
+| RS 3M                  | ≥ 95(对 SPY)     | ≥ 95(对 HSI)       | ≥ 64 天  |
 | 站上 SMA200            | ✓                | ✓                  | ≥ 200 天 |
 
 - 美股新股不在 RS universe 里,所以 3M 分数在本地计算,再排进云端表的 `raw_score` 分布里取百分位。
@@ -222,7 +222,7 @@ Kullamägi 的抛物线冲顶做空 setup。每天重新检出(不参与任何�
 | ADR%                 | ≥ 3.0%                                           | 港股蓝筹波动率结构性偏低 |
 | 价格                 | ≥ HK$20                                          |                          |
 | 站上 SMA50 与 SMA200 | 两条都要                                         |                          |
-| RS(对 HSI)           | 事件组 **12M ≥ 90**; Leaders / RS 组 **3M ≥ 90** | 与美股的分工一致         |
+| RS(对 HSI)           | 事件组 **12M ≥ 90**; Leaders / RS 组 **3M ≥ 95** | 与美股的分工一致         |
 
 ### 港股长线组
 
@@ -242,7 +242,7 @@ Kullamägi 的抛物线冲顶做空 setup。每天重新检出(不参与任何�
 
 ### 港股 Shorts
 
-与美股 Shorts 相同,换成 HKD:RS 3M ≥ 90(对 HSI,先筛 universe)、市值 ≥ HK$50M、日均量 ≥ 1M 股/天、dollar volume ≥ HK$50M、ADR% ≥ 4.0%、涨幅按市值分级 50% / 200% / 300%(≥ HK$10B / HK$2B–10B / HK$50M–2B)、连续上涨 ≥ 3 天。配置:`[hk_shorts]`。
+与美股 Shorts 相同,换成 HKD:RS 3M ≥ 95(对 HSI,先筛 universe)、市值 ≥ HK$50M、日均量 ≥ 1M 股/天、dollar volume ≥ HK$50M、ADR% ≥ 4.0%、涨幅按市值分级 50% / 200% / 300%(≥ HK$10B / HK$2B–10B / HK$50M–2B)、连续上涨 ≥ 3 天。配置:`[hk_shorts]`。
 
 ### 港股 IPO
 

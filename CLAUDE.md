@@ -123,7 +123,11 @@ Output: `output/TV/{US,HK}/` (TradingView, comma-sep) mirrored to
 
 Percentile tables are computed daily on **GitHub Actions** and published as CSVs;
 the local pipeline only fetches them. US: `Fred6725/rs-log` (12M, vs SPY) +
-`data/us_rs_3m/` (3M). HK: `data/hk_rs/` (12M+3M, vs HSI). Defaults 90, set 0 to
+`data/us_rs_3m/` (3M). HK: `data/hk_rs/` (12M+3M, vs HSI). Thresholds: 12M tiers
+90, 3M tiers 95 in both markets since 2026-10-02 (Leaders / conditional RS /
+Shorts / IPO ≥ 64 rows; US `[settings].min_rs_percentile_3m`, HK
+`[hk_settings].min_rs_percentile_longs_3m` + `[hk_shorts].min_rs_percentile_3m`;
+the code-side fallback when a key is unset is still 90); set 0 to
 disable a tier. The HK metrics frame is now also cloud-published (`data/hk_metrics/`,
 same workflow) and fetched locally via `hk_metrics.build_hk_metrics_cloud`, so
 discovery runs on the full universe on the happy path; a cloud miss falls back to the
@@ -144,8 +148,9 @@ local (throttle-prone) k-line fetch.
   currently nowhere active (all knobs remain independently tunable).
 - Not gated: Morning Gap. IPO: conditional 3M only (≥ 64-day history).
   **An IPO below 64 rows has no RS at all**, so both ladders carry a
-  direction gate instead: `perf_4w > ipo_min_perf_4w` (0.0, strict;
-  `drops['perf_4w']`; key in `[hk_settings]` for HK, `[settings]` for US) —
+  direction gate instead: `perf_4w > ipo_min_perf_4w` (strict;
+  `drops['perf_4w']`; key in `[hk_settings]` for HK, `[settings]` for US;
+  both 20.0 since 2026-10-02, was 0.0) —
   HKEX:625 2026-09-29 was emitted 21 days after listing at 4w -35%. NaN
   `perf_4w` (exactly 20 rows) is **dropped, not kept**: the name isn't in the
   master yet, and keeping it would let every IPO through ungated on its first
