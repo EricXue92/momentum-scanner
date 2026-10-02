@@ -85,12 +85,15 @@ consecutive_days = 2
 # 写 output/TV/US/<date>_ETF_rs.txt: 每行一只 `TICKER - 中文名`, 最强在最上面。
 # 排名快照: 同日重跑覆盖, 不进 eod_seen 去重, 不镜像 Webull, 不同步 Futu/TV。
 # 带分数的完整表在 EOD 日志里。手动重跑: `uv run main.py --mode etf-rs`。
+# 同一步还会生成走势页 output/Reports/ETF/etf_rs_trend.html (单文件, 每次覆盖):
+# 用同一批 K 线重算每个交易日的 RS 评分 / 名次 / 超额收益, 当日前 chart_top_n 画粗线。
 # 名单在 [etf_rs.tickers] 表里维护: 左边 ticker, 右边中文名 (增删改这里即可)。
 # 中文名完全相同的几只视为同一品种, 文件里只显示排名最高的那一只
 # (如 GDXU / NUGT 同为"黄金矿业 杠杆做多"); 想让两只都显示就把名字写得不同。
 [etf_rs]
 enabled = true
 benchmark = "SPY"
+chart_top_n = 20          # 走势页里画粗线的名次数 (按最新一天排名)
 
 [etf_rs.tickers]
 # --- 美股行业 / 主题 ---

@@ -21,6 +21,10 @@ overwrites, no eod_seen dedup, no Webull mirror, no Futu/TV sync. The scored
 table (rank / 3M relative score / percentile) goes to the log. Aged out by
 the generic ``TV/US`` 5-day cleanup rule.
 
+The same klines also feed the trend page ``Reports/ETF/etf_rs_trend.html``
+(``etf_rs_chart``: per-day rank / score history recomputed from closes, top
+``chart_top_n`` drawn thick) — a soft step after the ranking is written.
+
 Soft-fail by design: runs as a side-step of us-eod; any failure logs a
 warning and leaves the EOD exit code untouched.
 """
@@ -43,9 +47,10 @@ _STEM = "ETF_rs"
 
 
 def _fetch_klines(tickers: list[str]) -> dict[str, pd.DataFrame]:
-    """6mo daily closes via the shared retrying yfinance fetcher.
-    Monkeypatched in tests."""
-    return us_rs_3m.fetch_us_klines_yf(tickers, period="6mo")
+    """1y daily closes via the shared retrying yfinance fetcher. The ranking
+    itself only needs the last 64 bars; the rest is the trend chart's
+    history (``etf_rs_chart``, ~190 scorable days). Monkeypatched in tests."""
+    return us_rs_3m.fetch_us_klines_yf(tickers, period="1y")
 
 
 def _holdings(cfg_holdings) -> dict[str, str]:
@@ -236,7 +241,7 @@ def run_etf_rs(cfg: dict, output_dir: Path, today: date) -> Path | None:
         return None
     etfs = [t for t in names if t != benchmark]
 
-    logger.info(f"[{_LABEL}] Fetching 6mo closes for {len(etfs)} ETFs + {benchmark}...")
+    logger.info(f"[{_LABEL}] Fetching 1y closes for {len(etfs)} ETFs + {benchmark}...")
     klines = _fetch_klines(etfs + [benchmark])
     if not klines:
         logger.warning(f"[{_LABEL}] yfinance returned nothing; no ranking written today")
@@ -266,4 +271,14 @@ def run_etf_rs(cfg: dict, output_dir: Path, today: date) -> Path | None:
         return None
     _log_table(table, names, prev_ranks)
     logger.info(f"[{_LABEL}] {len(table)} ETFs ranked -> {out}")
+    # Trend page (Reports/ETF/etf_rs_trend.html): same klines, same order as
+    # the .txt. Soft — a render failure must not cost the ranking.
+    try:
+        import etf_rs_chart
+        etf_rs_chart.write_trend_chart(
+            klines, list(table.index), benchmark, names, holdings, output_dir, today,
+            top_n=int(cfg.get("chart_top_n", 20)),
+        )
+    except Exception as e:
+        logger.warning(f"[{_LABEL}] trend chart failed, ranking unaffected: {e}")
     return out

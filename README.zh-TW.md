@@ -177,6 +177,7 @@ Kullamägi 的拋物線衝頂做空 setup。每天重新檢出(不參與任何�
 
 - **給人看的,不是 TradingView 導入文件**——它是 `TV/US/` 裡唯一非逗號分隔的 `.txt`。帶分數的完整表(排名 / 分數 / 百分位)在 EOD 日誌裡。
 - **維護:** 增刪改 `[etf_rs.tickers]`(`TICKER = "中文名"`)即可調整名單。持倉來自靜態、手工維護的 `[etf_rs.holdings]` 表(不走 API 刷新;沒配的票不顯示持倉段)。
+- **走勢頁:** 同一步還會寫 `output/Reports/ETF/etf_rs_trend.html`(單個自包含檔案,每次覆蓋)。用同一批 K 線重算每個歷史交易日的分數(約 190 天,無狀態檔),不受 `.txt` 5 天保留期限制。Y 軸可在 0–99 RS 評分(預設,標出 RS 90 橫線)、名次、3M 超額收益之間切換;最新一天前 `chart_top_n`(20)名畫粗線,懸停或右側列表顯示每隻 ETF 的前五大持倉。歷史按當前名單和復權價重算,過去某天可能與當時 `.txt` 差一兩位。 頁面同時發佈在 <https://ericxue92.github.io/momentum-scanner/>:GitHub Actions 工作流(`etf_rs_page.yml`)在每個美股收盤後於雲端重建並部署到 GitHub Pages,不依賴本機。
 - **同名即同一品種:** 中文名完全相同的 ticker 只顯示最強的一隻(曾經的 GDXU / NUGT 即是一例;當前表裡已無同名對,規則保留);被隱藏的會列在日誌裡。
 - 僅為排名快照:同日重跑直接覆蓋;不去重、不鏡像 Webull、不同步 Futu/TV。
 

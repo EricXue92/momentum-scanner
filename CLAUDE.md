@@ -177,7 +177,26 @@ local (throttle-prone) k-line fetch.
   snapshot only: same-day rerun overwrites, no `eod_seen` dedup, no Webull
   mirror, no Futu/TV sync; the report ignores it (unknown group stem). Runs
   as a soft side-step at the end of us-eod / eod (also `--mode etf-rs`);
-  aged out by the generic `TV/US` 5-day rule.
+  aged out by the generic `TV/US` 5-day rule. **Trend page**
+  (`etf_rs_chart.py`): the same run then writes
+  `output/Reports/ETF/etf_rs_trend.html` — **undated, overwritten** (it
+  carries its own history; no `_RETENTION_RULES` entry matches it, by
+  design). History is **recomputed from the run's klines**, not read from
+  old `.txt` (they hold no scores and age out in 5 days) — which is why
+  `_fetch_klines` pulls `1y` although the ranking needs 64 bars. Each day's
+  score = `rank_etfs` on klines truncated to that day (tests pin this), with
+  today's ticker list + adjusted closes, so a past day may sit a place off
+  that day's `.txt`. Y = 0-99 percentile (within the ETF set → RS ≥ 90 is
+  always ~5 of 52) / rank / raw excess return; top `chart_top_n` (20) thick.
+  Soft inside `run_etf_rs`: a render failure never costs the `.txt`.
+  **Also published to GitHub Pages** (https://ericxue92.github.io/momentum-scanner/):
+  `.github/workflows/etf_rs_page.yml` rebuilds it in the cloud
+  (`scripts/build_etf_rs_page.py` → `_site/index.html`, deployed as a Pages
+  artifact — **no HTML is committed**). Triggers: `workflow_run` after the
+  launchd-dispatched US 3M RS workflow (the reliable daily tick), a backup
+  cron, manual dispatch. The build exits 1 when no page was produced so an
+  outage keeps yesterday's page live instead of deploying nothing. The local
+  copy under `output/Reports/ETF/` is independent of it.
 - **yfinance single-ticker frames:** `group_by="ticker"` returns a (ticker,
   field) MultiIndex even for ONE ticker (yfinance 1.x); every `single` branch
   indexes `data["Close"]` flat, so each download site wraps the result in
