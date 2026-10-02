@@ -82,16 +82,16 @@ ADR% (Kullamägi-style) measures how much a stock moves _now_; it replaced the o
 
 ### RS Gates by Group
 
-Doctrine: **event groups check long-term strength (12M ≥ 90); everything else checks recent strength (3M ≥ 90).** One independent knob per group; `0` disables a layer.
+Doctrine: **event groups check long-term strength (12M ≥ 90); everything else checks recent strength (3M ≥ 95).** One independent knob per group; `0` disables a layer.
 
 | Group                                                             | 12M gate                                | 3M gate                         |
 | ----------------------------------------------------------------- | --------------------------------------- | ------------------------------- |
 | Longs: EarningsGap / HighVolume / GapUp / NewHigh52W / TopGainers | `min_rs_percentile_longs` = **90**      | —                               |
 | Longs: TheSetup                                                   | off (per-group `min_rs_percentile = 0`) | —                               |
-| Leaders                                                           | `min_rs_percentile` = 0 (off)           | `min_rs_percentile_3m` = **90** |
-| Conditional RS                                                    | `min_rs_percentile_rs` = 0 (off)        | **90**                          |
-| US Shorts                                                         | `min_rs_percentile_shorts` = 0 (off)    | **90**                          |
-| US IPO (≥ 64 days of history)                                     | —                                       | **90**                          |
+| Leaders                                                           | `min_rs_percentile` = 0 (off)           | `min_rs_percentile_3m` = **95** |
+| Conditional RS                                                    | `min_rs_percentile_rs` = 0 (off)        | **95**                          |
+| US Shorts                                                         | `min_rs_percentile_shorts` = 0 (off)    | **95**                          |
+| US IPO (≥ 64 days of history)                                     | —                                       | **95**                          |
 | Morning Gap, ETF ranking                                          | —                                       | —                               |
 
 - Tickers **missing** from an RS table are kept, not dropped.
@@ -113,7 +113,7 @@ Oliver Kell's momentum/breakout setups. Six mutually exclusive groups — the ea
 
 ### Leaders
 
-Long-term trend leaders: Small Cap+, Avg Vol > 500K, Price > $20, above SMA50 & SMA200, shared gates, RS 3M ≥ 90. Five performance windows merged into one `Leaders.txt`:
+Long-term trend leaders: Small Cap+, Avg Vol > 500K, Price > $20, above SMA50 & SMA200, shared gates, RS 3M ≥ 95. Five performance windows merged into one `Leaders.txt`:
 
 | 4 weeks | 13 weeks | 26 weeks | YTD     | 52 weeks |
 | ------- | -------- | -------- | ------- | -------- |
@@ -121,13 +121,13 @@ Long-term trend leaders: Small Cap+, Avg Vol > 500K, Price > $20, above SMA50 & 
 
 ### Conditional RS
 
-Stocks holding up in a weak tape. **Runs only when SPY and QQQ are both down ≥ 1.0% on the day.** Filters: Small Cap+, Avg Vol > 500K, Price > $20, Day Up, above SMA50 & SMA200, shared gates, RS 3M ≥ 90.
+Stocks holding up in a weak tape. **Runs only when SPY and QQQ are both down ≥ 1.0% on the day.** Filters: Small Cap+, Avg Vol > 500K, Price > $20, Day Up, above SMA50 & SMA200, shared gates, RS 3M ≥ 95.
 
 ### US Shorts
 
 Kullamägi's parabolic blow-off setup. Re-detected daily (excluded from all dedup).
 
-1. **Finviz:** price 20%+ above SMA20, above SMA50, Avg Vol > 1M, price > $5, Cap > $50M → then **RS 3M ≥ 90** prunes the list.
+1. **Finviz:** price 20%+ above SMA20, above SMA50, Avg Vol > 1M, price > $5, Cap > $50M → then **RS 3M ≥ 95** prunes the list.
 2. **yfinance + Futu market cap**, in order:
 
 | Filter              | Threshold                                                                                       |
@@ -150,7 +150,7 @@ An auto-collected sidecar: candidates that passed a Longs/Leaders/RS Finviz scre
 | Avg volume / Dollar volume | ≥ 500K / ≥ $100M  | ≥ 500K / ≥ HK$100M | ≥ 20 days   |
 | ADR%                       | ≥ 4.0%            | ≥ 3.0%             | ≥ 20 days   |
 | Above SMA50                | ✓                 | ✓                  | ≥ 50 days   |
-| RS 3M                      | ≥ 90 (vs SPY)     | ≥ 90 (vs HSI)      | ≥ 64 days   |
+| RS 3M                      | ≥ 95 (vs SPY)     | ≥ 95 (vs HSI)      | ≥ 64 days   |
 | Above SMA200               | ✓                 | ✓                  | ≥ 200 days  |
 
 - US new issues aren't in the RS universe, so their 3M score is computed locally and ranked into the cloud table's `raw_score` distribution.
@@ -222,7 +222,7 @@ Shared by all five long-side groups (`[hk_settings]`):
 | ADR%                 | ≥ 3.0%                                              | HK blue chips are structurally less volatile |
 | Price                | ≥ HK$20                                             |                                              |
 | Above SMA50 & SMA200 | both                                                |                                              |
-| RS (vs HSI)          | event groups **12M ≥ 90**; Leaders / RS **3M ≥ 90** | mirrors the US split                         |
+| RS (vs HSI)          | event groups **12M ≥ 90**; Leaders / RS **3M ≥ 95** | mirrors the US split                         |
 
 ### HK Long-Side Groups
 
@@ -242,7 +242,7 @@ Priority-ordered; each ticker enters at most one file per day.
 
 ### HK Shorts
 
-Same as US Shorts in HKD: RS 3M ≥ 90 (vs HSI, universe pre-filter), cap ≥ HK$50M, avg vol ≥ 1M shares/day, dollar volume ≥ HK$50M, ADR% ≥ 4.0%, performance 50% / 200% / 300% by cap tier (≥ HK$10B / HK$2B–10B / HK$50M–2B), ≥ 3 consecutive up days. Config: `[hk_shorts]`.
+Same as US Shorts in HKD: RS 3M ≥ 95 (vs HSI, universe pre-filter), cap ≥ HK$50M, avg vol ≥ 1M shares/day, dollar volume ≥ HK$50M, ADR% ≥ 4.0%, performance 50% / 200% / 300% by cap tier (≥ HK$10B / HK$2B–10B / HK$50M–2B), ≥ 3 consecutive up days. Config: `[hk_shorts]`.
 
 ### HK IPO
 
