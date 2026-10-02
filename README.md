@@ -78,7 +78,7 @@ Applied after Finviz discovery, on yfinance daily bars. Thresholds live in `[set
 
 ADR% (Kullamägi-style) measures how much a stock moves _now_; it replaced the old Finviz `beta > 1.5` filter, which penalised in-play mid/large caps.
 
-**Big-gap bypass (TheSetup / EarningsGap only):** when the day's opening gap is ≥ 10%, the ADR% floor relaxes to 3.0% — a low-volatility large cap's earnings gap (CRM 2026-08-27: gap +11.9%, ADR% 3.74) would otherwise never surface. Per-group keys `adr_bypass_gap_percent` / `adr_bypass_min_percent` in `[[longs]]`; remove them to disable.
+**Big-gap bypass (TheSetup / EarningsGap only):** when the day's opening gap is ≥ 10%, the ADR% floor relaxes to 3.0% — a low-volatility large cap's earnings gap (CRM 2026-08-27: gap +11.9%, ADR% 3.74) would otherwise never surface. TheSetup itself requires a gap ≥ 10%, so its effective ADR% floor is 3.0%. Per-group keys `adr_bypass_gap_percent` / `adr_bypass_min_percent` in `[[longs]]`; remove them to disable.
 
 ### RS Gates by Group
 
@@ -92,6 +92,7 @@ Doctrine: **event groups check long-term strength (12M ≥ 90); everything else 
 | Conditional RS                                                    | `min_rs_percentile_rs` = 0 (off)        | **95**                          |
 | US Shorts                                                         | `min_rs_percentile_shorts` = 0 (off)    | **95**                          |
 | US IPO (≥ 64 days of history)                                     | —                                       | **95**                          |
+| US IPO (< 64 days of history)                                     | —                                       | no RS — 4-week gain > 20%       |
 | Morning Gap, ETF ranking                                          | —                                       | —                               |
 
 - Tickers **missing** from an RS table are kept, not dropped.
@@ -102,14 +103,14 @@ Doctrine: **event groups check long-term strength (12M ≥ 90); everything else 
 
 Oliver Kell's momentum/breakout setups. Six mutually exclusive groups — the earlier group wins, so a ticker lands in at most one Longs file per day. All share: Small Cap+, Avg Vol > 500K, above SMA50 & SMA200, plus the shared gates.
 
-| Priority | Group         | Additional filters                                                                                               |
-| -------- | ------------- | ---------------------------------------------------------------------------------------------------------------- |
+| Priority | Group         | Additional filters                                                                                                |
+| -------- | ------------- | ----------------------------------------------------------------------------------------------------------------- |
 | 0        | `TheSetup`    | Price > $10, Gap Up 10%+, Rel Vol ≥ 3× 20-day avg (yfinance). **No RS gate** — the heavy-volume gap is the signal |
-| 1        | `EarningsGap` | Price > $20, Earnings Today, Rel Vol > 1.5, Gap Up 5%+                                                           |
-| 2        | `HighVolume`  | Price > $20, Day Up, Rel Vol ≥ 3× 20-day avg (yfinance)                                                          |
-| 3        | `GapUp`       | Price > $20, Gap Up 3%+                                                                                          |
-| 4        | `NewHigh52W`  | Price > $20, New 52-week High                                                                                    |
-| 5        | `TopGainers`  | Price > $20, Finviz signal Top Gainers                                                                           |
+| 1        | `EarningsGap` | Price > $20, Earnings Today, Rel Vol > 1.5, Gap Up 5%+                                                            |
+| 2        | `HighVolume`  | Price > $20, Day Up, Rel Vol ≥ 3× 20-day avg (yfinance)                                                           |
+| 3        | `GapUp`       | Price > $20, Gap Up 3%+                                                                                           |
+| 4        | `NewHigh52W`  | Price > $20, New 52-week High                                                                                     |
+| 5        | `TopGainers`  | Price > $20, Finviz signal Top Gainers                                                                            |
 
 ### Leaders
 
@@ -150,9 +151,11 @@ An auto-collected sidecar: candidates that passed a Longs/Leaders/RS Finviz scre
 | Avg volume / Dollar volume | ≥ 500K / ≥ $100M  | ≥ 500K / ≥ HK$100M | ≥ 20 days   |
 | ADR%                       | ≥ 4.0%            | ≥ 3.0%             | ≥ 20 days   |
 | Above SMA50                | ✓                 | ✓                  | ≥ 50 days   |
+| 4-week gain                | > 20%             | > 20%              | < 64 days   |
 | RS 3M                      | ≥ 95 (vs SPY)     | ≥ 95 (vs HSI)      | ≥ 64 days   |
 | Above SMA200               | ✓                 | ✓                  | ≥ 200 days  |
 
+- **Direction gate below 64 days:** a listing that young has no 3M RS yet, so its 4-week gain must be strictly above 20% (`ipo_min_perf_4w`, in `[settings]` for US and `[hk_settings]` for HK; remove the key to disable). At exactly 20 days the 4-week gain can't be computed, so the name is not emitted that day.
 - US new issues aren't in the RS universe, so their 3M score is computed locally and ranked into the cloud table's `raw_score` distribution.
 - A ticker found in the 12M RS table has ≥ 12 months of history and can't be an IPO — it is removed from the bucket (transient yfinance gap).
 - Own master `eod_seen_IPO.txt`, so a graduated name still enters its proper group later. Output: `<date>_IPO.txt`, Futu group `IPO`.
@@ -167,14 +170,15 @@ A daily sector / theme rotation view: a fixed list of ~50 ETFs (US sectors and t
 
 - **Scoring:** the same 3M RS formula as stocks (`0.5·R21 + 0.3·R42 + 0.2·R63`, relative to SPY). The percentile is **within the ETF list**, not the stock universe.
 - **When:** a soft step at the end of every `us-eod` run (a failure never affects EOD); rerun alone with `--mode etf-rs`. Computed locally — one yfinance batch, no cloud step.
-- **Output:** `output/TV/US/<date>_ETF_rs.txt`, one ETF per line, **strongest first**, as `N. TICKER - name | top-5 holdings` (`N.` = rank):
+- **Output:** `output/TV/US/<date>_ETF_rs.txt`, one ETF per line, **strongest first**, as `N. TICKER rank-change - name | top-5 holdings` (`N.` = rank):
 
   ```
-  1. IBIT - 比特币 | 不适用: 主要资产为比特币
-  2. ARKG - 基因组革命 | TXG、TWST、TEM、CRSP、PSNL
-  3. USO - 原油 | 不适用: 原油期货及现金 / 国债抵押品
+  1. BWET = - 油轮运费期货 | 不适用: 油轮运费期货及现金抵押品
+  2. IBIT 🟢↑1 - 比特币 | 不适用: 主要资产为比特币
+  3. ARKG 🔴↓1 - 基因组革命 | TXG、TWST、TEM、CRSP、PSNL
   ```
 
+- **Rank change:** the marker after the ticker compares with the most recent earlier day's file: `🟢↑N` up N places, `🔴↓N` down N, `=` unchanged, `新` new to the list. A same-day rerun still compares with the previous day; with no earlier file (first run, or a gap longer than the 5-day retention) the marker is omitted.
 - **Human-readable, not a TradingView import** — the only non-comma `.txt` in `TV/US/`. The full scored table (rank / score / percentile) goes to the EOD log.
 - **Maintenance:** edit `[etf_rs.tickers]` (`TICKER = "name"`) to change the list. Holdings come from the static, hand-maintained `[etf_rs.holdings]` table (no API refresh; missing entry → segment omitted).
 - **Trend page:** the same step also writes `output/Reports/ETF/etf_rs_trend.html` (one self-contained file, overwritten every run). It recomputes each past trading day's score from the same klines (~190 days, no state file), so it is not limited by the 5-day `.txt` retention. Y axis switches between the 0–99 RS percentile (default, RS 90 line marked), rank, and the raw 3M excess return; the latest top `chart_top_n` (20) are drawn thick, and hovering / the side list shows each ETF's top-5 holdings. History uses today's ticker list and adjusted closes, so a past day can sit a place or two off that day's `.txt`. The page is also published at <https://ericxue92.github.io/momentum-scanner/>: a GitHub Actions workflow (`etf_rs_page.yml`) rebuilds it in the cloud after each US close and deploys it to GitHub Pages, independent of the local machine.
@@ -238,7 +242,7 @@ Priority-ordered; each ticker enters at most one file per day.
 
 - **Data:** the metrics frame and RS tables are fetched from the cloud (`data/hk_metrics/`, `data/hk_rs/`); a cloud miss falls back to a local yfinance fetch.
 - **Data-day rule:** only the 20:00 slot uses today's close; earlier runs trim today's incomplete bar and skip the HSI-triggered RS group. Weekend reruns map to the previous Friday.
-- **OpenD:** market caps and the HSI trigger come from Futu. With OpenD offline the run still completes, but the cap gate filters everything out.
+- **OpenD:** market caps and the HSI trigger come from Futu. With OpenD offline the run still completes, but the cap gate filters everything out. A high-priority ntfy alert is pushed (once per day).
 
 ### HK Shorts
 
@@ -285,7 +289,7 @@ The cloud CSVs also carry `rs_below_ma` / `rs_days_below_ma` / `rs_frac_below_ma
 
 Two pruners can shrink the US master so weakened names may re-qualify later; both back it up first:
 
-- **SMA50 auto-prune** — at the top of every `us-eod`: a close below SMA50 for 2 consecutive completed days **and** a latest close below the prior close (still declining; a rebound under the line is kept) → removed. Soft-fail: a yfinance outage skips the prune; missing/short-history tickers are kept. Config: `[sma50_prune]`.
+- **SMA50 auto-prune** — at the top of every `us-eod`: a close below SMA50 for 2 consecutive completed days **and** a latest close below the prior close (still declining; a rebound under the line is kept) → removed. Soft-fail: a yfinance outage skips the prune; missing/short-history tickers are kept. The day's removed names are written to `output/TV/US/<date>_SMA50Pruned.txt` (comma-separated; no file when nothing was pruned; a same-day rerun merges into it). Config: `[sma50_prune]`.
 - **RS-line audit** — manual, see [above](#rs-line-audit-and-daily-top-10).
 
 **Master line order (US and HK):** `eod_seen_US.txt` and `eod_seen_HK.txt` are re-sorted by **3M RS, strongest first**, on every `us-eod` / `hk-eod` (after the last group writes to the master), so the top of the file is the strongest of the names already surfaced. Tickers without a 3M score go last, alphabetically. US ranks by the raw 3M score; the HK cloud table publishes percentiles only, so HK names with the same percentile stay in alphabetical order. Order is cosmetic — dedup reads the file as a set, and the pruners preserve line order. If the 3M table is unavailable the file is left as is. The IPO / HKIPO masters stay alphabetical.
@@ -300,12 +304,13 @@ output/
 │   ├── US/<date>_{TheSetup,EarningsGap,HighVolume,GapUp,NewHigh52W,TopGainers,Leaders,RS,Shorts,IPO,Repeat}.txt
 │   ├── US/<date>_{MorningGapPre{20,10,5},MorningGap{5..30}}.txt
 │   ├── US/<date>_ETF_rs.txt   # ETF strength ranking — human-readable, NOT an import list
+│   ├── US/<date>_SMA50Pruned.txt   # names the SMA50 auto-prune removed from the master today
 │   ├── US/rs_us_<date>.txt    # daily strongest-RS top 10 (US)
 │   └── HK/<date>_{EarningsGap,HighVolume,GapUp,Leaders,RS,Shorts,IPO,HKMorningGap{10..60}}.txt
 ├── Webull/{US,HK}/<date>_*.txt   # newline-separated mirror, for Webull "Upload as File"
 ├── hk_rs_<date>.txt           # daily strongest-RS top 10 (HK)
 ├── rs-audit/                  # rs-line audit report + _drop / _keep_ranked sidecars
-├── Reports/                   # HTML reports (manual runs): PostMarket/<date>_us.html, PreMarket/<date>_us_premarket.html
+├── Reports/                   # HTML: PostMarket/<date>_us.html, PreMarket/<date>_us_premarket.html (manual runs); ETF/etf_rs_trend.html (every us-eod)
 ├── state/                     # eod_seen_* masters, RS / metrics caches, morning-gap daily seen, EDGAR cache
 └── launchd_*.log              # per-slot logs
 ```
@@ -314,7 +319,7 @@ output/
 - **Ticker format** — US: `NASDAQ:AAPL` / `NYSE:WMT` / `AMEX:GLD`. HK: `HKEX:NNN` **without leading zeros** (`HKEX:700`, `HKEX:9988`) — TradingView silently rejects `HKEX:0700`.
 - **Webull** must be newline-separated; its upload silently truncates comma lists.
 - **Importing** — TradingView: Watchlist → "Import list..." → a file from `output/TV/`. Webull: Watchlist → "Upload as File" → the matching file from `output/Webull/`.
-- **Retention** (auto-cleanup, soft-fail): TV / Webull 5 days · rs-audit 5 days · RS top-10 snapshots 4 days · Reports 7 days · state caches 2–4 days. Masters (`eod_seen_*`), `ntfy_last_seen.txt`, `edgar_cache/` and logs are never touched.
+- **Retention** (auto-cleanup, soft-fail): TV / Webull 5 days · rs-audit 5 days · RS top-10 snapshots 4 days · Reports 7 days (the ETF trend page is overwritten in place, never aged out) · state caches 2–4 days. Masters (`eod_seen_*`), `ntfy_last_seen.txt`, `edgar_cache/` and logs are never touched.
 
 ## Sync and Notifications
 
@@ -337,13 +342,14 @@ Optional, **off by default** (`[tv_sync]`). Uses TradingView's unofficial REST A
 
 Configure `[notify]` and subscribe to the topic in the [ntfy](https://ntfy.sh) app; a launchd subscriber bridges the same topic to macOS Notification Center.
 
-| Notification          | Sent when                                                                      |
-| --------------------- | ------------------------------------------------------------------------------ |
-| New gappers           | a morning-gap scan finds names not seen in an earlier same-phase scan that day |
-| **PROMOTED** (high)   | a pre-market gapper first passes the post-open cumulative-volume gate          |
-| **SKIPPED** (high)    | a scheduled scan exits because the network never came up                       |
-| RS workflow failure   | a launchd RS-workflow trigger fails                                            |
-| Catalyst Report Ready | the pre-market catalyst report is written (only when that report is enabled)   |
+| Notification          | Sent when                                                                                           |
+| --------------------- | --------------------------------------------------------------------------------------------------- |
+| New gappers           | a morning-gap scan finds names not seen in an earlier same-phase scan that day                      |
+| **PROMOTED** (high)   | a pre-market gapper first passes the post-open cumulative-volume gate                               |
+| **SKIPPED** (high)    | a scheduled scan exits because the network never came up                                            |
+| RS workflow failure   | a launchd RS-workflow trigger fails                                                                 |
+| **OpenD down** (high) | Futu OpenD is unreachable at the start of an EOD run or an in-window morning-gap scan; once per day |
+| Catalyst Report Ready | the pre-market catalyst report is written (only when that report is enabled)                        |
 
 ## LLM Reports
 

@@ -73,12 +73,12 @@ Finviz 選股之後,基於 yfinance 日線套用。閾值在 `[settings]`。
 
 | 閘門          | 閾值                                                            | 適用範圍                                     |
 | ------------- | --------------------------------------------------------------- | -------------------------------------------- |
-| Dollar Volume | 價 × 20 日均量 ≥ $100M(Shorts 為 ≥ $50M)                       | Longs、Leaders、RS、Shorts、IPO、Morning Gap |
+| Dollar Volume | 價 × 20 日均量 ≥ $100M(Shorts 為 ≥ $50M)                        | Longs、Leaders、RS、Shorts、IPO、Morning Gap |
 | ADR%          | 最近 20 根完整 bar 的 mean(`(High − Low) / Close`) × 100 ≥ 4.0% | 同上                                         |
 
 ADR%(Kullamägi 式)衡量一隻股票**當下**的波動幅度;它取代了過去的 Finviz `beta > 1.5` 過濾——後者容易誤殺正活躍的中大盤票。
 
-**大 gap 旁路(僅 TheSetup / EarningsGap):**當日開盤 gap ≥ 10% 時,ADR% 門檻放寬到 3.0%——否則低波動大盤股的財報跳空(CRM 2026-08-27:gap +11.9%,ADR% 3.74)永遠掃不出來。在 `[[longs]]` 對應組內用 `adr_bypass_gap_percent` / `adr_bypass_min_percent` 配置;刪掉即關閉。
+**大 gap 旁路(僅 TheSetup / EarningsGap):**當日開盤 gap ≥ 10% 時,ADR% 門檻放寬到 3.0%——否則低波動大盤股的財報跳空(CRM 2026-08-27:gap +11.9%,ADR% 3.74)永遠掃不出來。TheSetup 的入選條件本身就是 gap ≥ 10%,所以該組的 ADR% 門檻實際是 3.0%。在 `[[longs]]` 對應組內用 `adr_bypass_gap_percent` / `adr_bypass_min_percent` 配置;刪掉即關閉。
 
 ### 各組 RS 閘
 
@@ -92,6 +92,7 @@ ADR%(Kullamägi 式)衡量一隻股票**當下**的波動幅度;它取代了過�
 | 條件 RS 組                                                        | `min_rs_percentile_rs` = 0(關)     | **95**                          |
 | 美股 Shorts                                                       | `min_rs_percentile_shorts` = 0(關) | **95**                          |
 | 美股 IPO(歷史 ≥ 64 天)                                            | —                                  | **95**                          |
+| 美股 IPO(歷史 < 64 天)                                            | —                                  | 無 RS——4 週漲幅 > 20%           |
 | Morning Gap、ETF 排名                                             | —                                  | —                               |
 
 - RS 表裡**查不到**的 ticker 保留,不丟棄。
@@ -102,14 +103,14 @@ ADR%(Kullamägi 式)衡量一隻股票**當下**的波動幅度;它取代了過�
 
 Oliver Kell 的動量/突破 setup。6 組互斥——靠前的組優先,每隻 ticker 每天最多進一個 Longs 文件。共同條件:Small Cap+、Avg Vol > 500K、站上 SMA50 與 SMA200,再加共用閘門。
 
-| 優先級 | 分組          | 額外過濾                                                                                          |
-| ------ | ------------- | ------------------------------------------------------------------------------------------------- |
+| 優先級 | 分組          | 額外過濾                                                                                           |
+| ------ | ------------- | -------------------------------------------------------------------------------------------------- |
 | 0      | `TheSetup`    | Price > $10、Gap Up 10%+、Rel Vol ≥ 3× 20 日均量(yfinance)。**不過 RS 閘**——放量大缺口本身就是信號 |
-| 1      | `EarningsGap` | Price > $20、Earnings Today、Rel Vol > 1.5、Gap Up 5%+                                            |
-| 2      | `HighVolume`  | Price > $20、Day Up、Rel Vol ≥ 3× 20 日均量(yfinance)                                             |
-| 3      | `GapUp`       | Price > $20、Gap Up 3%+                                                                           |
-| 4      | `NewHigh52W`  | Price > $20、52 週新高                                                                            |
-| 5      | `TopGainers`  | Price > $20、Finviz 信號 Top Gainers                                                              |
+| 1      | `EarningsGap` | Price > $20、Earnings Today、Rel Vol > 1.5、Gap Up 5%+                                             |
+| 2      | `HighVolume`  | Price > $20、Day Up、Rel Vol ≥ 3× 20 日均量(yfinance)                                              |
+| 3      | `GapUp`       | Price > $20、Gap Up 3%+                                                                            |
+| 4      | `NewHigh52W`  | Price > $20、52 週新高                                                                             |
+| 5      | `TopGainers`  | Price > $20、Finviz 信號 Top Gainers                                                               |
 
 ### Leaders
 
@@ -133,7 +134,7 @@ Kullamägi 的拋物線衝頂做空 setup。每天重新檢出(不參與任何�
 | 過濾                | 閾值                                                                               |
 | ------------------- | ---------------------------------------------------------------------------------- |
 | 漲幅                | 2、3 或 4 週內上漲:**50%+**(市值 ≥ $10B)/ **200%+**($2B–$10B)/ **300%+**($50M–$2B) |
-| Dollar Volume、ADR% | ≥ $50M(`[shorts].min_dollar_volume`,比全局 $100M 寬鬆)、≥ 4.0%                   |
+| Dollar Volume、ADR% | ≥ $50M(`[shorts].min_dollar_volume`,比全局 $100M 寬鬆)、≥ 4.0%                     |
 | 連續上漲天數        | ≥ 3 天(不含當天未走完的 bar)                                                       |
 
 市值取自 Futu 快照(精確值;Finviz 的 `"1.23B"` 這類字符串在分級邊界附近容易分錯檔),取不到再回落 Finviz。
@@ -150,9 +151,11 @@ Kullamägi 的拋物線衝頂做空 setup。每天重新檢出(不參與任何�
 | 日均量 / Dollar Volume | ≥ 500K / ≥ $100M | ≥ 500K / ≥ HK$100M | ≥ 20 天  |
 | ADR%                   | ≥ 4.0%           | ≥ 3.0%             | ≥ 20 天  |
 | 站上 SMA50             | ✓                | ✓                  | ≥ 50 天  |
+| 4 週漲幅               | > 20%            | > 20%              | < 64 天  |
 | RS 3M                  | ≥ 95(對 SPY)     | ≥ 95(對 HSI)       | ≥ 64 天  |
 | 站上 SMA200            | ✓                | ✓                  | ≥ 200 天 |
 
+- **不足 64 天走方向閘:** 這麼新的票還沒有 3M RS,改為要求 4 週漲幅嚴格大於 20%(`ipo_min_perf_4w`,美股在 `[settings]`、港股在 `[hk_settings]`;刪掉該鍵即關閉)。歷史恰好 20 天時算不出 4 週漲幅,當天不輸出。
 - 美股新股不在 RS universe 裡,所以 3M 分數在本地計算,再排進雲端表的 `raw_score` 分佈裡取百分位。
 - 出現在 12M RS 表裡的 ticker 必然有 ≥ 12 個月曆史,不可能是新股——會被移出 IPO 桶(只是 yfinance 臨時缺數據)。
 - 獨立 master `eod_seen_IPO.txt`,所以新股"畢業"後仍能進入它應屬的分組。輸出:`<date>_IPO.txt`,Futu 分組 `IPO`。
@@ -167,14 +170,15 @@ Kullamägi 的拋物線衝頂做空 setup。每天重新檢出(不參與任何�
 
 - **打分:** 與個股相同的 3M RS 公式(`0.5·R21 + 0.3·R42 + 0.2·R63`,相對 SPY)。百分位是**在 ETF 名單內部**排的,不是對個股 universe。
 - **何時跑:** 每次 `us-eod` 末尾的 soft 步驟(失敗不影響 EOD);也可用 `--mode etf-rs` 單獨重跑。本地計算——一次 yfinance 批量下載,不走雲端。
-- **輸出:** `output/TV/US/<date>_ETF_rs.txt`,每行一隻 ETF,**最強的在最上面**,格式 `N. TICKER - 中文名 | 前五大持倉`(`N.` 為名次):
+- **輸出:** `output/TV/US/<date>_ETF_rs.txt`,每行一隻 ETF,**最強的在最上面**,格式 `N. TICKER 名次變化 - 中文名 | 前五大持倉`(`N.` 為名次):
 
   ```
-  1. IBIT - 比特币 | 不适用: 主要资产为比特币
-  2. ARKG - 基因组革命 | TXG、TWST、TEM、CRSP、PSNL
-  3. USO - 原油 | 不适用: 原油期货及现金 / 国债抵押品
+  1. BWET = - 油轮运费期货 | 不适用: 油轮运费期货及现金抵押品
+  2. IBIT 🟢↑1 - 比特币 | 不适用: 主要资产为比特币
+  3. ARKG 🔴↓1 - 基因组革命 | TXG、TWST、TEM、CRSP、PSNL
   ```
 
+- **名次變化:** ticker 後面的標記是和最近一個更早日期的文件相比:`🟢↑N` 上升 N 位、`🔴↓N` 下降 N 位、`=` 不變、`新` 新進名單。同日重跑仍和前一天比;沒有更早的文件時(首次運行,或中斷超過 5 天保留期)不顯示標記。
 - **給人看的,不是 TradingView 導入文件**——它是 `TV/US/` 裡唯一非逗號分隔的 `.txt`。帶分數的完整表(排名 / 分數 / 百分位)在 EOD 日誌裡。
 - **維護:** 增刪改 `[etf_rs.tickers]`(`TICKER = "中文名"`)即可調整名單。持倉來自靜態、手工維護的 `[etf_rs.holdings]` 表(不走 API 刷新;沒配的票不顯示持倉段)。
 - **走勢頁:** 同一步還會寫 `output/Reports/ETF/etf_rs_trend.html`(單個自包含檔案,每次覆蓋)。用同一批 K 線重算每個歷史交易日的分數(約 190 天,無狀態檔),不受 `.txt` 5 天保留期限制。Y 軸可在 0–99 RS 評分(預設,標出 RS 90 橫線)、名次、3M 超額收益之間切換;最新一天前 `chart_top_n`(20)名畫粗線,懸停或右側列表顯示每隻 ETF 的前五大持倉。歷史按當前名單和復權價重算,過去某天可能與當時 `.txt` 差一兩位。 頁面同時發佈在 <https://ericxue92.github.io/momentum-scanner/>:GitHub Actions 工作流(`etf_rs_page.yml`)在每個美股收盤後於雲端重建並部署到 GitHub Pages,不依賴本機。
@@ -238,7 +242,7 @@ Kullamägi 的拋物線衝頂做空 setup。每天重新檢出(不參與任何�
 
 - **數據:** metrics frame 與 RS 表從雲端拉取(`data/hk_metrics/`、`data/hk_rs/`);雲端取不到時回退到本地 yfinance 抓取。
 - **數據日規則:** 只有 20:00 這一檔用當天收盤;更早的運行會裁掉當天未走完的 bar,並跳過 HSI 觸發的 RS 組。週末補跑映射到上週五。
-- **OpenD:** 市值和 HSI 觸發來自 Futu。OpenD 不在線時流程照常跑完,但市值閘會把所有票篩掉。
+- **OpenD:** 市值和 HSI 觸發來自 Futu。OpenD 不在線時流程照常跑完,但市值閘會把所有票篩掉。此時會推一條高優先級 ntfy 告警(每天一次)。
 
 ### 港股 Shorts
 
@@ -285,8 +289,10 @@ Kullamägi 的拋物線衝頂做空 setup。每天重新檢出(不參與任何�
 
 有兩個裁剪器會縮減美股 master,讓走弱的票日後可以重新入選;兩者都會先備份:
 
-- **SMA50 自動裁剪**——每次 `us-eod` 一開始:收盤價連續 2 個已完成交易日低於 SMA50,**且**最新收盤低於前一日收盤(仍在下跌;線下反彈的票保留)→ 移除。軟失敗:yfinance 整體失敗就跳過裁剪;數據缺失/歷史太短的票保留。配置:`[sma50_prune]`。
+- **SMA50 自動裁剪**——每次 `us-eod` 一開始:收盤價連續 2 個已完成交易日低於 SMA50,**且**最新收盤低於前一日收盤(仍在下跌;線下反彈的票保留)→ 移除。軟失敗:yfinance 整體失敗就跳過裁剪;數據缺失/歷史太短的票保留。當天被移除的票寫入 `output/TV/US/<date>_SMA50Pruned.txt`(逗號分隔;沒有裁剪就不寫;同日重跑會合併進去)。配置:`[sma50_prune]`。
 - **RS-line 審計**——手動,見[上文](#rs-line-審計與每日-top-10)。
+
+**master 的行序(美股與港股):** `eod_seen_US.txt` 和 `eod_seen_HK.txt` 在每次 `us-eod` / `hk-eod` 末尾(最後一個分組寫入 master 之後)按 **3M RS 從強到弱**重排,所以文件最上面就是已入選票裡最強的。沒有 3M 分數的票排在最後,按字母序。美股按 3M 原始分排;港股雲端表只發佈百分位,所以同一百分位的港股保持字母序。行序只是為了好看——去重把文件當集合讀,裁剪器也保留行序。3M 表拉不到時文件保持原樣。IPO / HKIPO 的 master 保持字母序。
 
 再次命中事件組的老票另行彙總在 [EOD Repeat](#eod-repeat)。
 
@@ -298,12 +304,13 @@ output/
 │   ├── US/<date>_{TheSetup,EarningsGap,HighVolume,GapUp,NewHigh52W,TopGainers,Leaders,RS,Shorts,IPO,Repeat}.txt
 │   ├── US/<date>_{MorningGapPre{20,10,5},MorningGap{5..30}}.txt
 │   ├── US/<date>_ETF_rs.txt   # ETF 強度排名——給人看的,不是導入列表
+│   ├── US/<date>_SMA50Pruned.txt   # 當天被 SMA50 自動裁剪移出 master 的票
 │   ├── US/rs_us_<date>.txt    # 每日 RS 最強 Top 10 (美股)
 │   └── HK/<date>_{EarningsGap,HighVolume,GapUp,Leaders,RS,Shorts,IPO,HKMorningGap{10..60}}.txt
 ├── Webull/{US,HK}/<date>_*.txt   # 換行分隔的鏡像,用於 Webull "Upload as File"
 ├── hk_rs_<date>.txt           # 每日 RS 最強 Top 10 (港股)
 ├── rs-audit/                  # rs-line 審計報告 + _drop / _keep_ranked sidecar
-├── Reports/                   # HTML 報告 (手動運行): PostMarket/<date>_us.html、PreMarket/<date>_us_premarket.html
+├── Reports/                   # HTML: PostMarket/<date>_us.html、PreMarket/<date>_us_premarket.html (手動運行); ETF/etf_rs_trend.html (每次 us-eod 覆蓋)
 ├── state/                     # eod_seen_* master、RS / metrics 緩存、Morning Gap 當日 seen、EDGAR 緩存
 └── launchd_*.log              # 各計劃槽的日誌
 ```
@@ -312,7 +319,7 @@ output/
 - **Ticker 格式**——美股:`NASDAQ:AAPL` / `NYSE:WMT` / `AMEX:GLD`。港股:`HKEX:NNN`,**不帶前導零**(`HKEX:700`、`HKEX:9988`)——TradingView 會靜默拒絕 `HKEX:0700`。
 - **Webull** 必須換行分隔;它的上傳功能會靜默截斷逗號列表。
 - **導入**——TradingView:Watchlist → "Import list..." → 選 `output/TV/` 下的文件。Webull:Watchlist → "Upload as File" → 選 `output/Webull/` 下的對應文件。
-- **保留期**(自動清理,軟失敗):TV / Webull 5 天 · rs-audit 5 天 · RS Top 10 快照 4 天 · Reports 7 天 · state 緩存 2–4 天。master(`eod_seen_*`)、`ntfy_last_seen.txt`、`edgar_cache/` 和日誌永遠不會被清理。
+- **保留期**(自動清理,軟失敗):TV / Webull 5 天 · rs-audit 5 天 · RS Top 10 快照 4 天 · Reports 7 天(ETF 走勢頁除外,它每次原地覆蓋、不清理) · state 緩存 2–4 天。master(`eod_seen_*`)、`ntfy_last_seen.txt`、`edgar_cache/` 和日誌永遠不會被清理。
 
 ## 同步與通知
 
@@ -335,13 +342,14 @@ output/
 
 配置 `[notify]`,並在 [ntfy](https://ntfy.sh) app 裡訂閱該 topic;Mac 上另有一個常駐 launchd 訂閱器把同一 topic 橋接到 macOS 通知中心。
 
-| 通知                   | 觸發時機                                             |
-| ---------------------- | ---------------------------------------------------- |
-| 新 gapper              | Morning Gap 掃描發現當天同階段更早掃描裡沒出現過的票 |
-| **PROMOTED**(高優先級) | 盤前 gapper 首次通過盤後累計量閘                     |
-| **SKIPPED**(高優先級)  | 計劃內的掃描因網絡始終沒起來而退出                   |
-| RS workflow 失敗       | launchd 觸發雲端 RS workflow 失敗                    |
-| Catalyst Report Ready  | 盤前 catalyst 報告寫完(僅當該報告啟用時)             |
+| 通知                       | 觸發時機                                                            |
+| -------------------------- | ------------------------------------------------------------------- |
+| 新 gapper                  | Morning Gap 掃描發現當天同階段更早掃描裡沒出現過的票                |
+| **PROMOTED**(高優先級)     | 盤前 gapper 首次通過盤後累計量閘                                    |
+| **SKIPPED**(高優先級)      | 計劃內的掃描因網絡始終沒起來而退出                                  |
+| RS workflow 失敗           | launchd 觸發雲端 RS workflow 失敗                                   |
+| **OpenD 不在線**(高優先級) | EOD 或窗口內的 Morning Gap 掃描開始時連不上 Futu OpenD;每天只推一次 |
+| Catalyst Report Ready      | 盤前 catalyst 報告寫完(僅當該報告啟用時)                            |
 
 ## LLM 報告
 
