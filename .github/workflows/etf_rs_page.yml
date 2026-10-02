@@ -1,0 +1,63 @@
+name: Publish ETF RS Trend Page
+
+# Builds the ETF 3M RS trend page (etf_rs_chart) in the cloud and deploys it
+# to GitHub Pages. Nothing is committed back: the HTML travels as a Pages
+# artifact. Three triggers, all idempotent (a re-run just redeploys):
+#   - workflow_run: rides the US 3M RS workflow, which launchd dispatches
+#     Tue-Sat 08:45 HKT (GH's own cron is unreliable — see CLAUDE.md), so the
+#     page refreshes once the US close is in, whatever that run's outcome.
+#   - schedule: belt-and-suspenders, after the local 10:00 HKT us-eod.
+#   - workflow_dispatch: manual rebuild.
+on:
+  workflow_run:
+    workflows: ["Update US 3M RS Table"]
+    types: [completed]
+  schedule:
+    - cron: '30 2 * * 2-6'     # 02:30 UTC Tue-Sat = 10:30 HKT
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      # Exits 1 when no page was produced, so a Yahoo outage skips the deploy
+      # and Pages keeps serving the previous page.
+      - name: Build page
+        run: uv run python scripts/build_etf_rs_page.py _site
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
