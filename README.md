@@ -448,6 +448,7 @@ Only the key resources are listed here — this is not exhaustive; plenty of oth
 - [The 10 Principles of Trading with Investing Champion Oliver Kell](https://youtu.be/ElocJ-b_NTs) (TraderLion)
 - [How to Find and Trade the Next Tesla — Swing Trading Strategy](https://youtu.be/eu8onWJ5y34) (TraderLion)
 - [The $1,000,000 Simple Trading System That Took 13 Years to Build](https://youtu.be/iu2gdI1cO88) (TraderLion)
+- [The Wedge Pop Swing Trading Setup — How a Trading Champion Enters a Position](https://youtu.be/fYxSQvuwOQc) (TraderLion)
 - [Low Risk Stock Setups + PDF File](https://youtu.be/R5ScKXy1ytg) (TA Plot)
 - [How To Pyramid Into Stocks (21 Stock Setup Examples + PDF File)](https://youtu.be/11h6iSQkzuA) (TA Plot)
 - [Sitting Tight for the Right Low Risk Entry](https://youtu.be/Mt3iZ_Orv0g) (TA Plot)
