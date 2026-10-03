@@ -220,13 +220,13 @@ XLB  = "LIN、SHW、FCX、APD、ECL"
 # 并集再参与 Longs > Leaders 的跨组去重。
 #
 # TheSetup: 放量 + 大缺口 (gap ≥ 10% + 本地 RVol ≥ 3× 20 日均量), 最高优先级。
-# 价格门槛放宽到 $10 (其他组 $20); avgvol/$vol/ADR%/RS 12M/SMA50+200 与其他组一致。
+# 价格门槛与其他组一致 ($20, Finviz sh_price_o20; 2026-10-03 前为 $10); avgvol/$vol/ADR%/RS 12M/SMA50+200 与其他组一致。
 # 与其他事件组一样过跨日 master 去重 (只出新票, 老票复燃进 Repeat.txt)。
 # 不过 12M RS 闸 (min_rs_percentile = 0; 其他组缺省继承 [settings].min_rs_percentile_longs)。
 [[longs]]
 key = "the_setup"
 name = "The Setup (Heavy Volume + Gap Up 10%)"
-filters = ["ind_stocksonly","cap_smallover","sh_avgvol_o500","sh_price_o10","ta_gap_u10","ta_sma50_pa","ta_sma200_pa"]
+filters = ["ind_stocksonly","cap_smallover","sh_avgvol_o500","sh_price_o20","ta_gap_u10","ta_sma50_pa","ta_sma200_pa"]
 min_relative_volume = 3
 relative_volume_days = 20
 min_rs_percentile = 0

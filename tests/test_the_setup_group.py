@@ -27,12 +27,12 @@ def test_the_setup_is_first_longs_group(cfg):
     assert cfg["longs"][0]["key"] == "the_setup"
 
 
-def test_the_setup_filters_gap_up_10_and_price_over_10(the_setup):
+def test_the_setup_filters_gap_up_10_and_price_over_20(the_setup):
     filters = set(the_setup["filters"])
     assert "ta_gap_u10" in filters
     assert "ta_gap_u5" not in filters
-    assert "sh_price_o10" in filters
-    assert "sh_price_o20" not in filters
+    assert "sh_price_o20" in filters
+    assert "sh_price_o10" not in filters
     # Baseline shared with the other Longs groups.
     assert {"ind_stocksonly", "cap_smallover", "sh_avgvol_o500",
             "ta_sma50_pa", "ta_sma200_pa"} <= filters
