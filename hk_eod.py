@@ -634,7 +634,7 @@ def apply_strategy_filters(
     dvol = settings.get("min_dollar_volume", 100_000_000)
     avg_vol = settings.get("min_avg_volume", 1_000_000)
     adr = settings.get("min_adr_percent", 4.0)
-    price = settings.get("min_price", 20.0)
+    price = settings.get("min_price", 50.0)
 
     # --- Funnel diagnostics: log how many tickers survive each baseline gate
     # individually. Without this, a "0 candidates" outcome could be caused by
@@ -795,7 +795,7 @@ def filter_hk_ipo_candidates(
         每个 key 至少为 0。
     """
     ipo_cap = hk_settings.get("min_market_cap", 300_000_000)
-    ipo_min_price = hk_settings.get("min_price", 20.0)
+    ipo_min_price = hk_settings.get("min_price", 50.0)
     ipo_min_avg_vol = hk_settings.get("min_avg_volume", 1_000_000)
     ipo_min_dvol = hk_settings.get("min_dollar_volume", 100_000_000)
     ipo_min_adr = hk_settings.get("min_adr_percent", 3.5)
@@ -1240,7 +1240,7 @@ def run_hk_eod(
     logger.info(
         f"[HK IPO] {len(ipo_codes)} candidates after conditional filters "
         f"(>=20d hist; cap>={hk_settings.get('min_market_cap', 300_000_000):,.0f}, "
-        f"price>={hk_settings.get('min_price', 20.0)}, "
+        f"price>={hk_settings.get('min_price', 50.0)}, "
         f"+if 20d: avg_vol/dvol/ADR, +if 50d: SMA50, +if 200d: SMA200, "
         f"{perf_4w_note}+if 64d: RS_3M>={rs_3m_threshold}); "
         f"raw metrics<253: {int((metrics['n_rows'] < 253).sum())}; "

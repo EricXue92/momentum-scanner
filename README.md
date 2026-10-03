@@ -147,7 +147,7 @@ An auto-collected sidecar: candidates that passed a Longs/Leaders/RS Finviz scre
 | -------------------------- | ----------------- | ------------------ | ----------- |
 | History                    | ≥ 20 trading days | ≥ 20 trading days  | always      |
 | Market cap                 | ≥ $300M           | ≥ HK$300M          | always      |
-| Price                      | ≥ $20             | ≥ HK$20            | always      |
+| Price                      | ≥ $20             | ≥ HK$50            | always      |
 | Avg volume / Dollar volume | ≥ 1M / ≥ $100M    | ≥ 1M / ≥ HK$100M   | ≥ 20 days   |
 | ADR%                       | ≥ 4.0%            | ≥ 3.0%             | ≥ 20 days   |
 | Above SMA50                | ✓                 | ✓                  | ≥ 50 days   |
@@ -224,7 +224,7 @@ Shared by all five long-side groups (`[hk_settings]`):
 | Avg volume           | ≥ 1M shares/day (20-day)                            |                                              |
 | Dollar Volume        | ≥ HK$100M (20-day)                                  |                                              |
 | ADR%                 | ≥ 3.0%                                              | HK blue chips are structurally less volatile |
-| Price                | ≥ HK$20                                             |                                              |
+| Price                | ≥ HK$50                                             |                                              |
 | Above SMA50 & SMA200 | both                                                |                                              |
 | RS (vs HSI)          | event groups **12M ≥ 90**; Leaders / RS **3M ≥ 95** | mirrors the US split                         |
 

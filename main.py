@@ -1072,7 +1072,7 @@ def run_hk_morning_gap(
     discovery = discover_hk_morning_gap_candidates(
         min_gap_pct=config.get("min_gap_percent", 5.0),
         min_market_cap=config.get("min_market_cap", 300_000_000),
-        min_price=config.get("min_price", 20.0),
+        min_price=config.get("min_price", 50.0),
         exchanges=config.get("exchanges", ["HK_MAINBOARD"]),
         host=futu_host,
         port=futu_port,

@@ -365,7 +365,7 @@ min_avg_volume          = 1_000_000       # 5 个长线组统一日均量, 与 S
 # ADR% 调低至 3.0 (US 用 4.0)。HK 蓝筹波动率结构性偏低 — 在"放过百强股"
 # 和"还能筛掉静态低波动股"之间取折中。
 min_adr_percent         = 3.0
-min_price               = 20.0            # HKD
+min_price               = 50.0            # HKD (2026-10-03 前 20)
 # RS 闸 (对齐美股结构, vs HSI, 云端 IBD 算法), 按组分工:
 #   事件组 EarningsGap/HighVolume/GapUp → 仅 12M (min_rs_percentile_longs, ≙ 美股 Longs)
 #   Leaders / 条件 RS 组                → 仅 3M  (min_rs_percentile_longs_3m, ≙ 美股 Leaders/RS)
@@ -451,7 +451,7 @@ name = "HK Morning Gap Up"
 exchanges = ["HK_MAINBOARD"]
 min_gap_percent = 5.0           # 港股仅盘后一档; 对齐美股盘前 (min_gap_percent_pre)
 min_market_cap = 300_000_000    # HKD
-min_price = 20.0                # HKD
+min_price = 50.0                # HKD (2026-10-03 前 20)
 min_avg_volume = 1_000_000      # 20日股/天 (2026-10-03 前 500K)
 avg_volume_days = 20
 min_dollar_volume = 100_000_000 # HKD; 20日均量 × 最新收盘
