@@ -36,6 +36,17 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # Debugging a failing review: the action hides Claude's output, so a
+          # 2-second `is_error: true` with zero cost shows no reason. To see it,
+          # merge `show_full_output: true` to main FIRST — the action skips any
+          # PR whose workflow file differs from main — then open a throwaway PR.
+          # 2026-10-03: that revealed a 401 "OAuth token revoked"; fixed by
+          # `/install-github-app` (rotates the token; `claude setup-token` +
+          # `gh secret set CLAUDE_CODE_OAUTH_TOKEN` does the same by hand).
+          # The plugin install below failed on hosted runners in 2026-05 (the
+          # action tried to spawn a missing `~/.local/bin/claude`); it works
+          # again as of 2026-10-03 — if it regresses, fall back to an inline
+          # `prompt:` review request without `plugins`.
           plugin_marketplaces: 'https://github.com/anthropics/claude-code.git'
           plugins: 'code-review@claude-code-plugins'
           prompt: '/code-review:code-review --comment ${{ github.repository }}/pull/${{ github.event.pull_request.number }}'
