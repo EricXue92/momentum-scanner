@@ -36,26 +36,10 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          # Debugging a failing review: the action hides Claude's output, so a
-          # 2-second `is_error: true` with zero cost shows no reason. To see it,
-          # merge `show_full_output: true` to main FIRST — the action skips any
-          # PR whose workflow file differs from main — then open a throwaway PR.
-          # 2026-10-03: that revealed a 401 "OAuth token revoked"; fix by
-          # `claude setup-token` + `gh secret set CLAUDE_CODE_OAUTH_TOKEN`.
-          # The previous configuration used `plugin_marketplaces` +
-          # `plugins: code-review@claude-code-plugins` to invoke a slash-
-          # command-based reviewer. As of 2026-05-06, the action's plugin
-          # install path is broken on hosted runners — it tries to spawn
-          # `/home/runner/.local/bin/claude` which doesn't exist. Issuing
-          # the review request inline removes the dependency on the
-          # marketplace machinery.
-          prompt: |
-            Review pull request ${{ github.repository }}/pull/${{ github.event.pull_request.number }}
-            for code quality, correctness, and adherence to the project
-            conventions documented in CLAUDE.md. Focus on the changed
-            files only. Post a top-level summary plus inline comments on
-            any specific concerns. Skip the review if the PR is solely
-            documentation or trivial config changes.
+          plugin_marketplaces: 'https://github.com/anthropics/claude-code.git'
+          plugins: 'code-review@claude-code-plugins'
+          prompt: '/code-review:code-review --comment ${{ github.repository }}/pull/${{ github.event.pull_request.number }}'
+          claude_args: '--allowedTools "mcp__github_inline_comment__create_inline_comment"'
           # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
           # or https://code.claude.com/docs/en/cli-reference for available options
 
