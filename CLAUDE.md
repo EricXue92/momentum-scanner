@@ -3,6 +3,13 @@
 Thresholds and group configs live in `config.toml`. This file covers only the
 non-obvious invariants that are easy to break.
 
+Baseline floors since 2026-10-03 (uniform across US/HK long-side, IPO and
+morning-gap; Shorts unchanged): price ≥ $20 / HK$20 (Finviz `sh_price_o20`,
+TheSetup was $10 before) and 20-day avg volume ≥ 1M shares (Finviz
+`sh_avgvol_o1000`, `min_avg_volume = 1_000_000`; was 500K). The code-side
+fallback when `min_avg_volume` is unset is also 1M. Output older than that
+date was produced under the looser floors.
+
 ## Commands
 
 ```bash
