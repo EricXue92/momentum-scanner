@@ -36,7 +36,12 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          show_full_output: true  # DIAG: surface the hidden error text
+          # Debugging a failing review: the action hides Claude's output, so a
+          # 2-second `is_error: true` with zero cost shows no reason. To see it,
+          # merge `show_full_output: true` to main FIRST — the action skips any
+          # PR whose workflow file differs from main — then open a throwaway PR.
+          # 2026-10-03: that revealed a 401 "OAuth token revoked"; fix by
+          # `claude setup-token` + `gh secret set CLAUDE_CODE_OAUTH_TOKEN`.
           # The previous configuration used `plugin_marketplaces` +
           # `plugins: code-review@claude-code-plugins` to invoke a slash-
           # command-based reviewer. As of 2026-05-06, the action's plugin
