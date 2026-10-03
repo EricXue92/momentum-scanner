@@ -111,7 +111,7 @@ def filter_us_ipo_candidates(
     """
     min_cap = float(settings.get("min_market_cap", 300_000_000))
     min_price = float(settings.get("min_price", 10.0))
-    min_avg_vol = float(settings.get("min_avg_volume", 500_000))
+    min_avg_vol = float(settings.get("min_avg_volume", 1_000_000))
     min_dvol = float(settings.get("min_dollar_volume", 100_000_000))
     min_adr = float(settings.get("min_adr_percent", 4.0))
     rs_threshold = int(settings.get("min_rs_percentile_3m", 0))

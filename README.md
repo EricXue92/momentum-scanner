@@ -101,7 +101,7 @@ Doctrine: **event groups check long-term strength (12M ≥ 90); everything else 
 
 ### Longs
 
-Oliver Kell's momentum/breakout setups. Six mutually exclusive groups — the earlier group wins, so a ticker lands in at most one Longs file per day. All share: Small Cap+, Avg Vol > 500K, above SMA50 & SMA200, plus the shared gates.
+Oliver Kell's momentum/breakout setups. Six mutually exclusive groups — the earlier group wins, so a ticker lands in at most one Longs file per day. All share: Small Cap+, Avg Vol ≥ 1M, above SMA50 & SMA200, plus the shared gates.
 
 | Priority | Group         | Additional filters                                                                                                |
 | -------- | ------------- | ----------------------------------------------------------------------------------------------------------------- |
@@ -114,7 +114,7 @@ Oliver Kell's momentum/breakout setups. Six mutually exclusive groups — the ea
 
 ### Leaders
 
-Long-term trend leaders: Small Cap+, Avg Vol > 500K, Price > $20, above SMA50 & SMA200, shared gates, RS 3M ≥ 95. Five performance windows merged into one `Leaders.txt`:
+Long-term trend leaders: Small Cap+, Avg Vol ≥ 1M, Price > $20, above SMA50 & SMA200, shared gates, RS 3M ≥ 95. Five performance windows merged into one `Leaders.txt`:
 
 | 4 weeks | 13 weeks | 26 weeks | YTD     | 52 weeks |
 | ------- | -------- | -------- | ------- | -------- |
@@ -122,7 +122,7 @@ Long-term trend leaders: Small Cap+, Avg Vol > 500K, Price > $20, above SMA50 & 
 
 ### Conditional RS
 
-Stocks holding up in a weak tape. **Runs only when SPY and QQQ are both down ≥ 1.0% on the day.** Filters: Small Cap+, Avg Vol > 500K, Price > $20, Day Up, above SMA50 & SMA200, shared gates, RS 3M ≥ 95.
+Stocks holding up in a weak tape. **Runs only when SPY and QQQ are both down ≥ 1.0% on the day.** Filters: Small Cap+, Avg Vol ≥ 1M, Price > $20, Day Up, above SMA50 & SMA200, shared gates, RS 3M ≥ 95.
 
 ### US Shorts
 
@@ -148,7 +148,7 @@ An auto-collected sidecar: candidates that passed a Longs/Leaders/RS Finviz scre
 | History                    | ≥ 20 trading days | ≥ 20 trading days  | always      |
 | Market cap                 | ≥ $300M           | ≥ HK$300M          | always      |
 | Price                      | ≥ $20             | ≥ HK$20            | always      |
-| Avg volume / Dollar volume | ≥ 500K / ≥ $100M  | ≥ 500K / ≥ HK$100M | ≥ 20 days   |
+| Avg volume / Dollar volume | ≥ 1M / ≥ $100M    | ≥ 1M / ≥ HK$100M   | ≥ 20 days   |
 | ADR%                       | ≥ 4.0%            | ≥ 3.0%             | ≥ 20 days   |
 | Above SMA50                | ✓                 | ✓                  | ≥ 50 days   |
 | 4-week gain                | > 20%             | > 20%              | < 64 days   |
@@ -201,7 +201,7 @@ Nine scans per day: **pre-market** at −20/−10/−5 min → `MorningGapPre{20
 
 | Filter               | Threshold                                                                                         | Pre | Post |
 | -------------------- | ------------------------------------------------------------------------------------------------- | --- | ---- |
-| 20-day avg volume    | ≥ 500K shares/day                                                                                 | ✓   | ✓    |
+| 20-day avg volume    | ≥ 1M shares/day                                                                                   | ✓   | ✓    |
 | Pre-market volume    | Futu `pre_volume` ≥ 5% × 20-day avg volume — drops thin-tape gaps printed on a few hundred shares | ✓   | —    |
 | Dollar Volume        | ≥ $100M                                                                                           | ✓   | ✓    |
 | ADR%                 | ≥ 4.0%; relaxed to 3.0% when gap ≥ 10%                                                            | ✓   | ✓    |
@@ -221,7 +221,7 @@ Shared by all five long-side groups (`[hk_settings]`):
 | Gate                 | Threshold                                           | Notes                                        |
 | -------------------- | --------------------------------------------------- | -------------------------------------------- |
 | Market cap           | ≥ HK$300M                                           | from the Futu snapshot                       |
-| Avg volume           | ≥ 500K shares/day (20-day)                          |                                              |
+| Avg volume           | ≥ 1M shares/day (20-day)                            |                                              |
 | Dollar Volume        | ≥ HK$100M (20-day)                                  |                                              |
 | ADR%                 | ≥ 3.0%                                              | HK blue chips are structurally less volatile |
 | Price                | ≥ HK$20                                             |                                              |

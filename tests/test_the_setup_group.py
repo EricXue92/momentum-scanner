@@ -34,7 +34,7 @@ def test_the_setup_filters_gap_up_10_and_price_over_20(the_setup):
     assert "sh_price_o20" in filters
     assert "sh_price_o10" not in filters
     # Baseline shared with the other Longs groups.
-    assert {"ind_stocksonly", "cap_smallover", "sh_avgvol_o500",
+    assert {"ind_stocksonly", "cap_smallover", "sh_avgvol_o1000",
             "ta_sma50_pa", "ta_sma200_pa"} <= filters
 
 

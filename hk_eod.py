@@ -632,7 +632,7 @@ def apply_strategy_filters(
 
     cap = settings.get("min_market_cap", 300_000_000)
     dvol = settings.get("min_dollar_volume", 100_000_000)
-    avg_vol = settings.get("min_avg_volume", 500_000)
+    avg_vol = settings.get("min_avg_volume", 1_000_000)
     adr = settings.get("min_adr_percent", 4.0)
     price = settings.get("min_price", 20.0)
 
@@ -796,7 +796,7 @@ def filter_hk_ipo_candidates(
     """
     ipo_cap = hk_settings.get("min_market_cap", 300_000_000)
     ipo_min_price = hk_settings.get("min_price", 20.0)
-    ipo_min_avg_vol = hk_settings.get("min_avg_volume", 500_000)
+    ipo_min_avg_vol = hk_settings.get("min_avg_volume", 1_000_000)
     ipo_min_dvol = hk_settings.get("min_dollar_volume", 100_000_000)
     ipo_min_adr = hk_settings.get("min_adr_percent", 3.5)
     rs_3m_threshold = int(hk_settings.get("min_rs_percentile_longs_3m", 90))

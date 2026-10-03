@@ -932,8 +932,8 @@ def run_morning_gap(
     if not tickers:
         return offset, []
 
-    # Phase 3d: 20-day average volume gate (replaces Finviz sh_avgvol_o500).
-    min_avg_vol = config.get("min_avg_volume", 500_000)
+    # Phase 3d: 20-day average volume gate (replaces Finviz sh_avgvol_o1000).
+    min_avg_vol = config.get("min_avg_volume", 1_000_000)
     avg_days = config.get("avg_volume_days", 20)
     tickers = _filter_avg_volume(
         tickers, daily_data, min_avg_vol, avg_days, today_et
@@ -1150,8 +1150,8 @@ def run_hk_morning_gap(
     if not tickers:
         return offset, []
 
-    # Phase 3d: 20-day average volume gate (500K shares/day default)
-    min_avg_vol = config.get("min_avg_volume", 500_000)
+    # Phase 3d: 20-day average volume gate (1M shares/day default)
+    min_avg_vol = config.get("min_avg_volume", 1_000_000)
     avg_days = config.get("avg_volume_days", 20)
     tickers = _filter_avg_volume(
         tickers, daily_data, min_avg_vol, avg_days, today_hk
@@ -1672,7 +1672,7 @@ def _filter_avg_volume(
     single: bool | None = None,
 ) -> list[str]:
     """Keep tickers whose N-day average daily volume is >= min_avg_vol.
-    Replaces Finviz `sh_avgvol_o500` for the Futu-discovery path. Strict:
+    Replaces Finviz `sh_avgvol_o1000` for the Futu-discovery path. Strict:
     tickers with fewer than `days` completed bars are dropped."""
     if not tickers:
         return []
