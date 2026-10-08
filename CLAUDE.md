@@ -193,6 +193,10 @@ local (throttle-prone) k-line fetch.
   same-instrument key — the former GDXU/NUGT pair was the motivating case;
   NUGT and 12 global-market ETFs were dropped 2026-09-23, so no duplicate
   names remain today, rule kept) — the log still lists what was hidden.
+  **Non-ETF rows** (BTCUSD / ETHUSD, 2026-10-08): `[etf_rs.yf_symbols]`
+  maps display ticker → Yahoo symbol (`BTC-USD`); their 7-day klines are cut
+  to SPY's trading days (`align_to_benchmark_days`) because the 3M score
+  counts rows. Name ≠ IBIT's "比特币" on purpose (would collapse).
   Percentile is **within the ETF set**, not the stock universe. Ranking
   snapshot only: same-day rerun overwrites, no `eod_seen` dedup, no Webull
   mirror, no Futu/TV sync; the report ignores it (unknown group stem). Runs

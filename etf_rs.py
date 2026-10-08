@@ -66,6 +66,51 @@ def _holdings(cfg_holdings) -> dict[str, str]:
     return out
 
 
+def _yf_symbols(cfg_map) -> dict[str, str]:
+    """``{display ticker: yfinance symbol}`` from ``[etf_rs.yf_symbols]`` —
+    for non-ETF instruments whose Yahoo symbol differs from the displayed one
+    (crypto: ``BTCUSD`` → ``BTC-USD``). Blanks dropped."""
+    if not isinstance(cfg_map, dict):
+        return {}
+    out: dict[str, str] = {}
+    for t, sym in cfg_map.items():
+        t = str(t).strip().upper()
+        sym = str(sym or "").strip().upper()
+        if t and sym:
+            out[t] = sym
+    return out
+
+
+def align_to_benchmark_days(
+    klines: dict[str, pd.DataFrame],
+    tickers: list[str],
+    benchmark: str,
+) -> dict[str, pd.DataFrame]:
+    """Cut ``tickers``' klines to the benchmark's trading days. The 3M score
+    counts *rows* (21/42/63), so a 7-day-a-week crypto series would otherwise
+    measure ~9 weeks instead of 3 months; this also drops the crypto bar of a
+    day SPY hasn't closed yet. No benchmark → left as is."""
+    bench = klines.get(benchmark)
+    if bench is None or bench.empty:
+        return klines
+    days = set(_naive_days(bench["time_key"]))
+    out = dict(klines)
+    for t in tickers:
+        df = out.get(t)
+        if df is None or df.empty:
+            continue
+        mask = [d in days for d in _naive_days(df["time_key"])]
+        out[t] = df[mask].reset_index(drop=True)
+    return out
+
+
+def _naive_days(col) -> pd.DatetimeIndex:
+    idx = pd.DatetimeIndex(pd.to_datetime(col))
+    if idx.tz is not None:
+        idx = idx.tz_localize(None)
+    return idx.normalize()
+
+
 def _normalise(tickers) -> dict[str, str]:
     """``{ticker: 中文名}`` from either the ``[etf_rs.tickers]`` table or a
     plain list (names empty). Upper-case, strip, drop blanks and duplicates
@@ -240,9 +285,14 @@ def run_etf_rs(cfg: dict, output_dir: Path, today: date) -> Path | None:
         logger.info(f"[{_LABEL}] no tickers configured; skipping")
         return None
     etfs = [t for t in names if t != benchmark]
+    yf_symbols = {t: s for t, s in _yf_symbols(cfg.get("yf_symbols", {})).items() if t in etfs}
+    to_display = {s: t for t, s in yf_symbols.items()}
 
     logger.info(f"[{_LABEL}] Fetching 1y closes for {len(etfs)} ETFs + {benchmark}...")
-    klines = _fetch_klines(etfs + [benchmark])
+    klines = _fetch_klines([yf_symbols.get(t, t) for t in etfs] + [benchmark])
+    klines = {to_display.get(k, k): v for k, v in (klines or {}).items()}
+    if yf_symbols:
+        klines = align_to_benchmark_days(klines, list(yf_symbols), benchmark)
     if not klines:
         logger.warning(f"[{_LABEL}] yfinance returned nothing; no ranking written today")
         return None

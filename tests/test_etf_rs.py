@@ -241,3 +241,42 @@ def test_run_annotates_against_previous_day_file(tmp_path, monkeypatch):
     # same-day rerun compares against 09_14 again, not against today's own file
     out2 = etf_rs.run_etf_rs(_cfg(), tmp_path, date(2026, 9, 15))
     assert out2.read_text() == "1. BBB 🟢↑1 - 乙\n2. AAA 🔴↓1 - 甲\n3. CCC 新 - 丙\n"
+
+
+# --- non-ETF symbols (crypto) via [etf_rs.yf_symbols] ---
+
+
+def test_run_fetches_aliased_symbol_and_aligns_to_benchmark_days(tmp_path, monkeypatch):
+    """BTCUSD is fetched as BTC-USD, reported as BTCUSD, and its 7-day-a-week
+    rows are cut to the benchmark's trading days before scoring — the 3M
+    offsets count rows, so weekend bars would shrink 63 rows to ~9 weeks."""
+    seen: list[list[str]] = []
+    days = pd.date_range(end="2026-09-11", periods=200, freq="D")  # incl. weekends
+    # +50% only on the weekend bars: after alignment those rows are gone and
+    # the series is flat → BTCUSD scores exactly like a flat ETF.
+    btc = pd.DataFrame({
+        "time_key": days,
+        "close": [150.0 if d.weekday() >= 5 else 100.0 for d in days],
+    })
+
+    def fake_fetch(tickers, **kw):
+        seen.append(list(tickers))
+        return {"BTC-USD": btc, "AAA": _kline(5), "SPY": _kline(0)}
+
+    monkeypatch.setattr(etf_rs, "_fetch_klines", fake_fetch)
+    cfg = _cfg(tickers={"AAA": "甲", "BTCUSD": "比特币现货"},
+               yf_symbols={"btcusd": "BTC-USD"})
+    out = etf_rs.run_etf_rs(cfg, tmp_path, date(2026, 9, 15))
+    assert seen == [["AAA", "BTC-USD", "SPY"]]
+    assert out.read_text() == "1. AAA - 甲\n2. BTCUSD - 比特币现货\n"
+
+
+def test_align_to_benchmark_days_keeps_unaliased_and_missing_benchmark():
+    days = pd.date_range(end="2026-09-11", periods=10, freq="D")
+    crypto = pd.DataFrame({"time_key": days, "close": range(10)})
+    bench = _kline(0, n=5)
+    out = etf_rs.align_to_benchmark_days({"X": crypto, "SPY": bench}, ["X"], "SPY")
+    assert list(out["X"]["time_key"]) == list(bench["time_key"])
+    # no benchmark → left untouched
+    same = etf_rs.align_to_benchmark_days({"X": crypto}, ["X"], "SPY")
+    assert same["X"] is crypto
