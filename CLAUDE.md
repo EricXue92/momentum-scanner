@@ -70,6 +70,13 @@ Output: `output/TV/{US,HK}/` (TradingView, comma-sep) mirrored to
   day's 1h bars (last bar's close), warns, and only falls back to the stale
   day when intraday has nothing either. The rest of us-eod still `dropna`s
   and runs a day stale on such days.
+- **EMA20 first-break list (US, read-only):** `ema20_break.py`
+  (`[ema20_break]`) runs right before the SMA50 prune over the same master —
+  latest close < EMA20 AND prior close ≥ prior EMA20 (cross-down day only) →
+  `output/TV/US/<date>_EMA20Break.txt` (comma-sep). Never touches the master.
+  Empty → no file; same-day rerun overwrites; keeps only the newest
+  `keep_files` (3) lists itself (stricter than the `TV/US` 5-day rule).
+  Reuses `sma50_prune._fetch_daily_closes` (incl. the NaN-Close fill). Soft-fail.
 - **EOD Repeat (US):** tickers the master would drop that still fired an
   _event_ Longs group today are collected by `_repeat_hits` **before**
   `_dedup_seen` (which mutates `us_seen`) and written to

@@ -70,6 +70,16 @@ top_n     = 10          # 每日 RS 最强快照条数 (audit 写 output/rs_us_<
 #   drop_days_below = ...   # 连续在均线下方天数
 #   drop_frac_below = ...   # persistence_window 内占比
 
+# EMA20 首次跌破名单: us-eod 开跑前 (SMA50 剪除之前) 扫 eod_seen_US.txt,
+# 最新收盘 < EMA20 且前一日收盘 >= 前一日 EMA20 (今天是跌破当天) 的票
+# 写入 output/TV/US/<date>_EMA20Break.txt (逗号分隔, 可导入 TradingView)。
+# 只出名单, 不改 master。没有命中不写文件; 同日重跑覆盖; 只保留最新 keep_files 份。
+# 软失败: yfinance 整体失败则跳过。仅 US。不镜像 Webull, 不同步 Futu/TV。
+[ema20_break]
+enabled = true
+ema_period = 20
+keep_files = 3
+
 # SMA50 剪除: us-eod 开跑前排查 eod_seen_US.txt, 收盘价连续 N 天低于 SMA50
 # 且最新收盘低于前一日收盘 (仍在下跌, 线下反弹的票保留) 的股票从 master 移除
 # (先备份 .bak.<stamp>), 走弱票未来重新走强可再入选。

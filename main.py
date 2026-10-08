@@ -2139,6 +2139,19 @@ def main() -> int:
         us_seen_path = _eod_seen_path(output_dir, "US")
         hk_seen_path = _eod_seen_path(output_dir, "HK")
 
+        # --- EMA20 first-break list (US master, read-only) ---
+        # Before the SMA50 prune so the list covers the full master.
+        # Soft-fail: any error skips the list, EOD proceeds.
+        try:
+            from ema20_break import write_ema20_break_list
+            write_ema20_break_list(
+                us_seen_path,
+                config.get("ema20_break", {}),
+                us_output_dir / f"{today}_EMA20Break.txt",
+            )
+        except Exception as e:
+            logger.warning(f"[ema20-break] failed, skipped: {e}")
+
         # --- SMA50 prune (US master, before load) ---
         # Tickers whose close sat below SMA50 for N consecutive completed days
         # are removed from the master (backed up first) so they can re-qualify
