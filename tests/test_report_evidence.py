@@ -75,7 +75,7 @@ def test_summarize_for_log():
     assert evidence.summarize_for_log(None) == "news=0 filings=0 analyst=no calendar=no"
 
 
-from datetime import datetime, timezone  # noqa: E402
+from datetime import datetime, timedelta, timezone  # noqa: E402
 from unittest.mock import MagicMock  # noqa: E402
 
 import pandas as pd  # noqa: E402
@@ -200,7 +200,10 @@ def test_extract_calendar_datetime_value_truncates_to_date():
 
 def test_fetch_evidence_us_assembles_all_sources(monkeypatch):
     t = _ticker_mock()
-    t.news = [_news_item("n1", "2026-09-08T10:00:00Z"), _news_item("n2", "2026-09-07T10:00:00Z")]
+    # fetch_evidence ages news against the wall clock (not `as_of`), so the
+    # fixture dates must be relative — fixed 2026-09 dates aged out after 30 days.
+    recent = [(datetime.now(timezone.utc) - timedelta(days=d)).strftime("%Y-%m-%dT%H:%M:%SZ") for d in (1, 2)]
+    t.news = [_news_item("n1", recent[0]), _news_item("n2", recent[1])]
     monkeypatch.setattr(evidence.yf, "Ticker", lambda sym: t)
     monkeypatch.setattr(
         evidence.edgar, "fetch_recent_filings",
