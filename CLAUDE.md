@@ -20,6 +20,8 @@ uv run main.py --mode hk-eod         # HK EOD (Shorts + Longs/Leaders/RS)   — 
 uv run main.py --mode morning-gap    # US intraday gap scan; clean-exits outside ET window
 uv run main.py --mode hk-morning-gap # HK intraday gap scan (post-open only)
 uv run main.py --mode report --market {us,hk}  # CANSLIM report (HTML) from today's .txt files; only US is scheduled
+uv run main.py --mode etf-rs         # ETF 3M RS ranking + trend page only (also runs at the end of us-eod)
+uv run main.py --mode rs-line-audit --market {us,hk,both} --dry-run  # audit the master; without --dry-run it prompts to prune
 uv run pytest tests/ -v             # `uv run python -m pytest` works too
 ```
 
@@ -171,8 +173,41 @@ local (throttle-prone) k-line fetch.
   master yet, and keeping it would let every IPO through ungated on its first
   eligible day. HK re-evaluates it at 21 rows; a US name only comes back if it
   passes a Finviz long-side screener again. Key unset = gate off.
+- **Do NOT make fetch failure hard-fail:** walk back ≤ 3 days of stale cache, then
+  pass through (no gate) with a warning. Tickers **missing** from the table are
+  KEPT, not dropped.
+- **RS-line trend (annotate in EOD; manual prune via audit mode):** cloud scripts
+  publish `rs_below_ma` / `rs_days_below_ma` / `rs_frac_below_ma` (TraderLion-style
+  RS line = price/index vs its own EMA21) as extra columns in
+  `data/{us_rs_3m,hk_rs}/<date>.csv`. The EOD log annotates long-side survivors
+  whose RS line is persistently below its MA; EOD itself has **no `.txt`/dedup
+  effect**. Computed cloud-side only (local never refetches klines). Config:
+  `[rs_line]`. Spec:
+  `docs/superpowers/specs/2026-05-27-rs-line-trend-filter-design.md`.
+- **`uv run main.py --mode rs-line-audit [--market us|hk|both] [--dry-run|--yes]`**
+  scores the cross-day master, writes
+  `output/rs-audit/rs_line_audit_<MKT>_<date>{,_drop,_keep_ranked}.txt`, prints the
+  report, then **prompts y/N** to prune the drops from
+  `output/state/eod_seen_{US,HK}.txt` so they can re-qualify on a future EOD run.
+  Confirmed prunes back the master up first as `eod_seen_<MKT>.txt.bak.<stamp>`.
+  `--yes` skips the prompt (auto-prune, legacy non-interactive behavior);
+  `--dry-run` writes the report + sidecars but does NOT touch the master
+  (no prompt, no backup). **Pruning** stays manual/operator-triggered, but a
+  `--dry-run` audit is chained daily as a soft step at the end of
+  `run_eod.sh` / `run_hk_eod.sh` (after the report) to produce the
+  strongest-RS snapshot below.
+- **Daily strongest-RS snapshot:** every audit run also writes the top
+  `[rs_line].top_n` (10) of `keep_ranked` (unknowns excluded, never padded) to
+  `output/TV/US/rs_us_<date>.txt` / `output/hk_rs_<date>.txt` — dated, skipped
+  when empty, overwritten on same-day rerun (ranking snapshot, no dedup
+  semantics; not Webull-mirrored, no eod_seen effect).
+  Cleanup: snapshots 4-day window; audit report + sidecars (`rs-audit/`)
+  5-day window.
+
+## ETF 3M RS ranking
+
 - **ETF 3M RS ranking** (`etf_rs.py`, `[etf_rs]` config): the fixed
-  `[etf_rs.tickers]` table (ticker = 中文名, ~50 entries) is scored
+  `[etf_rs.tickers]` table (ticker = 中文名, 57 entries) is scored
   **locally** with the same 3M algorithm (`compute_us_rs_3m_table`, vs
   `benchmark` SPY; one yfinance batch, no cloud step) and written to
   `output/TV/US/<date>_ETF_rs.txt` as **one `N. TICKER 🟢↑N - 中文名 | 前五大持仓`
@@ -211,7 +246,7 @@ local (throttle-prone) k-line fetch.
   score = `rank_etfs` on klines truncated to that day (tests pin this), with
   today's ticker list + adjusted closes, so a past day may sit a place off
   that day's `.txt`. Y = 0-99 percentile (within the ETF set → RS ≥ 90 is
-  always ~5 of 52) / rank / raw excess return; top `chart_top_n` (20) thick.
+  always ~6 of 57) / rank / raw excess return; top `chart_top_n` (20) thick.
   Soft inside `run_etf_rs`: a render failure never costs the `.txt`.
   **Also published to GitHub Pages** (https://ericxue92.github.io/momentum-scanner/):
   `.github/workflows/etf_rs_page.yml` rebuilds it in the cloud
@@ -221,6 +256,9 @@ local (throttle-prone) k-line fetch.
   cron, manual dispatch. The build exits 1 when no page was produced so an
   outage keeps yesterday's page live instead of deploying nothing. The local
   copy under `output/Reports/ETF/` is independent of it.
+
+## yfinance single-ticker frames
+
 - **yfinance single-ticker frames:** `group_by="ticker"` returns a (ticker,
   field) MultiIndex even for ONE ticker (yfinance 1.x); every `single` branch
   indexes `data["Close"]` flat, so each download site wraps the result in
@@ -239,36 +277,6 @@ local (throttle-prone) k-line fetch.
   the same latent bug. Both accept flat frames now. **Test fakes must mimic
   the runtime shape** (flat for one ticker) — the old MultiIndex-only fake is
   why the single-ticker test stayed green.
-- **Do NOT make fetch failure hard-fail:** walk back ≤ 3 days of stale cache, then
-  pass through (no gate) with a warning. Tickers **missing** from the table are
-  KEPT, not dropped.
-- **RS-line trend (annotate in EOD; manual prune via audit mode):** cloud scripts
-  publish `rs_below_ma` / `rs_days_below_ma` / `rs_frac_below_ma` (TraderLion-style
-  RS line = price/index vs its own EMA21) as extra columns in
-  `data/{us_rs_3m,hk_rs}/<date>.csv`. The EOD log annotates long-side survivors
-  whose RS line is persistently below its MA; EOD itself has **no `.txt`/dedup
-  effect**. Computed cloud-side only (local never refetches klines). Config:
-  `[rs_line]`. Spec:
-  `docs/superpowers/specs/2026-05-27-rs-line-trend-filter-design.md`.
-- **`uv run main.py --mode rs-line-audit [--market us|hk|both] [--dry-run|--yes]`**
-  scores the cross-day master, writes
-  `output/rs-audit/rs_line_audit_<MKT>_<date>{,_drop,_keep_ranked}.txt`, prints the
-  report, then **prompts y/N** to prune the drops from
-  `output/state/eod_seen_{US,HK}.txt` so they can re-qualify on a future EOD run.
-  Confirmed prunes back the master up first as `eod_seen_<MKT>.txt.bak.<stamp>`.
-  `--yes` skips the prompt (auto-prune, legacy non-interactive behavior);
-  `--dry-run` writes the report + sidecars but does NOT touch the master
-  (no prompt, no backup). **Pruning** stays manual/operator-triggered, but a
-  `--dry-run` audit is chained daily as a soft step at the end of
-  `run_eod.sh` / `run_hk_eod.sh` (after the report) to produce the
-  strongest-RS snapshot below.
-- **Daily strongest-RS snapshot:** every audit run also writes the top
-  `[rs_line].top_n` (10) of `keep_ranked` (unknowns excluded, never padded) to
-  `output/TV/US/rs_us_<date>.txt` / `output/hk_rs_<date>.txt` — dated, skipped
-  when empty, overwritten on same-day rerun (ranking snapshot, no dedup
-  semantics; not Webull-mirrored, no eod_seen effect).
-  Cleanup: snapshots 4-day window; audit report + sidecars (`rs-audit/`)
-  5-day window.
 
 ## Futu sync
 

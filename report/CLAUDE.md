@@ -1,12 +1,12 @@
 # report/ — CANSLIM + catalyst reports
 
-Moved from the root `CLAUDE.md` (loads only when working under `report/`).
-The catalyst-report process constraints stay in the root file.
+Loads only when working under `report/`. The catalyst-report process
+constraints live in the root `CLAUDE.md`.
 
 **Report — daily LLM generation is OFF since 2026-09-17** (both the post-market
 CANSLIM step in `run_eod.sh`, commented out, and the pre-market catalyst report,
 `[morning_gap_catalyst].enabled = false`). Code paths kept for manual use
-(`--mode report --market us`). The rest of this bullet describes the wiring.
+(`--mode report --market us`).
 Soft-fail (wrapper exit code reflects only the EOD step). Shorts /
 HK Shorts / Morning Gap are excluded from it. **US only** — `run_hk_eod.sh`
 no longer runs the report step (HK code path kept for manual use). Output is
