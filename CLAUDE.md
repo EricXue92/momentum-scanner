@@ -10,6 +10,11 @@ and 20-day avg volume ≥ 1M shares in both markets (Finviz
 `sh_avgvol_o1000`, `min_avg_volume = 1_000_000`; was 500K). The code-side
 fallbacks for unset `min_price` / `min_avg_volume` match these values.
 Output older than that date was produced under the looser floors.
+**Avg-volume exception since 2026-10-10:** every US list is back at ≥ 500K
+— Longs, Leaders, conditional RS, Shorts (Finviz `sh_avgvol_o500`), the IPO
+ladder (`[settings].min_avg_volume`) and morning-gap
+(`[morning_gap].min_avg_volume`), with the US code-side fallbacks at 500K
+too. HK stays at 1M.
 
 ## Commands
 

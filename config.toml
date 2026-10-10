@@ -33,7 +33,7 @@ min_rs_percentile_3m     = 95    # 3M 层 (≥95 = top 5%): Leaders / 条件 RS 
 # 美股 IPO ladder 阈值 (Finviz 屏过但 yfinance 历史不足的票)
 min_market_cap = 300_000_000     # USD; = Finviz cap_smallover
 min_price      = 20.0            # USD; = Finviz sh_price_o20
-min_avg_volume = 1_000_000       # 20日股/天; = Finviz sh_avgvol_o1000 (2026-10-03 前 500K)
+min_avg_volume = 500_000         # 20日股/天; = Finviz sh_avgvol_o500 (2026-10-03 → 10-10 为 1M)
 # min_dollar_volume / min_adr_percent 复用上方 [settings] 值
 # 方向闸: 不足 64 天的新股 (还没有 3M RS) 要求 perf_4w 严格大于此值 (%)。
 # 20 行时 perf_4w 算不出 → 当天不出, 21 行起评估。删除/注释此键 = 关闭。
@@ -252,12 +252,13 @@ ETHUSD = "不适用: 加密货币现货"
 #
 # TheSetup: 放量 + 大缺口 (gap ≥ 10% + 本地 RVol ≥ 3× 20 日均量), 最高优先级。
 # 价格门槛与其他组一致 ($20, Finviz sh_price_o20; 2026-10-03 前为 $10); avgvol/$vol/ADR%/RS 12M/SMA50+200 与其他组一致。
+# Longs 6 组日均量 ≥ 500K (Finviz sh_avgvol_o500; 2026-10-03 → 10-10 为 1M)。
 # 与其他事件组一样过跨日 master 去重 (只出新票, 老票复燃进 Repeat.txt)。
 # 不过 12M RS 闸 (min_rs_percentile = 0; 其他组缺省继承 [settings].min_rs_percentile_longs)。
 [[longs]]
 key = "the_setup"
 name = "The Setup (Heavy Volume + Gap Up 10%)"
-filters = ["ind_stocksonly","cap_smallover","sh_avgvol_o1000","sh_price_o20","ta_gap_u10","ta_sma50_pa","ta_sma200_pa"]
+filters = ["ind_stocksonly","cap_smallover","sh_avgvol_o500","sh_price_o20","ta_gap_u10","ta_sma50_pa","ta_sma200_pa"]
 min_relative_volume = 3
 relative_volume_days = 20
 min_rs_percentile = 0
@@ -272,32 +273,32 @@ adr_bypass_min_percent = 3.0
 [[longs]]
 key = "earnings_gap"
 name = "Earnings Gap"
-filters = ["ind_stocksonly","cap_smallover","earningsdate_today","sh_avgvol_o1000","sh_price_o20","sh_relvol_o1.5","ta_gap_u5","ta_sma50_pa","ta_sma200_pa"]
+filters = ["ind_stocksonly","cap_smallover","earningsdate_today","sh_avgvol_o500","sh_price_o20","sh_relvol_o1.5","ta_gap_u5","ta_sma50_pa","ta_sma200_pa"]
 adr_bypass_gap_percent = 10.0   # 大 gap ADR% 旁路, 说明见 TheSetup
 adr_bypass_min_percent = 3.0
 
 [[longs]]
 key = "high_volume"
 name = "Relative Volume Surge"
-filters = ["ind_stocksonly","cap_smallover","sh_avgvol_o1000","sh_price_o20","ta_perf_dup","ta_sma50_pa","ta_sma200_pa"]
+filters = ["ind_stocksonly","cap_smallover","sh_avgvol_o500","sh_price_o20","ta_perf_dup","ta_sma50_pa","ta_sma200_pa"]
 min_relative_volume = 3
 relative_volume_days = 20
 
 [[longs]]
 key = "gap_up"
 name = "Gap Up"
-filters = ["ind_stocksonly","cap_smallover","sh_avgvol_o1000","sh_price_o20","ta_gap_u3","ta_sma50_pa","ta_sma200_pa"]
+filters = ["ind_stocksonly","cap_smallover","sh_avgvol_o500","sh_price_o20","ta_gap_u3","ta_sma50_pa","ta_sma200_pa"]
 
 [[longs]]
 key = "new_high_52w"
 name = "52W New High"
-filters = ["ind_stocksonly","cap_smallover","sh_avgvol_o1000","sh_price_o20","ta_highlow52w_nh","ta_sma200_pa","ta_sma50_pa"]
+filters = ["ind_stocksonly","cap_smallover","sh_avgvol_o500","sh_price_o20","ta_highlow52w_nh","ta_sma200_pa","ta_sma50_pa"]
 
 [[longs]]
 key = "top_gainers"
 name = "Top Gainers"
 signal = "ta_topgainers"
-filters = ["ind_stocksonly","cap_smallover","sh_avgvol_o1000","sh_price_o20","ta_sma50_pa","ta_sma200_pa"]
+filters = ["ind_stocksonly","cap_smallover","sh_avgvol_o500","sh_price_o20","ta_sma50_pa","ta_sma200_pa"]
 
 # EOD Repeat: 已在跨日 master (output/state/eod_seen_US.txt) 里、今天又命中
 # 事件类 Longs 子组的老票 —— 汇总到 <date>_Repeat.txt 供每日复查。
@@ -309,32 +310,33 @@ keys = ["the_setup", "earnings_gap", "high_volume", "gap_up", "top_gainers"]
 file_stem = "Repeat"
 
 # Leaders: 强势 + 站上 SMA50/SMA200，5 个 perf 窗口合并去重，输出 Leaders.txt。
-# 共同条件: cap ≥ small、avg vol ≥ 1M、price > $20。
+# 共同条件: cap ≥ small、avg vol ≥ 500K (2026-10-03 → 10-10 为 1M)、price > $20。
 # 全局 min_dollar_volume ($100M) 和 min_adr_percent (≥4.0%) 自动套用。
 [[leaders]]
 name = "Leaders 4W +30%"
-filters = ["ind_stocksonly","cap_smallover","sh_avgvol_o1000","sh_price_o20","ta_perf_4w30o","ta_sma200_pa","ta_sma50_pa"]
+filters = ["ind_stocksonly","cap_smallover","sh_avgvol_o500","sh_price_o20","ta_perf_4w30o","ta_sma200_pa","ta_sma50_pa"]
 
 [[leaders]]
 name = "Leaders 13W +50%"
-filters = ["ind_stocksonly","cap_smallover","sh_avgvol_o1000","sh_price_o20","ta_perf_13w50o","ta_sma200_pa","ta_sma50_pa"]
+filters = ["ind_stocksonly","cap_smallover","sh_avgvol_o500","sh_price_o20","ta_perf_13w50o","ta_sma200_pa","ta_sma50_pa"]
 
 [[leaders]]
 name = "Leaders 26W +100%"
-filters = ["ind_stocksonly","cap_smallover","sh_avgvol_o1000","sh_price_o20","ta_perf_26w100o","ta_sma200_pa","ta_sma50_pa"]
+filters = ["ind_stocksonly","cap_smallover","sh_avgvol_o500","sh_price_o20","ta_perf_26w100o","ta_sma200_pa","ta_sma50_pa"]
 
 [[leaders]]
 name = "Leaders YTD +100%"
-filters = ["ind_stocksonly","cap_smallover","sh_avgvol_o1000","sh_price_o20","ta_perf_ytd100o","ta_sma200_pa","ta_sma50_pa"]
+filters = ["ind_stocksonly","cap_smallover","sh_avgvol_o500","sh_price_o20","ta_perf_ytd100o","ta_sma200_pa","ta_sma50_pa"]
 
 [[leaders]]
 name = "Leaders 52W +150%"
-filters = ["ind_stocksonly","cap_smallover","sh_avgvol_o1000","sh_price_o20","ta_perf_52w150o","ta_sma200_pa","ta_sma50_pa"]
+filters = ["ind_stocksonly","cap_smallover","sh_avgvol_o500","sh_price_o20","ta_perf_52w150o","ta_sma200_pa","ta_sma50_pa"]
 
 # Shorts: 基于 Kristjan Kullamägi 的做空筛选，输出 Shorts.txt。
+# 日均量 ≥ 500K (sh_avgvol_o500; 2026-10-10 前 1M)。
 [shorts]
 name = "Short Candidates"
-filters = ["ind_stocksonly", "ta_sma20_pa20", "ta_sma50_pa", "sh_avgvol_o1000", "sh_price_o5", "cap_microover"]
+filters = ["ind_stocksonly", "ta_sma20_pa20", "ta_sma50_pa", "sh_avgvol_o500", "sh_price_o5", "cap_microover"]
 min_dollar_volume = 50_000_000   # Shorts 专用: 比全局 $100M 宽松 (2026-09-23)
 min_consecutive_up_days = 3
 # 按市值分级的月涨幅阈值 (%)
@@ -343,9 +345,10 @@ perf_mid_cap = 200      # $2B–$10B
 perf_small_cap = 300    # $50M–$2B
 
 # RS: 条件触发，仅当 SPY 和 QQQ 当日都跌 ≥ 1.0% 时运行。
+# 日均量 ≥ 500K (sh_avgvol_o500; 2026-10-10 前 1M)。
 [rs]
 name = "Relative Strength"
-filters = ["ind_stocksonly","cap_smallover","sh_avgvol_o1000","sh_price_o20","ta_perf_dup","ta_sma200_pa","ta_sma50_pa"]
+filters = ["ind_stocksonly","cap_smallover","sh_avgvol_o500","sh_price_o20","ta_perf_dup","ta_sma200_pa","ta_sma50_pa"]
 
 # Morning Gap: 盘前 -20/-10/-5 + 盘后 +5/+10/+15/+20/+25/+30 分钟扫描。
 # 负 offset = 盘前 (→ MorningGapPre{N}.txt, 跳过盘中累计量过滤);
@@ -361,7 +364,7 @@ min_gap_percent = 5.0           # 盘后 discovery
 min_gap_percent_pre = 5.0       # 盘前 discovery (负 offset); 不设则回落到 min_gap_percent
 min_market_cap = 300_000_000    # USD; = Finviz cap_smallover
 min_price = 20.0                # USD; = Finviz sh_price_o20
-min_avg_volume = 1_000_000      # 20日股/天; = Finviz sh_avgvol_o1000 (2026-10-03 前 500K)
+min_avg_volume = 500_000        # 20日股/天; = Finviz sh_avgvol_o500 (2026-10-03 → 10-10 为 1M)
 avg_volume_days = 20
 # 盘前专用: Futu pre_volume ≥ 此比例 × 20日均量, 否则视为薄盘假 gap 丢弃
 # (NVT/WIX 2026-09-11 盘前 +6%/+5% 只是几笔零星成交, 开盘 +1.7%/-0.1%)。0 = 关闭。
