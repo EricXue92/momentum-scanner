@@ -82,16 +82,16 @@ ADR% (Kullamägi-style) measures how much a stock moves _now_; it replaced the o
 
 ### RS Gates by Group
 
-Doctrine: **event groups check long-term strength (12M ≥ 90); everything else checks recent strength (3M ≥ 95).** One independent knob per group; `0` disables a layer.
+Doctrine: **event groups check long-term strength (12M ≥ 90); everything else checks recent strength (3M ≥ 90).** One independent knob per group; `0` disables a layer.
 
 | Group                                                             | 12M gate                                | 3M gate                         |
 | ----------------------------------------------------------------- | --------------------------------------- | ------------------------------- |
 | Longs: EarningsGap / HighVolume / GapUp / NewHigh52W / TopGainers | `min_rs_percentile_longs` = **90**      | —                               |
 | Longs: TheSetup                                                   | off (per-group `min_rs_percentile = 0`) | —                               |
-| Leaders                                                           | `min_rs_percentile` = 0 (off)           | `min_rs_percentile_3m` = **95** |
-| Conditional RS                                                    | `min_rs_percentile_rs` = 0 (off)        | **95**                          |
-| US Shorts                                                         | `min_rs_percentile_shorts` = 0 (off)    | **95**                          |
-| US IPO (≥ 64 days of history)                                     | —                                       | **95**                          |
+| Leaders                                                           | `min_rs_percentile` = 0 (off)           | `min_rs_percentile_3m` = **90** |
+| Conditional RS                                                    | `min_rs_percentile_rs` = 0 (off)        | **90**                          |
+| US Shorts                                                         | `min_rs_percentile_shorts` = 0 (off)    | **90**                          |
+| US IPO (≥ 64 days of history)                                     | —                                       | **90**                          |
 | US IPO (< 64 days of history)                                     | —                                       | no RS — 4-week gain > 20%       |
 | Morning Gap, ETF ranking                                          | —                                       | —                               |
 
@@ -101,7 +101,7 @@ Doctrine: **event groups check long-term strength (12M ≥ 90); everything else 
 
 ### Longs
 
-Oliver Kell's momentum/breakout setups. Six mutually exclusive groups — the earlier group wins, so a ticker lands in at most one Longs file per day. All share: Small Cap+, Avg Vol ≥ 1M, above SMA50 & SMA200, plus the shared gates.
+Oliver Kell's momentum/breakout setups. Six mutually exclusive groups — the earlier group wins, so a ticker lands in at most one Longs file per day. All share: Small Cap+, Avg Vol ≥ 500K, above SMA50 & SMA200, plus the shared gates.
 
 | Priority | Group         | Additional filters                                                                                                |
 | -------- | ------------- | ----------------------------------------------------------------------------------------------------------------- |
@@ -114,7 +114,7 @@ Oliver Kell's momentum/breakout setups. Six mutually exclusive groups — the ea
 
 ### Leaders
 
-Long-term trend leaders: Small Cap+, Avg Vol ≥ 1M, Price > $20, above SMA50 & SMA200, shared gates, RS 3M ≥ 95. Five performance windows merged into one `Leaders.txt`:
+Long-term trend leaders: Small Cap+, Avg Vol ≥ 500K, Price > $20, above SMA50 & SMA200, shared gates, RS 3M ≥ 90. Five performance windows merged into one `Leaders.txt`:
 
 | 4 weeks | 13 weeks | 26 weeks | YTD     | 52 weeks |
 | ------- | -------- | -------- | ------- | -------- |
@@ -122,13 +122,13 @@ Long-term trend leaders: Small Cap+, Avg Vol ≥ 1M, Price > $20, above SMA50 & 
 
 ### Conditional RS
 
-Stocks holding up in a weak tape. **Runs only when SPY and QQQ are both down ≥ 1.0% on the day.** Filters: Small Cap+, Avg Vol ≥ 1M, Price > $20, Day Up, above SMA50 & SMA200, shared gates, RS 3M ≥ 95.
+Stocks holding up in a weak tape. **Runs only when SPY and QQQ are both down ≥ 1.0% on the day.** Filters: Small Cap+, Avg Vol ≥ 500K, Price > $20, Day Up, above SMA50 & SMA200, shared gates, RS 3M ≥ 90.
 
 ### US Shorts
 
 Kullamägi's parabolic blow-off setup. Re-detected daily (excluded from all dedup).
 
-1. **Finviz:** price 20%+ above SMA20, above SMA50, Avg Vol > 1M, price > $5, Cap > $50M → then **RS 3M ≥ 95** prunes the list.
+1. **Finviz:** price 20%+ above SMA20, above SMA50, Avg Vol > 500K, price > $5, Cap > $50M → then **RS 3M ≥ 90** prunes the list.
 2. **yfinance + Futu market cap**, in order:
 
 | Filter              | Threshold                                                                                       |
@@ -148,11 +148,11 @@ An auto-collected sidecar: candidates that passed a Longs/Leaders/RS Finviz scre
 | History                    | ≥ 20 trading days | ≥ 20 trading days  | always      |
 | Market cap                 | ≥ $300M           | ≥ HK$300M          | always      |
 | Price                      | ≥ $20             | ≥ HK$50            | always      |
-| Avg volume / Dollar volume | ≥ 1M / ≥ $100M    | ≥ 1M / ≥ HK$100M   | ≥ 20 days   |
+| Avg volume / Dollar volume | ≥ 500K / ≥ $100M  | ≥ 1M / ≥ HK$100M   | ≥ 20 days   |
 | ADR%                       | ≥ 4.0%            | ≥ 3.0%             | ≥ 20 days   |
 | Above SMA50                | ✓                 | ✓                  | ≥ 50 days   |
 | 4-week gain                | > 20%             | > 20%              | < 64 days   |
-| RS 3M                      | ≥ 95 (vs SPY)     | ≥ 95 (vs HSI)      | ≥ 64 days   |
+| RS 3M                      | ≥ 90 (vs SPY)     | ≥ 90 (vs HSI)      | ≥ 64 days   |
 | Above SMA200               | ✓                 | ✓                  | ≥ 200 days  |
 
 - **Direction gate below 64 days:** a listing that young has no 3M RS yet, so its 4-week gain must be strictly above 20% (`ipo_min_perf_4w`, in `[settings]` for US and `[hk_settings]` for HK; remove the key to disable). At exactly 20 days the 4-week gain can't be computed, so the name is not emitted that day.
@@ -201,7 +201,7 @@ Nine scans per day: **pre-market** at −20/−10/−5 min → `MorningGapPre{20
 
 | Filter               | Threshold                                                                                         | Pre | Post |
 | -------------------- | ------------------------------------------------------------------------------------------------- | --- | ---- |
-| 20-day avg volume    | ≥ 1M shares/day                                                                                   | ✓   | ✓    |
+| 20-day avg volume    | ≥ 500K shares/day                                                                                 | ✓   | ✓    |
 | Pre-market volume    | Futu `pre_volume` ≥ 5% × 20-day avg volume — drops thin-tape gaps printed on a few hundred shares | ✓   | —    |
 | Dollar Volume        | ≥ $100M                                                                                           | ✓   | ✓    |
 | ADR%                 | ≥ 4.0%; relaxed to 3.0% when gap ≥ 10%                                                            | ✓   | ✓    |
@@ -226,7 +226,7 @@ Shared by all five long-side groups (`[hk_settings]`):
 | ADR%                 | ≥ 3.0%                                              | HK blue chips are structurally less volatile |
 | Price                | ≥ HK$50                                             |                                              |
 | Above SMA50 & SMA200 | both                                                |                                              |
-| RS (vs HSI)          | event groups **12M ≥ 90**; Leaders / RS **3M ≥ 95** | mirrors the US split                         |
+| RS (vs HSI)          | event groups **12M ≥ 90**; Leaders / RS **3M ≥ 90** | mirrors the US split                         |
 
 ### HK Long-Side Groups
 
@@ -246,7 +246,7 @@ Priority-ordered; each ticker enters at most one file per day.
 
 ### HK Shorts
 
-Same as US Shorts in HKD: RS 3M ≥ 95 (vs HSI, universe pre-filter), cap ≥ HK$50M, avg vol ≥ 1M shares/day, dollar volume ≥ HK$50M, ADR% ≥ 4.0%, performance 50% / 200% / 300% by cap tier (≥ HK$10B / HK$2B–10B / HK$50M–2B), ≥ 3 consecutive up days. Config: `[hk_shorts]`.
+Same as US Shorts in HKD: RS 3M ≥ 90 (vs HSI, universe pre-filter), cap ≥ HK$50M, avg vol ≥ 1M shares/day, dollar volume ≥ HK$50M, ADR% ≥ 4.0%, performance 50% / 200% / 300% by cap tier (≥ HK$10B / HK$2B–10B / HK$50M–2B), ≥ 3 consecutive up days. Config: `[hk_shorts]`.
 
 ### HK IPO
 

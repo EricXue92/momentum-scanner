@@ -28,7 +28,7 @@ min_rs_percentile        = 0   # Leaders 12M (≥80 = top 20%) # 80
 min_rs_percentile_longs  = 90    # Longs 6 组 12M (≥90 = top 10%); TheSetup 组内覆盖为 0
 min_rs_percentile_rs     = 0     # 条件 RS 组 12M 层已关闭; 只走下方 3M 单闸
 min_rs_percentile_shorts = 0     # US Shorts 12M 层已关闭; 只走下方 3M 单闸
-min_rs_percentile_3m     = 95    # 3M 层 (≥95 = top 5%): Leaders / 条件 RS 组 / Shorts / IPO(≥64天)
+min_rs_percentile_3m     = 90    # 3M 层 (≥90 = top 10%): Leaders / 条件 RS 组 / Shorts / IPO(≥64天)
 
 # 美股 IPO ladder 阈值 (Finviz 屏过但 yfinance 历史不足的票)
 min_market_cap = 300_000_000     # USD; = Finviz cap_smallover
@@ -408,7 +408,7 @@ min_price               = 50.0            # HKD (2026-10-03 前 20)
 #   HK Shorts                           → 仅 3M ([hk_shorts].min_rs_percentile_3m, ≙ 美股 Shorts)
 # 任一键设 0 关闭对应层。
 min_rs_percentile_longs    = 90           # 事件组 12M (≥90 = top 10%)
-min_rs_percentile_longs_3m = 95           # Leaders/RS/IPO 3M (≥95 = top 5%)
+min_rs_percentile_longs_3m = 90           # Leaders/RS/IPO 3M (≥90 = top 10%)
 # HK IPO 方向闸: 不足 64 天的新股 (还没有 3M RS) 要求 perf_4w 严格大于此值 (%)。
 # 20 行时 perf_4w 算不出 → 当天不出, 21 行起评估。删除/注释此键 = 关闭。
 ipo_min_perf_4w         = 20.0
@@ -420,7 +420,7 @@ hsi_rs_trigger          = -1.0            # HSI 当日跌幅 ≤ 此值则触发
 name = "HK Short Candidates"
 # 3M RS 单闸 (对齐美股 Shorts): 在 yfinance 批量下载前先筛 universe;
 # 表中缺失的票保留; 缺省继承 [hk_settings].min_rs_percentile_longs_3m; 设 0 关闭。
-min_rs_percentile_3m = 95
+min_rs_percentile_3m = 90
 min_avg_volume = 1_000_000            # 日均成交量 (股) — Shorts 独有
 min_market_cap = 50_000_000            # HKD
 min_dollar_volume = 50_000_000         # HKD; 对齐美股 Shorts $50M (2026-09-23 放宽)

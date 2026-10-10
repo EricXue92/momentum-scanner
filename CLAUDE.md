@@ -146,8 +146,8 @@ Output: `output/TV/{US,HK}/` (TradingView, comma-sep) mirrored to
 Percentile tables are computed daily on **GitHub Actions** and published as CSVs;
 the local pipeline only fetches them. US: `Fred6725/rs-log` (12M, vs SPY) +
 `data/us_rs_3m/` (3M). HK: `data/hk_rs/` (12M+3M, vs HSI). Thresholds: 12M tiers
-90, 3M tiers 95 in both markets since 2026-10-02 (Leaders / conditional RS /
-Shorts / IPO ≥ 64 rows; US `[settings].min_rs_percentile_3m`, HK
+90, 3M tiers 90 in both markets since 2026-10-10 (was 95 from 2026-10-02;
+Leaders / conditional RS / Shorts / IPO ≥ 64 rows; US `[settings].min_rs_percentile_3m`, HK
 `[hk_settings].min_rs_percentile_longs_3m` + `[hk_shorts].min_rs_percentile_3m`;
 the code-side fallback when a key is unset is still 90); set 0 to
 disable a tier. The HK metrics frame is now also cloud-published (`data/hk_metrics/`,
