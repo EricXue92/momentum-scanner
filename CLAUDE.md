@@ -212,7 +212,7 @@ local (throttle-prone) k-line fetch.
 ## ETF 3M RS ranking
 
 - **ETF 3M RS ranking** (`etf_rs.py`, `[etf_rs]` config): the fixed
-  `[etf_rs.tickers]` table (ticker = 中文名, 58 entries) is scored
+  `[etf_rs.tickers]` table (ticker = 中文名, 59 entries) is scored
   **locally** with the same 3M algorithm (`compute_us_rs_3m_table`, vs
   `benchmark` SPY; one yfinance batch, no cloud step) and written to
   `output/TV/US/<date>_ETF_rs.txt` as **one `N. TICKER 🟢↑N - 中文名 | 前五大持仓`
@@ -251,7 +251,7 @@ local (throttle-prone) k-line fetch.
   score = `rank_etfs` on klines truncated to that day (tests pin this), with
   today's ticker list + adjusted closes, so a past day may sit a place off
   that day's `.txt`. Y = 0-99 percentile (within the ETF set → RS ≥ 90 is
-  always ~6 of 58) / rank / raw excess return; top `chart_top_n` (20) thick.
+  always ~6 of 59) / rank / raw excess return; top `chart_top_n` (20) thick.
   Soft inside `run_etf_rs`: a render failure never costs the `.txt`.
   **Also published to GitHub Pages** (https://ericxue92.github.io/momentum-scanner/):
   `.github/workflows/etf_rs_page.yml` rebuilds it in the cloud
