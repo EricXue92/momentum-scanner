@@ -212,7 +212,7 @@ local (throttle-prone) k-line fetch.
 ## ETF 3M RS ranking
 
 - **ETF 3M RS ranking** (`etf_rs.py`, `[etf_rs]` config): the fixed
-  `[etf_rs.tickers]` table (ticker = 中文名, 59 entries) is scored
+  `[etf_rs.tickers]` table (ticker = 中文名, 49 entries) is scored
   **locally** with the same 3M algorithm (`compute_us_rs_3m_table`, vs
   `benchmark` SPY; one yfinance batch, no cloud step) and written to
   `output/TV/US/<date>_ETF_rs.txt` as **one `N. TICKER 🟢↑N - 中文名 | 前五大持仓`
@@ -233,10 +233,12 @@ local (throttle-prone) k-line fetch.
   same-instrument key — the former GDXU/NUGT pair was the motivating case;
   NUGT and 12 global-market ETFs were dropped 2026-09-23, so no duplicate
   names remain today, rule kept) — the log still lists what was hidden.
-  **Non-ETF rows** (BTCUSD / ETHUSD, 2026-10-08): `[etf_rs.yf_symbols]`
-  maps display ticker → Yahoo symbol (`BTC-USD`); their 7-day klines are cut
-  to SPY's trading days (`align_to_benchmark_days`) because the 3M score
-  counts rows. Name ≠ IBIT's "比特币" on purpose (would collapse).
+  **Non-ETF rows** (mechanism kept, table empty since 2026-10-14 — BTCUSD /
+  ETHUSD were removed together with QQQ IWM RSP USO GLD SLV EWJ EWY):
+  `[etf_rs.yf_symbols]` maps display ticker → Yahoo symbol (`BTC-USD`); their
+  7-day klines are cut to SPY's trading days (`align_to_benchmark_days`)
+  because the 3M score counts rows. A crypto name must differ from IBIT's
+  "比特币" (would collapse).
   Percentile is **within the ETF set**, not the stock universe. Ranking
   snapshot only: same-day rerun overwrites, no `eod_seen` dedup, no Webull
   mirror, no Futu/TV sync; the report ignores it (unknown group stem). Runs
@@ -251,7 +253,7 @@ local (throttle-prone) k-line fetch.
   score = `rank_etfs` on klines truncated to that day (tests pin this), with
   today's ticker list + adjusted closes, so a past day may sit a place off
   that day's `.txt`. Y = 0-99 percentile (within the ETF set → RS ≥ 90 is
-  always ~6 of 59) / rank / raw excess return; top `chart_top_n` (20) thick.
+  always ~5 of 49) / rank / raw excess return; top `chart_top_n` (20) thick.
   Soft inside `run_etf_rs`: a render failure never costs the `.txt`.
   **Also published to GitHub Pages** (https://ericxue92.github.io/momentum-scanner/):
   `.github/workflows/etf_rs_page.yml` rebuilds it in the cloud

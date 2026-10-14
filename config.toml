@@ -125,7 +125,6 @@ XLY  = "可选消费"
 XLC  = "通讯服务"
 XLI  = "工业"
 XLK  = "科技"
-USO  = "原油"
 FFTY = "IBD 50 成长股"
 TAN  = "太阳能"
 CIBR = "网络安全"
@@ -145,8 +144,6 @@ REMX = "稀土与战略金属"
 COPX = "铜矿"
 LIT  = "锂电池产业链"
 GDX  = "黄金矿业"
-GLD  = "黄金"
-SLV  = "白银"
 ARKK = "ARK 创新"
 ARKG = "基因组革命"
 QTUM = "量子计算"
@@ -158,24 +155,14 @@ POWR = "美国电力基建 (iShares, 2026-10-06 加入)"
 FOTO = "光子学 (光通信与激光, 2026-10-12 加入)"
 NCLD = "新云算力 (Neocloud, 2026-10-13 加入)"
 SHLD = "国防科技"
-# --- 宽基指数 (2026-09-26 加入) ---
-QQQ  = "纳斯达克 100"
-IWM  = "罗素 2000 小盘股"
-RSP  = "标普 500 等权重"
+# --- 宽基 / 原材料 (2026-09-26 加入; QQQ/IWM/RSP 2026-10-14 移除) ---
 XLB  = "原材料"
-# --- 全球市场 (2026-10-06 重新加入日/韩) ---
-EWJ  = "日本"
-EWY  = "韩国"
-# --- 加密货币现货 (2026-10-08 加入; 非 ETF, yfinance 代码见 [etf_rs.yf_symbols]) ---
-# 名字别写成 "比特币", 否则与 IBIT 同名会被 collapse 掉。
-BTCUSD = "比特币现货 (BTC/USD)"
-ETHUSD = "以太坊现货 (ETH/USD)"
+# 2026-10-14 移除: QQQ IWM RSP USO GLD SLV EWJ EWY BTCUSD ETHUSD (不参与计算也不展示)
 
-# 显示代码 → yfinance 代码 (仅非 ETF 品种需要)。加密货币 7×24 有周末 K 线,
-# 计算前会裁到 SPY 交易日 (3M 算法按行数取 21/42/63 根), 收盘价为 UTC 0 点。
+# 显示代码 → yfinance 代码 (仅非 ETF 品种需要; 2026-10-14 起无此类品种, 表留空)。
+# 例: BTCUSD = "BTC-USD" — 名字别写成 "比特币", 否则与 IBIT 同名会被 collapse 掉。
+# 加密货币 7×24 有周末 K 线, 计算前会裁到 SPY 交易日 (3M 算法按行数取 21/42/63 根), 收盘价为 UTC 0 点。
 [etf_rs.yf_symbols]
-BTCUSD = "BTC-USD"
-ETHUSD = "ETH-USD"
 
 # 前五大持仓 (静态表, 手工维护): 输出行尾追加 ` | 持仓1、持仓2、…`; 没配的票不追加。
 # 来源: 各发行商 / stockanalysis 披露, 整理日 2026-09-15 (各基金披露日不同, 非同一天快照)。
@@ -201,7 +188,6 @@ XLY  = "AMZN、TSLA、HD、MCD、BKNG"
 XLC  = "META、GOOGL、GOOG、T、VZ"
 XLI  = "CAT、GE、RTX、GEV、DE"
 XLK  = "NVDA、AAPL、MSFT、AVGO、AMD"
-USO  = "不适用: 原油期货及现金 / 国债抵押品"
 FFTY = "ECO、WT、TVTX、NTRA、TGTX"
 TAN  = "FSLR、NXT、ENLT(以色列)、ENPH、HASI"
 CIBR = "PANW、CRWD、FTNT、CSCO、AVGO"
@@ -221,8 +207,6 @@ REMX = "PLS(澳)、ALB、MP、LYC(澳)、600111(北方稀土)"
 COPX = "HBM(加)、TECK.B(加)、BHP(澳)、FM(加)、GLEN(英)"
 LIT  = "RIO、6752(松下)、002371(北方华创)、006400(三星SDI)、6762(TDK)"
 GDX  = "NEM、AEM、B(Barrick)、WPM、AU"
-GLD  = "不适用: 实物黄金"
-SLV  = "不适用: 实物白银"
 ARKK = "TSLA、SPCX(SpaceX)、CRCL、TEM、COIN"
 ARKG = "TXG、TWST、TEM、CRSP、PSNL"
 QTUM = "ARQQ、3443(创意电子)、HQ、NET、ESTC"
@@ -234,17 +218,8 @@ POWR = "PWR、ETN、GEV、NEE、EQT (2026-10-02 披露)"
 FOTO = "LITE、IPGP、COHR、FN、CIEN (Yahoo, 整理日 2026-10-12)"
 NCLD = "NBIS、CRWV、IREN、HUT、GLXY (Yahoo + Roundhill 官网, 整理日 2026-10-13)"
 SHLD = "PLTR、RTX、GD、LMT、NOC"
-# --- 宽基指数 (整理日 2026-09-26) ---
-QQQ  = "NVDA、AAPL、MSFT、AVGO、AMZN"
-IWM  = "罗素 2000 等约 2000 只小盘股, 单票权重 <1%, 前五大随时轮换"
-RSP  = "不适用: 标普 500 等权重, 每只约 0.2%"
+# --- 宽基 / 原材料 (整理日 2026-09-26) ---
 XLB  = "LIN、SHW、FCX、APD、ECL"
-# --- 全球市场 (整理日 2026-10-06, 披露日 2026-10-02) ---
-EWJ  = "8306(三菱日联)、6857(爱德万测试)、7203(丰田)、8035(东京电子)、6501(日立)"
-EWY  = "000660(SK海力士)、005930(三星电子)、402340(SK Square)、009150(三星电机)、105560(KB金融)"
-# --- 加密货币现货 ---
-BTCUSD = "不适用: 加密货币现货"
-ETHUSD = "不适用: 加密货币现货"
 
 # ════════════════════════════════════════════════════════════
 #  美股 (US)
