@@ -94,7 +94,7 @@ def test_write_ranking_one_per_line_strongest_first_with_names(tmp_path):
         index=["BBB", "AAA", "CCC"],
     )
     out = etf_rs.write_ranking(table, {"AAA": "甲", "BBB": "乙"}, {}, tmp_path, date(2026, 9, 15))
-    assert out == tmp_path / "TV" / "US" / "2026_09_15_ETF_rs.txt"
+    assert out == tmp_path / "TV" / "US" / "2026_09_15_ETF_rs_3m.txt"
     # unnamed ticker → bare symbol line
     assert out.read_text() == "1. BBB - 乙\n2. AAA - 甲\n3. CCC\n"
 
@@ -150,7 +150,7 @@ def test_run_disabled_is_noop(tmp_path, monkeypatch):
 def test_run_fetch_failure_soft_fails(tmp_path, monkeypatch):
     monkeypatch.setattr(etf_rs, "_fetch_klines", lambda *a, **k: {})
     assert etf_rs.run_etf_rs(_cfg(), tmp_path, date(2026, 9, 15)) is None
-    assert not (tmp_path / "TV" / "US" / "2026_09_15_ETF_rs.txt").exists()
+    assert not (tmp_path / "TV" / "US" / "2026_09_15_ETF_rs_3m.txt").exists()
 
 
 def test_run_dedups_and_strips_config_tickers(tmp_path, monkeypatch):
@@ -179,7 +179,7 @@ def test_run_accepts_plain_list_without_names(tmp_path, monkeypatch):
 def _write_prev(tmp_path: Path, stamp: str, text: str) -> Path:
     d = tmp_path / "TV" / "US"
     d.mkdir(parents=True, exist_ok=True)
-    p = d / f"{stamp}_ETF_rs.txt"
+    p = d / f"{stamp}_ETF_rs_3m.txt"
     p.write_text(text)
     return p
 
@@ -280,3 +280,80 @@ def test_align_to_benchmark_days_keeps_unaliased_and_missing_benchmark():
     # no benchmark → left untouched
     same = etf_rs.align_to_benchmark_days({"X": crypto}, ["X"], "SPY")
     assert same["X"] is crypto
+
+
+# --- 1M (weekly-ladder) ranking alongside the 3M file ---
+
+
+def _kline_two_phase(early_pct: float, late_pct: float, n: int = 90) -> pd.DataFrame:
+    """Flat 100 for the first n-21 bars, then flat at 100·(1+early) for 16
+    bars, then flat at 100·(1+early)·(1+late) for the last 5 bars. The 1M
+    weekly ladder sees only the last 21 bars; the 3M window sees both legs."""
+    first = 100.0 * (1 + early_pct / 100)
+    last = first * (1 + late_pct / 100)
+    closes = [100.0] * (n - 21) + [first] * 16 + [last] * 5
+    return pd.DataFrame({"time_key": pd.bdate_range(end="2026-09-11", periods=n), "close": closes})
+
+
+def test_run_writes_1m_file_next_to_3m_file(tmp_path, monkeypatch):
+    # AAA: big 3M, flat last week; BBB: small 3M, strong last week → 3M says
+    # AAA first, 1M says BBB first.
+    monkeypatch.setattr(etf_rs, "_fetch_klines", lambda *a, **k: {
+        "AAA": _kline_two_phase(40, 0), "BBB": _kline_two_phase(2, 8),
+        "CCC": _kline_two_phase(0, -5), "SPY": _kline_two_phase(5, 1)})
+    out = etf_rs.run_etf_rs(_cfg(), tmp_path, date(2026, 9, 15))
+    assert out == tmp_path / "TV" / "US" / "2026_09_15_ETF_rs_3m.txt"
+    assert out.read_text() == "1. AAA - 甲\n2. BBB - 乙\n3. CCC - 丙\n"
+    one = tmp_path / "TV" / "US" / "2026_09_15_ETF_rs_1m.txt"
+    assert one.read_text() == "1. BBB - 乙\n2. AAA - 甲\n3. CCC - 丙\n"
+
+
+def test_1m_markers_compare_only_against_previous_1m_file(tmp_path, monkeypatch):
+    d = tmp_path / "TV" / "US"
+    d.mkdir(parents=True)
+    (d / "2026_09_14_ETF_rs_3m.txt").write_text("1. CCC - 丙\n2. BBB - 乙\n3. AAA - 甲\n")
+    (d / "2026_09_14_ETF_rs_1m.txt").write_text("1. AAA - 甲\n2. BBB - 乙\n")
+    monkeypatch.setattr(etf_rs, "_fetch_klines", lambda *a, **k: {
+        "AAA": _kline_two_phase(40, 0), "BBB": _kline_two_phase(2, 8),
+        "CCC": _kline_two_phase(0, -5), "SPY": _kline_two_phase(5, 1)})
+    etf_rs.run_etf_rs(_cfg(), tmp_path, date(2026, 9, 15))
+    assert (d / "2026_09_15_ETF_rs_3m.txt").read_text() == \
+        "1. AAA 🟢↑2 - 甲\n2. BBB = - 乙\n3. CCC 🔴↓2 - 丙\n"
+    assert (d / "2026_09_15_ETF_rs_1m.txt").read_text() == \
+        "1. BBB 🟢↑1 - 乙\n2. AAA 🔴↓1 - 甲\n3. CCC 新 - 丙\n"
+
+
+def test_read_previous_ranks_3m_ignores_1m_files(tmp_path):
+    d = tmp_path / "TV" / "US"
+    d.mkdir(parents=True)
+    (d / "2026_09_14_ETF_rs_1m.txt").write_text("1. BBB - 乙\n2. AAA - 甲\n")
+    assert etf_rs.read_previous_ranks(tmp_path, date(2026, 9, 15)) is None
+    assert etf_rs.read_previous_ranks(tmp_path, date(2026, 9, 15), stem=etf_rs._STEM_1M) == {"BBB": 1, "AAA": 2}
+
+
+def test_1m_failure_does_not_cost_3m_file(tmp_path, monkeypatch):
+    monkeypatch.setattr(etf_rs, "_fetch_klines", lambda *a, **k: {
+        "AAA": _kline(5), "BBB": _kline(20), "CCC": _kline(-3), "SPY": _kline(10)})
+    real = etf_rs.rank_etfs
+
+    def boom(klines, tickers, benchmark, weights_bars=None):
+        if weights_bars is not None:
+            raise RuntimeError("1m exploded")
+        return real(klines, tickers, benchmark, weights_bars)
+
+    monkeypatch.setattr(etf_rs, "rank_etfs", boom)
+    out = etf_rs.run_etf_rs(_cfg(), tmp_path, date(2026, 9, 15))
+    assert out is not None and out.exists()
+    assert not (tmp_path / "TV" / "US" / "2026_09_15_ETF_rs_1m.txt").exists()
+
+
+def test_read_previous_ranks_3m_falls_back_to_legacy_stem(tmp_path):
+    # files written before the 2026-10-15 rename (<date>_ETF_rs.txt) still
+    # serve as the previous 3M snapshot; the newest file wins regardless of stem
+    d = tmp_path / "TV" / "US"
+    d.mkdir(parents=True)
+    (d / "2026_09_13_ETF_rs_3m.txt").write_text("1. CCC - 丙\n")
+    (d / "2026_09_14_ETF_rs.txt").write_text("1. BBB - 乙\n2. AAA - 甲\n")
+    assert etf_rs.read_previous_ranks(tmp_path, date(2026, 9, 15)) == {"BBB": 1, "AAA": 2}
+    (d / "2026_09_14_ETF_rs_3m.txt").write_text("1. AAA - 甲\n")
+    assert etf_rs.read_previous_ranks(tmp_path, date(2026, 9, 15)) == {"AAA": 1}

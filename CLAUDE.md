@@ -215,12 +215,12 @@ local (throttle-prone) k-line fetch.
   `[etf_rs.tickers]` table (ticker = 中文名, 49 entries) is scored
   **locally** with the same 3M algorithm (`compute_us_rs_3m_table`, vs
   `benchmark` SPY; one yfinance batch, no cloud step) and written to
-  `output/TV/US/<date>_ETF_rs.txt` as **one `N. TICKER 🟢↑N - 中文名 | 前五大持仓`
+  `output/TV/US/<date>_ETF_rs_3m.txt` (stem `ETF_rs` before 2026-10-15) as **one `N. TICKER 🟢↑N - 中文名 | 前五大持仓`
   per line, strongest at the top** — human-readable, NOT a TradingView
   import (the only non-comma `.txt` in `TV/US/`). The **rank-change marker**
   after the ticker (`🟢↑N` / `🔴↓N` / `=` / `新`, `rank_delta_marker`; the
   colored dot is the only way to tint an arrow in plain text) compares
-  against the latest `*_ETF_rs.txt` in the same folder dated strictly
+  against the latest `*_ETF_rs_3m.txt` (or legacy `*_ETF_rs.txt`, `_LEGACY_STEMS`) in the same folder dated strictly
   **before** today (`read_previous_ranks`; ticker = first whitespace token after the `N.` prefix
   of each line, so annotated files re-parse) — a same-day rerun keeps
   comparing to the prior day, and with no earlier snapshot (first run,
@@ -243,7 +243,20 @@ local (throttle-prone) k-line fetch.
   snapshot only: same-day rerun overwrites, no `eod_seen` dedup, no Webull
   mirror, no Futu/TV sync; the report ignores it (unknown group stem). Runs
   as a soft side-step at the end of us-eod / eod (also `--mode etf-rs`);
-  aged out by the generic `TV/US` 5-day rule. **Trend page**
+  aged out by the generic `TV/US` 5-day rule. **1M companion file**
+  (since 2026-10-15): the same run also writes `<date>_ETF_rs_1m.txt`
+  from the same klines on the **1M weekly ladder** `WEIGHTS_1M_BARS`
+  (cumulative 1/2/3/4-week returns = 5/10/15/20 bars back, 0.4/0.2/0.2/0.2,
+  21 bars minimum; same benchmark-relative score + in-set percentile).
+  Same line format, same-name collapse and marker rules, but markers
+  compare only against the previous `_1m` file (`read_previous_ranks(stem=)`;
+  the stems are matched exactly so the two never cross).
+  It is a soft step after the 3M file (`_write_1m_ranking`) — a failure
+  never costs the 3M `.txt`; the trend page stays 3M-only. Scoring
+  lookbacks are bars, not months: `us_rs_3m._score_from_kline_bars`
+  takes `(bars, weight)` pairs and `compute_us_rs_3m_table(weights_bars=)`
+  selects the ladder; the month-based `_score_from_kline` / `WEIGHTS_3M`
+  API is a thin front (`BARS_PER_MONTH` = 21) and unchanged for IPO/cloud. **Trend page**
   (`etf_rs_chart.py`): the same run then writes
   `output/Reports/ETF/etf_rs_trend.html` — **undated, overwritten** (it
   carries its own history; no `_RETENTION_RULES` entry matches it, by
@@ -255,6 +268,16 @@ local (throttle-prone) k-line fetch.
   that day's `.txt`. Y = 0-99 percentile (within the ETF set → RS ≥ 90 is
   always ~5 of 49) / rank / raw excess return; top `chart_top_n` (20) thick.
   Soft inside `run_etf_rs`: a render failure never costs the `.txt`.
+  **3M + 1M on one page** (since 2026-10-15): `write_trend_chart` computes
+  both histories (`score_history(weights_bars=WEIGHTS_1M_BARS)` for 1M) on
+  the 3M calendar and embeds them as `s`/`p` (3M) and `s1`/`p1` (1M) per
+  series; `run_etf_rs` passes the 3M-unscored names too (`missing`, 21-63
+  bars) so they get a 1M line with null 3M. UI: `窗口 3M/1M` switches
+  chart + list + markers; Y-axis mode `1M−3M 名次差` plots 3M rank − 1M rank
+  (positive = the 1M ladder ranks it higher = gaining); the list has a
+  `1M−3M 差` sort (largest first, grouped 领先/持平/落后/单窗口) and every
+  row shows `3M 第N名 · 1M 第N名 · ▲Δ`; the tooltip shows both windows.
+  Thick lines = today's top `chart_top_n` of the **active** window.
   **Also published to GitHub Pages** (https://ericxue92.github.io/momentum-scanner/):
   `.github/workflows/etf_rs_page.yml` rebuilds it in the cloud
   (`scripts/build_etf_rs_page.py` → `_site/index.html`, deployed as a Pages

@@ -170,7 +170,7 @@ Kullamägi 的抛物线冲顶做空 setup。每天重新检出(不参与任何�
 
 - **打分:** 与个股相同的 3M RS 公式(`0.5·R21 + 0.3·R42 + 0.2·R63`,相对 SPY)。百分位是**在 ETF 名单内部**排的,不是对个股 universe。
 - **何时跑:** 每次 `us-eod` 末尾的 soft 步骤(失败不影响 EOD);也可用 `--mode etf-rs` 单独重跑。本地计算——一次 yfinance 批量下载,不走云端。
-- **输出:** `output/TV/US/<date>_ETF_rs.txt`,每行一只 ETF,**最强的在最上面**,格式 `N. TICKER 名次变化 - 中文名 | 前五大持仓`(`N.` 为名次):
+- **输出:** `output/TV/US/<date>_ETF_rs_3m.txt`,每行一只 ETF,**最强的在最上面**,格式 `N. TICKER 名次变化 - 中文名 | 前五大持仓`(`N.` 为名次): 另有 `<date>_ETF_rs_1m.txt`,用 1 个月周阶梯(`0.4·R5 + 0.2·R10 + 0.2·R15 + 0.2·R20`)对同一名单再排一次,格式相同,名次变化只和自己前一天的文件比。
 
   ```
   1. BWET = - 油轮运费期货 | 不适用: 油轮运费期货及现金抵押品
@@ -303,7 +303,7 @@ output/
 ├── TV/                        # 逗号分隔,用于 TradingView "Import list..."
 │   ├── US/<date>_{TheSetup,EarningsGap,HighVolume,GapUp,NewHigh52W,TopGainers,Leaders,RS,Shorts,IPO,Repeat}.txt
 │   ├── US/<date>_{MorningGapPre{20,10,5},MorningGap{5..30}}.txt
-│   ├── US/<date>_ETF_rs.txt   # ETF 强度排名——给人看的,不是导入列表
+│   ├── US/<date>_ETF_rs_3m.txt   # ETF 强度排名——给人看的,不是导入列表
 │   ├── US/<date>_SMA50Pruned.txt   # 当天被 SMA50 自动裁剪移出 master 的票
 │   ├── US/rs_us_<date>.txt    # 每日 RS 最强 Top 10 (美股)
 │   └── HK/<date>_{EarningsGap,HighVolume,GapUp,Leaders,RS,Shorts,IPO,HKMorningGap{10..60}}.txt

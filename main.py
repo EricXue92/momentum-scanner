@@ -2628,7 +2628,7 @@ def main() -> int:
 
         # --- ETF 3M RS ranking (US, snapshot, soft side-step) ---
         # Fixed [etf_rs].tickers list scored with the 3M algorithm vs SPY →
-        # TV/US/<date>_ETF_rs.txt, strongest first. Ranking only: no dedup,
+        # TV/US/<date>_ETF_rs_3m.txt, strongest first. Ranking only: no dedup,
         # no mirror/sync. Failure must not colour the EOD exit code.
         try:
             from etf_rs import run_etf_rs

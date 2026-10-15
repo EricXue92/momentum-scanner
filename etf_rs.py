@@ -7,10 +7,11 @@ the ETF set*, not against the ~6000-stock Fred6725 universe. Computed locally:
 ~50 tickers is a single yfinance batch, well under the home-IP throttle that
 pushed the stock-universe compute to GitHub Actions.
 
-Output: ``output/TV/US/<YYYY_MM_DD>_ETF_rs.txt`` — one ETF per line,
+Output: ``output/TV/US/<YYYY_MM_DD>_ETF_rs_3m.txt`` — one ETF per line,
 strongest at the top, ``TICKER 🟢↑N - 中文名 | 前五大持仓`` (``🟢↑N`` / ``🔴↓N`` /
-``=`` / ``新`` = rank change vs the latest earlier snapshot in the same
-folder, see ``read_previous_ranks``; omitted when none exists; name from the
+``=`` / ``新`` = rank change vs the latest earlier snapshot **of the same
+stem** in the same folder, see ``read_previous_ranks``; omitted when none
+exists; name from the
 ``[etf_rs.tickers]`` table — a bare list works too and yields bare symbols;
 holdings from the static ``[etf_rs.holdings]`` table, hand-maintained from
 issuer disclosures, omitted when absent). Tickers sharing the
@@ -20,6 +21,13 @@ TradingView import. It is a ranking snapshot, NOT a watchlist: same-day rerun
 overwrites, no eod_seen dedup, no Webull mirror, no Futu/TV sync. The scored
 table (rank / 3M relative score / percentile) goes to the log. Aged out by
 the generic ``TV/US`` 5-day cleanup rule.
+
+A second file ``<YYYY_MM_DD>_ETF_rs_1m.txt`` (same format, same collapse,
+own rank-change markers vs the previous ``_1m`` snapshot) ranks the same
+klines on the 1M weekly ladder ``us_rs_3m.WEIGHTS_1M_BARS`` (cumulative
+1/2/3/4-week returns, 0.4/0.2/0.2/0.2, 21 bars minimum) — the short-window
+view next to the 3M one. It is a soft step after the 3M file: a failure
+there never costs the 3M ranking. The trend page stays 3M-only.
 
 The same klines also feed the trend page ``Reports/ETF/etf_rs_trend.html``
 (``etf_rs_chart``: per-day rank / score history recomputed from closes, top
@@ -43,7 +51,11 @@ import us_rs_3m
 logger = logging.getLogger("momentum_scanner")
 
 _LABEL = "ETF RS"
-_STEM = "ETF_rs"
+_STEM = "ETF_rs_3m"       # 3M ladder (the original file; was "ETF_rs" before 2026-10-15)
+_STEM_1M = "ETF_rs_1m"    # 1M weekly ladder (us_rs_3m.WEIGHTS_1M_BARS)
+# Older stems still accepted as the "previous snapshot" of a stem, so the
+# rename did not blank the rank-change markers for the retention window.
+_LEGACY_STEMS: dict[str, tuple[str, ...]] = {_STEM: ("ETF_rs",)}
 
 
 def _fetch_klines(tickers: list[str]) -> dict[str, pd.DataFrame]:
@@ -128,17 +140,19 @@ def rank_etfs(
     klines: dict[str, pd.DataFrame],
     tickers: list[str],
     benchmark: str,
+    weights_bars: list[tuple[int, float]] | None = None,
 ) -> pd.DataFrame:
-    """Score ``tickers`` with the 3M algorithm relative to ``benchmark`` and
-    return the table sorted strongest first (columns: raw_score,
-    rs_percentile). Tickers with < 64 bars are excluded, never padded. A
-    missing benchmark falls back to absolute scores (warned inside
-    ``compute_us_rs_3m_table``)."""
+    """Score ``tickers`` relative to ``benchmark`` and return the table sorted
+    strongest first (columns: raw_score, rs_percentile). ``weights_bars``
+    None = the 3M ladder; ``us_rs_3m.WEIGHTS_1M_BARS`` = the 1M weekly
+    ladder. Tickers with too few bars (64 for 3M, 21 for 1M) are excluded,
+    never padded. A missing benchmark falls back to absolute scores (warned
+    inside ``compute_us_rs_3m_table``)."""
     etf_klines = {t: klines[t] for t in tickers if t in klines}
     bench = klines.get(benchmark)
     if bench is None:
         bench = pd.DataFrame({"time_key": [], "close": []})
-    table = us_rs_3m.compute_us_rs_3m_table(etf_klines, bench)
+    table = us_rs_3m.compute_us_rs_3m_table(etf_klines, bench, weights_bars=weights_bars)
     if table.empty:
         return table
     return table.sort_values("raw_score", ascending=False)
@@ -168,12 +182,17 @@ def collapse_same_name(
     return table.loc[keep], dropped
 
 
-_FILE_RE = re.compile(rf"^(\d{{4}}_\d{{2}}_\d{{2}})_{_STEM}\.txt$")
+def _file_re(stem: str) -> re.Pattern[str]:
+    return re.compile(rf"^(\d{{4}}_\d{{2}}_\d{{2}})_{re.escape(stem)}\.txt$")
+
+
 _RANK_PREFIX_RE = re.compile(r"^\d+\.$")  # leading "12." rank number on each output line
 
 
-def read_previous_ranks(output_dir: Path, today: date) -> dict[str, int] | None:
-    """``{ticker: 1-based rank}`` from the most recent ``TV/US/<date>_ETF_rs.txt``
+def read_previous_ranks(output_dir: Path, today: date,
+                        stem: str = _STEM) -> dict[str, int] | None:
+    """``{ticker: 1-based rank}`` from the most recent ``TV/US/<date>_<stem>.txt``
+    (``stem`` = ``_STEM`` 3M / ``_STEM_1M`` 1M — the two never see each other)
     dated strictly before ``today`` (so a same-day rerun compares against the
     same prior snapshot, not its own earlier output). The ticker is the first
     whitespace token of each line after an optional ``N.`` rank prefix — works
@@ -183,8 +202,9 @@ def read_previous_ranks(output_dir: Path, today: date) -> dict[str, int] | None:
     if not target.is_dir():
         return None
     candidates: list[tuple[date, Path]] = []
+    file_res = [_file_re(s) for s in (stem, *_LEGACY_STEMS.get(stem, ()))]
     for p in target.iterdir():
-        m = _FILE_RE.match(p.name)
+        m = next((m for r in file_res if (m := r.match(p.name))), None)
         if not m:
             continue
         try:
@@ -238,8 +258,9 @@ def write_ranking(
     output_dir: Path,
     today: date,
     prev_ranks: dict[str, int] | None = None,
+    stem: str = _STEM,
 ) -> Path | None:
-    """Write ``TV/US/<YYYY_MM_DD>_ETF_rs.txt``: one
+    """Write ``TV/US/<YYYY_MM_DD>_<stem>.txt`` (``_STEM`` 3M / ``_STEM_1M`` 1M): one
     ``N. TICKER 🟢↑N - 中文名 | 前五大持仓`` per line (``N.`` = 1-based rank),
     strongest at the top (name /
     holdings segments omitted when unknown). The rank-change marker
@@ -250,7 +271,7 @@ def write_ranking(
         return None
     target = output_dir / "TV" / "US"
     target.mkdir(parents=True, exist_ok=True)
-    out = target / f"{today.strftime('%Y_%m_%d')}_{_STEM}.txt"
+    out = target / f"{today.strftime('%Y_%m_%d')}_{stem}.txt"
     lines = []
     for i, t in enumerate(table.index, start=1):
         marker = rank_delta_marker(prev_ranks.get(t), i) if prev_ranks is not None else ""
@@ -260,8 +281,8 @@ def write_ranking(
 
 
 def _log_table(table: pd.DataFrame, names: dict[str, str],
-               prev_ranks: dict[str, int] | None = None) -> None:
-    lines = [f"[{_LABEL}] rank  ticker  3M-rel   pct  Δ     name"]
+               prev_ranks: dict[str, int] | None = None, window: str = "3M") -> None:
+    lines = [f"[{_LABEL}] rank  ticker  {window}-rel   pct  Δ     name"]
     for i, (t, row) in enumerate(table.iterrows(), start=1):
         marker = rank_delta_marker(prev_ranks.get(t), i) if prev_ranks is not None else "-"
         lines.append(
@@ -269,6 +290,39 @@ def _log_table(table: pd.DataFrame, names: dict[str, str],
             f"{int(row['rs_percentile']):>3}  {marker:<4}  {names.get(t, '')}"
         )
     logger.info("\n".join(lines))
+
+
+def _write_1m_ranking(
+    klines: dict[str, pd.DataFrame],
+    etfs: list[str],
+    benchmark: str,
+    names: dict[str, str],
+    holdings: dict[str, str],
+    output_dir: Path,
+    today: date,
+) -> Path | None:
+    """The 1M counterpart of the 3M block in ``run_etf_rs``: same klines,
+    ``WEIGHTS_1M_BARS`` lookbacks, same-name collapse, rank-change markers
+    against the previous ``_1m`` snapshot only. Returns the path or None."""
+    label = f"{_LABEL} 1M"
+    table = rank_etfs(klines, etfs, benchmark, weights_bars=us_rs_3m.WEIGHTS_1M_BARS)
+    missing = [t for t in etfs if t not in table.index]
+    if missing:
+        logger.warning(f"[{label}] {len(missing)} ETF(s) unscored (no data / < 21 bars): {missing}")
+    table, collapsed = collapse_same_name(table, names)
+    if collapsed:
+        logger.info(f"[{label}] same-name collapse, hidden: "
+                    + ", ".join(f"{d} (→ {w})" for d, w in collapsed))
+    prev_ranks = read_previous_ranks(output_dir, today, stem=_STEM_1M)
+    if prev_ranks is None:
+        logger.info(f"[{label}] no earlier 1M snapshot before {today}; rank-change markers omitted")
+    out = write_ranking(table, names, holdings, output_dir, today, prev_ranks, stem=_STEM_1M)
+    if out is None:
+        logger.warning(f"[{label}] nothing scored; no file written")
+        return None
+    _log_table(table, names, prev_ranks, window="1M")
+    logger.info(f"[{label}] {len(table)} ETFs ranked -> {out}")
+    return out
 
 
 def run_etf_rs(cfg: dict, output_dir: Path, today: date) -> Path | None:
@@ -321,12 +375,19 @@ def run_etf_rs(cfg: dict, output_dir: Path, today: date) -> Path | None:
         return None
     _log_table(table, names, prev_ranks)
     logger.info(f"[{_LABEL}] {len(table)} ETFs ranked -> {out}")
+    # 1M weekly ladder on the same klines → <date>_ETF_rs_1m.txt. Soft — a
+    # failure here must not cost the 3M file above or the trend page below.
+    try:
+        _write_1m_ranking(klines, etfs, benchmark, names, holdings, output_dir, today)
+    except Exception as e:
+        logger.warning(f"[{_LABEL} 1M] failed, 3M ranking unaffected: {e}")
     # Trend page (Reports/ETF/etf_rs_trend.html): same klines, same order as
     # the .txt. Soft — a render failure must not cost the ranking.
     try:
         import etf_rs_chart
+        # 3M-unscored names (21-63 bars) still get a 1M line on the page.
         etf_rs_chart.write_trend_chart(
-            klines, list(table.index), benchmark, names, holdings, output_dir, today,
+            klines, list(table.index) + missing, benchmark, names, holdings, output_dir, today,
             top_n=int(cfg.get("chart_top_n", 20)),
         )
     except Exception as e:

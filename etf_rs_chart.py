@@ -1,6 +1,6 @@
 """Trend page for the daily ETF 3M RS ranking (``etf_rs``).
 
-The dated ``TV/US/<date>_ETF_rs.txt`` snapshots age out after 5 days and carry
+The dated ``TV/US/<date>_ETF_rs_3m.txt`` snapshots age out after 5 days and carry
 no scores, so they cannot show how the ranking evolved. This module instead
 **recomputes** the 3M relative score for every past trading day from the same
 klines ``run_etf_rs`` already fetched (no extra network call, no state file)
@@ -44,12 +44,16 @@ _FILENAME = "etf_rs_trend.html"
 _DATA_SLOT = "__ETF_RS_DATA__"
 
 
-def _ticker_scores(df: pd.DataFrame | None) -> pd.Series:
-    """Absolute 3M score for every bar of one kline, indexed by naive date.
+def _ticker_scores(df: pd.DataFrame | None,
+                   weights_bars: list[tuple[int, float]] | None = None) -> pd.Series:
+    """Absolute score for every bar of one kline, indexed by naive date.
 
-    Same arithmetic as ``us_rs_3m._score_from_kline`` applied to the kline
-    truncated at each bar: offsets count the ticker's **own** rows, NaN before
-    the 64th bar and wherever a close involved is non-positive."""
+    Same arithmetic as ``us_rs_3m._score_from_kline_bars`` applied to the
+    kline truncated at each bar: offsets count the ticker's **own** rows, NaN
+    before the (max lag + 1)th bar (64 for the default 3M ladder, 21 for
+    ``WEIGHTS_1M_BARS``) and wherever a close involved is non-positive."""
+    if weights_bars is None:
+        weights_bars = us_rs_3m._months_to_bars(us_rs_3m.WEIGHTS_3M)
     if df is None or df.empty:
         return pd.Series(dtype=float)
     idx = pd.DatetimeIndex(pd.to_datetime(df["time_key"]))
@@ -61,8 +65,7 @@ def _ticker_scores(df: pd.DataFrame | None) -> pd.Series:
     score = np.zeros(len(last))
     valid = last > 0
     with np.errstate(divide="ignore", invalid="ignore"):
-        for months, weight in us_rs_3m.WEIGHTS_3M:
-            lag = months * 21
+        for lag, weight in weights_bars:
             past = np.full(len(last), np.nan)
             if lag < len(last):
                 past[lag:] = last[:-lag]
@@ -77,21 +80,23 @@ def score_history(
     tickers: list[str],
     benchmark: str,
     max_days: int | None = None,
+    weights_bars: list[tuple[int, float]] | None = None,
 ) -> pd.DataFrame:
-    """Benchmark-relative 3M score per trading day (index) and ticker (columns,
+    """Benchmark-relative score per trading day (index) and ticker (columns,
     in ``tickers`` order) — each row is what ``etf_rs.rank_etfs`` would have
-    scored on klines truncated to that day.
+    scored on klines truncated to that day. ``weights_bars`` None = the 3M
+    ladder; ``us_rs_3m.WEIGHTS_1M_BARS`` = the 1M weekly ladder.
 
     The calendar is the benchmark's scorable days. A ticker with no bar on a
     day carries its latest earlier bar (the daily run scores whatever its last
     row is); days before its 64th bar are NaN. Tickers that are never scorable
     are left out. A missing/unscorable benchmark falls back to absolute scores
     on the union calendar, like the daily ranking."""
-    cols = {t: _ticker_scores(klines[t]) for t in tickers if t in klines}
+    cols = {t: _ticker_scores(klines[t], weights_bars) for t in tickers if t in klines}
     cols = {t: s for t, s in cols.items() if s.notna().any()}
     if not cols:
         return pd.DataFrame()
-    bench = _ticker_scores(klines.get(benchmark)).dropna()
+    bench = _ticker_scores(klines.get(benchmark), weights_bars).dropna()
     if bench.empty:
         calendar = pd.DatetimeIndex(sorted(set().union(*(s.index for s in cols.values()))))
     else:
@@ -119,12 +124,21 @@ def render_html(
     benchmark: str,
     today: date,
     top_n: int = 20,
+    history_1m: pd.DataFrame | None = None,
 ) -> str:
     """The self-contained page. Series keep ``history``'s column order (the
     caller passes today's ranking order, strongest first); per day it embeds
     the 0-99 RS percentile (``p``) and the raw relative score in percent
-    (``s``), unscored days as null."""
+    (``s``) of the 3M ladder, plus the same for the 1M ladder (``p1`` /
+    ``s1``, from ``history_1m`` aligned to ``history``'s calendar and
+    columns), unscored days as null."""
     pct = percentile_history(history)
+    if history_1m is None or history_1m.empty:
+        h1 = pd.DataFrame(index=history.index, columns=history.columns, dtype=float)
+        p1 = h1
+    else:
+        p1 = percentile_history(history_1m).reindex(index=history.index, columns=history.columns)
+        h1 = history_1m.reindex(index=history.index, columns=history.columns)
     payload = {
         "generated": today.isoformat(),
         "benchmark": benchmark,
@@ -137,6 +151,8 @@ def render_html(
                 "holdings": holdings.get(t, ""),
                 "s": [None if pd.isna(v) else round(float(v) * 100, 2) for v in history[t]],
                 "p": [None if pd.isna(v) else int(v) for v in pct[t]],
+                "s1": [None if pd.isna(v) else round(float(v) * 100, 2) for v in h1[t]],
+                "p1": [None if pd.isna(v) else int(v) for v in p1[t]],
             }
             for t in history.columns
         ],
@@ -157,15 +173,24 @@ def write_trend_chart(
     top_n: int = 20,
 ) -> Path | None:
     """Write ``Reports/ETF/etf_rs_trend.html`` (overwritten every run) for
-    ``tickers`` in the given order. No scorable history → no file, None."""
+    ``tickers`` in the given order — 3M history plus the 1M weekly-ladder
+    history on the same calendar. A ticker scorable only on 1M (21-63 bars)
+    keeps its column with null 3M values. No scorable history → no file,
+    None."""
     history = score_history(klines, tickers, benchmark)
-    if history.empty:
+    history_1m = score_history(klines, tickers, benchmark, weights_bars=us_rs_3m.WEIGHTS_1M_BARS)
+    if history.empty and history_1m.empty:
         logger.warning(f"[{_LABEL}] no score history; trend chart not written")
         return None
+    calendar = history.index if not history.empty else history_1m.index
+    cols = [t for t in tickers if t in history.columns or t in history_1m.columns]
+    history = history.reindex(index=calendar, columns=cols)
+    history_1m = history_1m.reindex(index=calendar, columns=cols)
     target = output_dir / _SUBDIR
     target.mkdir(parents=True, exist_ok=True)
     out = target / _FILENAME
-    out.write_text(render_html(history, names, holdings, benchmark, today, top_n), encoding="utf-8")
+    out.write_text(render_html(history, names, holdings, benchmark, today, top_n, history_1m),
+                   encoding="utf-8")
     logger.info(
         f"[{_LABEL}] trend chart: {len(history.columns)} ETFs x {len(history)} days "
         f"({history.index[0]:%Y-%m-%d} → {history.index[-1]:%Y-%m-%d}) -> {out}"
@@ -178,7 +203,7 @@ _TEMPLATE = r"""<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>ETF 3M RS 走势</title>
+<title>ETF RS 走势(3M / 1M)</title>
 <style>
 :root {
   color-scheme: light;
@@ -237,7 +262,9 @@ button:focus-visible { outline: 2px solid var(--s1); outline-offset: -2px; }
 .chart { position: relative; padding: 0 6px 6px; }
 .chart svg { display: block; width: 100%; touch-action: pan-y; }
 .list { position: sticky; top: 16px; max-height: calc(100vh - 32px); overflow: auto; }
-.list h2 { position: sticky; top: 0; background: var(--surface); padding-bottom: 8px; border-bottom: 1px solid var(--grid); z-index: 1; }
+.list h2 { position: sticky; top: 0; background: var(--surface); padding-bottom: 8px; border-bottom: 1px solid var(--grid); z-index: 1;
+  display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+.list h2 .seg button { padding: 3px 9px; font-size: 12px; }
 @media (max-width: 1020px) {
   .grid { grid-template-columns: minmax(0, 1fr); }
   .list { position: static; max-height: none; }
@@ -307,6 +334,8 @@ svg.dim .lab:not(.is-hover) { opacity: 0.4; }
 .row .nm { color: var(--ink2); margin-left: 6px; }
 .row .sc { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 12px; white-space: nowrap; }
 .row .sc b { color: var(--ink); font-size: 14px; font-weight: 650; margin-right: 6px; }
+.row .df { grid-column: 4 / -1; color: var(--muted); font-size: 11.5px; font-variant-numeric: tabular-nums; margin-top: 1px; }
+.row .df b { font-weight: 650; }
 .row .hd { grid-column: 4 / -1; color: var(--muted); font-size: 12px; margin-top: 1px; }
 .row.rest .tk { font-weight: 500; }
 .split { padding: 6px 14px; font-size: 11.5px; color: var(--muted); background: var(--band); border-bottom: 1px solid var(--grid); }
@@ -314,9 +343,10 @@ svg.dim .lab:not(.is-hover) { opacity: 0.4; }
 </head>
 <body>
 <div class="wrap">
-  <h1>ETF 3M 相对强度走势</h1>
+  <h1>ETF 相对强度走势(3M / 1M)</h1>
   <p class="sub" id="sub"></p>
   <div class="filters">
+    <span><span class="lbl">窗口</span><span class="seg" id="win"></span></span>
     <span><span class="lbl">范围</span><span class="seg" id="range"></span></span>
     <span><span class="lbl">Y 轴</span><span class="seg" id="mode"></span></span>
     <label class="chk" id="clip-wrap"><input type="checkbox" id="clip"> 裁剪极端值</label>
@@ -328,7 +358,10 @@ svg.dim .lab:not(.is-hover) { opacity: 0.4; }
       <h2 id="chart-title"></h2>
       <div class="chart" id="chart"><svg id="svg" role="img"></svg><div class="tip" id="tip" hidden></div></div>
     </section>
-    <aside class="card list" id="list"></aside>
+    <aside class="card list" id="list">
+      <h2><span id="list-title"></span><span class="seg" id="sort"></span></h2>
+      <div id="rows"></div>
+    </aside>
   </div>
 </div>
 <script id="etf-rs-data" type="application/json">__ETF_RS_DATA__</script>
@@ -340,20 +373,26 @@ svg.dim .lab:not(.is-hover) { opacity: 0.4; }
   const TOP = Math.min(D.top_n, N);
   const SLOTS = 8, NS = 'http://www.w3.org/2000/svg';
   const HINT = '点击线条或右侧列表可固定颜色(最多 ' + SLOTS + ' 只);悬停查看持仓';
+  const WINS = [['3M', '3m'], ['1M', '1m']];
   const RANGES = [['1M', 21], ['3M', 63], ['6M', 126], ['全部', 0]];
-  const MODES = [['RS 评分', 'rs'], ['名次', 'rank'], ['超额收益 %', 'score']];
+  const MODES = [['RS 评分', 'rs'], ['名次', 'rank'], ['超额收益 %', 'score'], ['1M−3M 名次差', 'diff']];
+  const SORTS = [['名次', 'rank'], ['1M−3M 差', 'diff']];
   const RS_LINE = 90;
   const WEEK = ['日', '一', '二', '三', '四', '五', '六'];
 
-  // rank of every series on every day (1 = strongest); ties keep payload
-  // order, which is today's ranking order.
-  const ranks = S.map(() => new Array(n).fill(null));
-  for (let i = 0; i < n; i++) {
-    const order = [];
-    for (let k = 0; k < N; k++) if (S[k].s[i] != null) order.push(k);
-    order.sort((a, b) => (S[b].s[i] - S[a].s[i]) || (a - b));
-    order.forEach((k, j) => { ranks[k][i] = j + 1; });
+  // rank of every series on every day (1 = strongest) per window; ties keep
+  // payload order, which is today's 3M ranking order.
+  function rankTable(key) {
+    const R = S.map(() => new Array(n).fill(null));
+    for (let i = 0; i < n; i++) {
+      const order = [];
+      for (let k = 0; k < N; k++) if (S[k][key][i] != null) order.push(k);
+      order.sort((a, b) => (S[b][key][i] - S[a][key][i]) || (a - b));
+      order.forEach((k, j) => { R[k][i] = j + 1; });
+    }
+    return R;
   }
+  const ranks3 = rankTable('s'), ranks1 = rankTable('s1');
 
   const store = {
     get(key, dflt) {
@@ -374,8 +413,10 @@ svg.dim .lab:not(.is-hover) { opacity: 0.4; }
     return pins;
   }
   const state = {
+    win: ['3m', '1m'].includes(store.get('win', '3m')) ? store.get('win', '3m') : '3m',
+    sort: ['rank', 'diff'].includes(store.get('sort', 'rank')) ? store.get('sort', 'rank') : 'rank',
     range: [21, 63, 126, 0].includes(store.get('range', 63)) ? store.get('range', 63) : 63,
-    mode: ['rs', 'rank', 'score'].includes(store.get('mode', 'rs')) ? store.get('mode', 'rs') : 'rs',
+    mode: ['rs', 'rank', 'score', 'diff'].includes(store.get('mode', 'rs')) ? store.get('mode', 'rs') : 'rs',
     clip: store.get('clip', true) !== false,   // score mode: keep one runaway ETF from flattening the rest
     pins: loadPins(),   // slot index = color; a slot stays with its ETF until unpinned
     hover: null,
@@ -400,8 +441,26 @@ svg.dim .lab:not(.is-hover) { opacity: 0.4; }
   const slotOf = k => state.pins.indexOf(S[k].t);
   const colorOf = k => { const s = slotOf(k); return s < 0 ? null : 'var(--s' + (s + 1) + ')'; };
   const fmtScore = v => v == null ? '–' : (v > 0 ? '+' : '') + v.toFixed(1) + '%';
-  function delta(k, i) {
-    const cur = ranks[k][i], prev = i > 0 ? ranks[k][i - 1] : null;
+  // active window accessors: score key, percentile key, rank table, label
+  const SK = () => state.win === '1m' ? 's1' : 's';
+  const PK = () => state.win === '1m' ? 'p1' : 'p';
+  const R = () => state.win === '1m' ? ranks1 : ranks3;
+  const WL = () => state.win === '1m' ? '1M' : '3M';
+  // 3M rank − 1M rank: positive = the 1M ladder ranks it higher = gaining
+  const diffOf = (k, i) => (ranks3[k][i] == null || ranks1[k][i] == null) ? null : ranks3[k][i] - ranks1[k][i];
+  const fmtDiff = v => v == null ? '–' : v > 0 ? '▲' + v : v < 0 ? '▼' + (-v) : '=';
+  const diffCls = v => v == null || v === 0 ? 'flat' : v > 0 ? 'up' : 'down';
+  // today's top band of the active window (thick lines, end labels)
+  let topSet = new Set();
+  function computeTop() {
+    const RR = R();
+    topSet = new Set();
+    for (let k = 0; k < N; k++) if (RR[k][n - 1] != null && RR[k][n - 1] <= TOP) topSet.add(k);
+  }
+  const isTop = k => topSet.has(k);
+  function delta(k, i, RR) {
+    RR = RR || R();
+    const cur = RR[k][i], prev = i > 0 ? RR[k][i - 1] : null;
     if (cur == null || i === 0) return ['', 'flat'];
     if (prev == null) return ['新', 'flat'];
     if (prev === cur) return ['–', 'flat'];
@@ -415,24 +474,25 @@ svg.dim .lab:not(.is-hover) { opacity: 0.4; }
       const b = h('button', '', label, host);
       b.type = 'button';
       b.addEventListener('click', () => {
-        state[key] = value; store.set(key, value); syncControls(); render();
+        state[key] = value; store.set(key, value); syncControls(); renderList(); render();
       });
       b.dataset.value = String(value);
     });
   }
   function syncControls() {
-    for (const [host, key] of [[$('range'), 'range'], [$('mode'), 'mode']]) {
+    for (const [host, key] of [[$('win'), 'win'], [$('range'), 'range'], [$('mode'), 'mode'], [$('sort'), 'sort']]) {
       host.querySelectorAll('button').forEach(b => {
         b.setAttribute('aria-pressed', String(b.dataset.value === String(state[key])));
       });
     }
     $('clip-wrap').hidden = state.mode !== 'score';
     $('clip').checked = state.clip;
-    const thick = ';粗线 = 当日前 ' + TOP + ')';
+    const wl = WL(), thick = ';粗线 = 当日 ' + wl + ' 前 ' + TOP + ')';
     $('chart-title').textContent = state.mode === 'rs'
-      ? '3M RS 评分走势(名单内 0–99 百分位;横线 = RS ' + RS_LINE + thick
-      : state.mode === 'rank' ? '名次走势(1 = 最强' + thick
-      : '3M 加权超额收益(相对 ' + D.benchmark + ',%;RS 评分的原始分数' + thick;
+      ? wl + ' RS 评分走势(名单内 0–99 百分位;横线 = RS ' + RS_LINE + thick
+      : state.mode === 'rank' ? wl + ' 名次走势(1 = 最强' + thick
+      : state.mode === 'diff' ? '1M−3M 名次差走势(3M 名次 − 1M 名次;正 = 1M 领先,正在走强;负 = 走弱' + thick
+      : wl + ' 加权超额收益(相对 ' + D.benchmark + ',%;RS 评分的原始分数' + thick;
   }
   let hintTimer = 0;
   function flashHint(text) {
@@ -463,14 +523,17 @@ svg.dim .lab:not(.is-hover) { opacity: 0.4; }
     return { a, b, ticks };
   }
   function render() {
+    computeTop();
     const W = Math.max(320, chartEl.clientWidth - 12), narrow = W < 640;
-    const rankMode = state.mode === 'rank', rsMode = state.mode === 'rs';
+    const rankMode = state.mode === 'rank', rsMode = state.mode === 'rs', diffMode = state.mode === 'diff';
+    const sk = SK(), pk = PK(), RR = R();
     const H = rsMode ? 760 : rankMode ? 700 : 580;
     const m = { l: 36, r: narrow ? 60 : 178, t: 12, b: 28 };
     const pw = W - m.l - m.r, ph = H - m.t - m.b;
     const cnt = state.range ? Math.min(state.range, n) : n, i0 = n - cnt;
     const X = i => m.l + (cnt === 1 ? pw / 2 : (i - i0) / (cnt - 1) * pw);
-    const val = rsMode ? ((k, i) => S[k].p[i]) : rankMode ? ((k, i) => ranks[k][i]) : ((k, i) => S[k].s[i]);
+    const val = rsMode ? ((k, i) => S[k][pk][i]) : rankMode ? ((k, i) => RR[k][i])
+      : diffMode ? diffOf : ((k, i) => S[k][sk][i]);
 
     svg.replaceChildren();
     svg.setAttribute('viewBox', '0 0 ' + W + ' ' + H);
@@ -513,10 +576,10 @@ svg.dim .lab:not(.is-hover) { opacity: 0.4; }
       });
     } else {
       const vals = [];
-      for (let k = 0; k < N; k++) for (let i = i0; i < n; i++) if (S[k].s[i] != null) vals.push(S[k].s[i]);
+      for (let k = 0; k < N; k++) for (let i = i0; i < n; i++) { const v = val(k, i); if (v != null) vals.push(v); }
       vals.sort((a, b) => a - b);
       let lo = vals.length ? vals[0] : -1, hi = vals.length ? vals[vals.length - 1] : 1;
-      if (state.clip && vals.length > 8) {
+      if (state.clip && !diffMode && vals.length > 8) {
         // Scale to the largest value inside a wide Tukey fence (4 x IQR);
         // anything beyond runs off the plot and is flagged on its label.
         const q = f => vals[Math.min(vals.length - 1, Math.floor(f * vals.length))];
@@ -533,7 +596,7 @@ svg.dim .lab:not(.is-hover) { opacity: 0.4; }
         el('line', { class: v === 0 ? 'zero' : 'gridl', x1: m.l, x2: m.l + pw, y1: Y(v), y2: Y(v) }, svg);
         el('text', { class: 'tick', x: m.l - 8, y: Y(v) + 4, 'text-anchor': 'end' }, svg).textContent = v;
       });
-      note = { x: m.l + 6, y: Y(0) - 5, text: '0 = ' + D.benchmark };
+      note = { x: m.l + 6, y: Y(0) - 5, text: diffMode ? '0 = 两窗口名次相同;上方 = 1M 领先 3M(走强)' : '0 = ' + D.benchmark };
     }
 
     // x ticks: weeks for short ranges, months otherwise
@@ -566,7 +629,7 @@ svg.dim .lab:not(.is-hover) { opacity: 0.4; }
     const clip = { 'clip-path': 'url(#' + clipId + ')' };
     const layers = { rest: el('g', clip, svg), top: el('g', clip, svg), pin: el('g', clip, svg) };
     for (let k = N - 1; k >= 0; k--) {
-      const c = colorOf(k), kind = c ? 'pin' : k < TOP ? 'top' : 'rest';
+      const c = colorOf(k), kind = c ? 'pin' : isTop(k) ? 'top' : 'rest';
       const p = el('path', { class: 'ln ' + kind, d: pathOf(k) }, layers[kind]);
       if (c) p.style.stroke = c;
     }
@@ -577,7 +640,7 @@ svg.dim .lab:not(.is-hover) { opacity: 0.4; }
     const labs = [];
     for (let k = 0; k < N; k++) {
       const v = val(k, n - 1);
-      if (v != null && (k < TOP || slotOf(k) >= 0)) labs.push({ k, y0: Y(v), y: Y(v) });
+      if (v != null && (isTop(k) || slotOf(k) >= 0)) labs.push({ k, y0: Y(v), y: Y(v) });
     }
     labs.sort((a, b) => a.y0 - b.y0);
     const gap = 13, floor = m.t + ph;
@@ -594,10 +657,11 @@ svg.dim .lab:not(.is-hover) { opacity: 0.4; }
       el('path', { class: 'lead', d: 'M' + (xe + 6) + ' ' + y0.toFixed(1) + 'L' + (lx - 4) + ' ' + y.toFixed(1) }, g);
       if (c) el('circle', { class: 'dot', cx: xe, cy: y0, r: 4 }, g).style.fill = c;
       const t = el('text', { x: lx, y: y + 4 }, g);
-      if (!narrow) el('tspan', { class: 'rk' }, t).textContent = (rsMode ? S[k].p[n - 1] : ranks[k][n - 1]) + ' ';
+      if (!narrow) el('tspan', { class: 'rk' }, t).textContent =
+        (rsMode ? S[k][pk][n - 1] : diffMode ? fmtDiff(diffOf(k, n - 1)) : RR[k][n - 1]) + ' ';
       el('tspan', { class: 'tk' }, t).textContent = S[k].t;
-      const sv = S[k].s[n - 1];
-      if (G0 && offScale(sv)) {
+      const sv = val(k, n - 1);
+      if (G0 && !diffMode && offScale(sv)) {
         el('tspan', { class: 'nm', dx: 5 }, t).textContent = (sv > 0 ? '↑ ' : '↓ ') + fmtScore(sv) + ' 超出刻度';
       } else if (!narrow && S[k].name) el('tspan', { class: 'nm', dx: 5 }, t).textContent = shortName(S[k].name);
       // a wide transparent strip so the whole label row is the hit target
@@ -629,7 +693,7 @@ svg.dim .lab:not(.is-hover) { opacity: 0.4; }
     for (let k = 0; k < N; k++) {
       const v = G.val(k, i);
       if (v == null) continue;
-      const d = Math.abs(G.Y(v) - py) + (slotOf(k) >= 0 ? 0 : k < TOP ? 2 : 4);
+      const d = Math.abs(G.Y(v) - py) + (slotOf(k) >= 0 ? 0 : isTop(k) ? 2 : 4);
       if (d < bd) { bd = d; best = k; }
     }
     setHover(best, i, px, py);
@@ -676,30 +740,42 @@ svg.dim .lab:not(.is-hover) { opacity: 0.4; }
       key.style.marginRight = '6px';
       who.appendChild(document.createTextNode(S[k].t));
       if (S[k].name) h('span', 'n', S[k].name, who);
-      const valEl = h('div', 'val', null, main);
-      h('b', '', 'RS ' + S[k].p[i], valEl);
-      valEl.appendChild(document.createTextNode(' · 第 ' + ranks[k][i] + ' 名 '));
-      const [txt, cls] = delta(k, i);
-      if (txt) h('span', cls, txt, valEl);
-      valEl.appendChild(document.createTextNode(' · 超额 ' + fmtScore(S[k].s[i])));
+      for (const [wl, sk, pk, RR] of [['3M', 's', 'p', ranks3], ['1M', 's1', 'p1', ranks1]]) {
+        const valEl = h('div', 'val', null, main);
+        h('span', 't', wl + ' ', valEl).style.color = 'var(--muted)';
+        if (S[k][sk][i] == null) { h('span', 'flat', '无评分(历史不足)', valEl); continue; }
+        h('b', '', 'RS ' + S[k][pk][i], valEl);
+        valEl.appendChild(document.createTextNode(' · 第 ' + RR[k][i] + ' 名 '));
+        const [txt, cls] = delta(k, i, RR);
+        if (txt) h('span', cls, txt, valEl);
+        valEl.appendChild(document.createTextNode(' · 超额 ' + fmtScore(S[k][sk][i])));
+      }
+      const dv = diffOf(k, i);
+      if (dv != null) {
+        const dEl = h('div', 'val', null, main);
+        dEl.appendChild(document.createTextNode('1M−3M 名次差 '));
+        h('b', diffCls(dv), fmtDiff(dv) + (dv > 0 ? ' 走强' : dv < 0 ? ' 走弱' : ''), dEl);
+      }
       if (S[k].holdings) h('div', 'hold', '持仓:' + S[k].holdings, main);
     }
+    const RR = R(), sk = SK(), pk = PK();
     const others = [];
     state.pins.forEach(t => {
       if (t == null) return;
       const j = known.get(t);
-      if (j !== k && ranks[j][i] != null) others.push(j);
+      if (j !== k && RR[j][i] != null) others.push(j);
     });
-    others.sort((a, b) => ranks[a][i] - ranks[b][i]);
+    others.sort((a, b) => RR[a][i] - RR[b][i]);
     if (others.length) {
       const rows = h('div', k != null ? 'rows' : '', null, tip);
+      h('div', 'd', WL() + ' 窗口', rows);
       others.forEach(j => {
         const r = h('div', 'r', null, rows);
         h('span', 'key', null, r).style.background = colorOf(j);
         h('span', 't', S[j].t, r);
-        h('b', '', 'RS ' + S[j].p[i], r);
-        h('span', 't', '#' + ranks[j][i], r);
-        h('span', 't', fmtScore(S[j].s[i]), r);
+        h('b', '', 'RS ' + S[j][pk][i], r);
+        h('span', 't', '#' + RR[j][i], r);
+        h('span', 't', fmtScore(S[j][sk][i]), r);
       });
     } else if (k == null) h('div', 'd', '移到线条上查看该 ETF', tip);
     tip.hidden = false;
@@ -714,24 +790,39 @@ svg.dim .lab:not(.is-hover) { opacity: 0.4; }
 
   // ---------- ranking list (also the table view of the latest day) ----------
   function renderList() {
-    listEl.replaceChildren();
-    const last = n - 1;
-    h('h2', '', '当日排名 · ' + dates[last] + '(RS 评分 / 超额收益)', listEl);
-    const order = S.map((_, k) => k).sort((a, b) =>
-      (ranks[a][last] == null) - (ranks[b][last] == null) || (ranks[a][last] - ranks[b][last]) || (a - b));
-    let below = false;
+    computeTop();
+    const rowsEl = $('rows');
+    rowsEl.replaceChildren();
+    const last = n - 1, RR = R(), sk = SK(), pk = PK(), diffSort = state.sort === 'diff';
+    $('list-title').textContent = diffSort
+      ? '1M−3M 名次差 · ' + dates[last] + '(差值大 = 1M 中快速上升)'
+      : WL() + ' 当日排名 · ' + dates[last] + '(RS / 超额)';
+    const byRank = (a, b) => (RR[a][last] == null) - (RR[b][last] == null) || (RR[a][last] - RR[b][last]) || (a - b);
+    const order = S.map((_, k) => k).sort(diffSort
+      ? ((a, b) => { const da = diffOf(a, last), db = diffOf(b, last);
+          return (da == null) - (db == null) || (db - da) || (ranks1[a][last] - ranks1[b][last]) || (a - b); })
+      : byRank);
+    let phase = -1;
+    const split = text => h('div', 'split', text, rowsEl);
     order.forEach((k, pos) => {
-      if (!below && pos > 0 && !(S[k].p[last] >= RS_LINE)) {
-        below = true;
-        h('div', 'split', 'RS ' + RS_LINE + ' 以下', listEl);
+      if (diffSort) {
+        const dv = diffOf(k, last);
+        const ph = dv == null ? 3 : dv > 0 ? 0 : dv === 0 ? 1 : 2;
+        if (ph !== phase) {
+          phase = ph;
+          split(['1M 名次领先 3M → 正在走强(差值越大越快)', '两窗口名次相同',
+                 '1M 名次落后 3M → 正在走弱', '仅一个窗口有评分(历史不足 64 天)'][ph]);
+        }
+      } else {
+        if (phase < 0 && pos > 0 && !(S[k][pk][last] >= RS_LINE)) { phase = 0; split('RS ' + RS_LINE + ' 以下'); }
+        if (pos === TOP && N > TOP) split('第 ' + (TOP + 1) + ' 名之后(图中为细线)');
       }
-      if (pos === TOP && N > TOP) h('div', 'split', '第 ' + (TOP + 1) + ' 名之后(图中为细线)', listEl);
       const c = colorOf(k);
-      const row = h('button', 'row' + (c ? ' is-pin' : '') + (pos >= TOP ? ' rest' : ''), null, listEl);
+      const row = h('button', 'row' + (c ? ' is-pin' : '') + (isTop(k) ? '' : ' rest'), null, rowsEl);
       row.type = 'button';
       row.dataset.k = k;
       row.setAttribute('aria-pressed', String(!!c));
-      h('span', 'rk', ranks[k][last] == null ? '–' : ranks[k][last], row);
+      h('span', 'rk', RR[k][last] == null ? '–' : RR[k][last], row);
       const [txt, cls] = delta(k, last);
       h('span', 'dl ' + cls, txt, row);
       const key = h('span', 'key', null, row);
@@ -740,8 +831,12 @@ svg.dim .lab:not(.is-hover) { opacity: 0.4; }
       h('span', 'tk', S[k].t, who);
       if (S[k].name) h('span', 'nm', S[k].name, who);
       const sc = h('span', 'sc', null, row);
-      h('b', '', S[k].p[last] == null ? '–' : S[k].p[last], sc);
-      sc.appendChild(document.createTextNode(fmtScore(S[k].s[last])));
+      h('b', '', S[k][pk][last] == null ? '–' : S[k][pk][last], sc);
+      sc.appendChild(document.createTextNode(fmtScore(S[k][sk][last])));
+      const df = h('span', 'df', null, row);
+      const r3 = ranks3[k][last], r1 = ranks1[k][last], dv = diffOf(k, last);
+      df.appendChild(document.createTextNode('3M 第 ' + (r3 == null ? '–' : r3) + ' 名 · 1M 第 ' + (r1 == null ? '–' : r1) + ' 名 · '));
+      h('b', diffCls(dv), fmtDiff(dv), df);
       if (S[k].holdings) h('span', 'hd', S[k].holdings, row);
       row.addEventListener('pointerenter', () => setHover(k, null));
       row.addEventListener('pointerleave', () => setHover(null, null));
@@ -753,10 +848,13 @@ svg.dim .lab:not(.is-hover) { opacity: 0.4; }
 
   // ---------- boot ----------
   $('sub').textContent = '数据截至 ' + dates[n - 1] + ' · 相对 ' + D.benchmark + ' · ' + N + ' 只 ETF · '
-    + n + ' 个交易日 · RS 评分为名单内百分位(非全市场)· 生成于 ' + D.generated;
+    + n + ' 个交易日 · RS 评分为名单内百分位(非全市场)· 3M = 0.5·R21 + 0.3·R42 + 0.2·R63,'
+    + '1M = 0.4·R5 + 0.2·R10 + 0.2·R15 + 0.2·R20(更灵敏)· 生成于 ' + D.generated;
   $('hint').textContent = HINT;
+  segmented($('win'), WINS, 'win');
   segmented($('range'), RANGES, 'range');
   segmented($('mode'), MODES, 'mode');
+  segmented($('sort'), SORTS, 'sort');
   $('clip').addEventListener('change', ev => {
     state.clip = ev.target.checked; store.set('clip', state.clip); render();
   });

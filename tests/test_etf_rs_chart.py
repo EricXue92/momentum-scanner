@@ -163,6 +163,7 @@ def test_render_embeds_series_in_given_order_with_names_holdings_and_percent_sco
         "t": "AAA", "name": "甲", "holdings": "X、Y",
         "s": [round(v * 100, 2) for v in hist["AAA"]],
         "p": [int(v) for v in etf_rs_chart.percentile_history(hist)["AAA"]],
+        "s1": [None] * len(hist), "p1": [None] * len(hist),  # no 1M history given
     }
     assert data["series"][0]["holdings"] == ""
 
@@ -233,3 +234,54 @@ def test_run_chart_failure_does_not_lose_the_ranking(tmp_path, monkeypatch):
     monkeypatch.setattr(etf_rs_chart, "write_trend_chart", boom)
     out = etf_rs.run_etf_rs(_cfg(), tmp_path, date(2026, 9, 12))
     assert out is not None and out.exists()
+
+
+# --- 1M window alongside 3M ---
+
+
+def test_history_1m_uses_weekly_ladder_and_is_scorable_from_bar_21():
+    from us_rs_3m import WEIGHTS_1M_BARS
+    klines = {"AAA": _walk(1), "SPY": _walk(9)}
+    h1 = etf_rs_chart.score_history(klines, ["AAA"], "SPY", weights_bars=WEIGHTS_1M_BARS)
+    h3 = etf_rs_chart.score_history(klines, ["AAA"], "SPY")
+    assert len(h1) == 120 - 20 and len(h3) == 120 - 63
+    day = h1.index[-1]
+    expected = etf_rs.rank_etfs(_truncate(klines, day), ["AAA"], "SPY",
+                                weights_bars=WEIGHTS_1M_BARS).loc["AAA", "raw_score"]
+    assert math.isclose(h1.loc[day, "AAA"], expected)
+
+
+def test_render_embeds_1m_series_aligned_to_the_3m_calendar():
+    from us_rs_3m import WEIGHTS_1M_BARS
+    klines = _klines()
+    h3 = etf_rs_chart.score_history(klines, ["AAA", "BBB"], "SPY")
+    h1 = etf_rs_chart.score_history(klines, ["AAA", "BBB"], "SPY", weights_bars=WEIGHTS_1M_BARS)
+    data = _payload(etf_rs_chart.render_html(h3, {}, {}, "SPY", date(2026, 9, 12), history_1m=h1))
+    aaa = data["series"][0]
+    assert len(aaa["s1"]) == len(data["dates"]) == len(h3)
+    assert aaa["s1"][-1] == round(float(h1["AAA"].iloc[-1]) * 100, 2)
+    assert aaa["p1"][-1] == int(etf_rs_chart.percentile_history(h1)["AAA"].iloc[-1])
+
+
+def test_write_trend_chart_keeps_1m_only_tickers_with_null_3m(tmp_path):
+    klines = _klines()
+    klines["NEW"] = _walk(4, n=40)   # 40 bars: 1M scorable, 3M not
+    out = etf_rs_chart.write_trend_chart(
+        klines, ["AAA", "BBB", "NEW"], "SPY", {}, {}, tmp_path, date(2026, 9, 12))
+    data = _payload(out.read_text())
+    assert [s["t"] for s in data["series"]] == ["AAA", "BBB", "NEW"]
+    new = data["series"][2]
+    assert all(v is None for v in new["s"]) and new["s1"][-1] is not None
+    assert len(data["dates"]) == 120 - 63   # calendar stays the 3M one
+
+
+def test_run_passes_3m_unscored_tickers_to_the_chart(tmp_path, monkeypatch):
+    klines = _klines()
+    klines["NEW"] = _walk(4, n=40)
+    monkeypatch.setattr(etf_rs, "_fetch_klines", lambda *a, **k: klines)
+    cfg = _cfg(); cfg["tickers"]["NEW"] = "新"
+    out = etf_rs.run_etf_rs(cfg, tmp_path, date(2026, 9, 12))
+    ranked = [line.split()[1] for line in out.read_text().splitlines()]
+    assert "NEW" not in ranked
+    chart = tmp_path / "Reports" / "ETF" / "etf_rs_trend.html"
+    assert [s["t"] for s in _payload(chart.read_text())["series"]] == ranked + ["NEW"]

@@ -170,7 +170,7 @@ A daily sector / theme rotation view: a fixed list of ~50 ETFs (US sectors and t
 
 - **Scoring:** the same 3M RS formula as stocks (`0.5·R21 + 0.3·R42 + 0.2·R63`, relative to SPY). The percentile is **within the ETF list**, not the stock universe.
 - **When:** a soft step at the end of every `us-eod` run (a failure never affects EOD); rerun alone with `--mode etf-rs`. Computed locally — one yfinance batch, no cloud step.
-- **Output:** `output/TV/US/<date>_ETF_rs.txt`, one ETF per line, **strongest first**, as `N. TICKER rank-change - name | top-5 holdings` (`N.` = rank):
+- **Output:** `output/TV/US/<date>_ETF_rs_3m.txt`, one ETF per line, **strongest first**, as `N. TICKER rank-change - name | top-5 holdings` (`N.` = rank): A second file `<date>_ETF_rs_1m.txt` ranks the same list on a 1-month weekly ladder (`0.4·R5 + 0.2·R10 + 0.2·R15 + 0.2·R20`), same format, with its own rank-change markers.
 
   ```
   1. BWET = - 油轮运费期货 | 不适用: 油轮运费期货及现金抵押品
@@ -303,7 +303,7 @@ output/
 ├── TV/                        # comma-separated, for TradingView "Import list..."
 │   ├── US/<date>_{TheSetup,EarningsGap,HighVolume,GapUp,NewHigh52W,TopGainers,Leaders,RS,Shorts,IPO,Repeat}.txt
 │   ├── US/<date>_{MorningGapPre{20,10,5},MorningGap{5..30}}.txt
-│   ├── US/<date>_ETF_rs.txt   # ETF strength ranking — human-readable, NOT an import list
+│   ├── US/<date>_ETF_rs_3m.txt   # ETF strength ranking — human-readable, NOT an import list
 │   ├── US/<date>_SMA50Pruned.txt   # names the SMA50 auto-prune removed from the master today
 │   ├── US/rs_us_<date>.txt    # daily strongest-RS top 10 (US)
 │   └── HK/<date>_{EarningsGap,HighVolume,GapUp,Leaders,RS,Shorts,IPO,HKMorningGap{10..60}}.txt

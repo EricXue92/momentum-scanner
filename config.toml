@@ -92,11 +92,14 @@ consecutive_days = 2
 
 # ETF 3M RS 排名: 每天 us-eod 末尾对下面固定 ETF 名单跑一遍 3M RS 算法
 # (0.5·R1M + 0.3·R2M + 0.2·R3M, 减去 benchmark 同期得分, 名单内 0-99 百分位),
-# 写 output/TV/US/<date>_ETF_rs.txt: 每行一只 `TICKER - 中文名`, 最强在最上面。
+# 写 output/TV/US/<date>_ETF_rs_3m.txt: 每行一只 `TICKER - 中文名`, 最强在最上面。
 # 排名快照: 同日重跑覆盖, 不进 eod_seen 去重, 不镜像 Webull, 不同步 Futu/TV。
 # 带分数的完整表在 EOD 日志里。手动重跑: `uv run main.py --mode etf-rs`。
+# 同一步再按 1M 周阶梯 (最近 1/2/3/4 周累计收益, 即回看 5/10/15/20 根, 权重 0.4/0.2/0.2/0.2,
+# 至少 21 根) 排一次, 写 output/TV/US/<date>_ETF_rs_1m.txt, 格式相同, 涨跌标记只和前一天的 _1m 文件比。
 # 同一步还会生成走势页 output/Reports/ETF/etf_rs_trend.html (单文件, 每次覆盖):
-# 用同一批 K 线重算每个交易日的 RS 评分 / 名次 / 超额收益, 当日前 chart_top_n 画粗线。
+# 用同一批 K 线重算每个交易日的 RS 评分 / 名次 / 超额收益, 当日前 chart_top_n 画粗线;
+# 页面可切换 3M / 1M 窗口, 并有 "1M−3M 名次差" 视图 (正 = 1M 名次领先 3M, 正在走强)。
 # 名单在 [etf_rs.tickers] 表里维护: 左边 ticker, 右边中文名 (增删改这里即可)。
 # 中文名完全相同的几只视为同一品种, 文件里只显示排名最高的那一只
 # (如 GDXU / NUGT 同为"黄金矿业 杠杆做多"); 想让两只都显示就把名字写得不同。

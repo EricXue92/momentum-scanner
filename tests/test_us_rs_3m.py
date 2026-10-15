@@ -284,3 +284,54 @@ def test_fetch_us_klines_yf_trailing_batch_of_one_is_kept(monkeypatch):
     monkeypatch.setattr("us_rs_3m.time.sleep", lambda s: None)
     klines = us_rs_3m.fetch_us_klines_yf(["AAA", "BBB", "CCC"], period="6mo", batch_size=2)
     assert sorted(klines) == ["AAA", "BBB", "CCC"]
+
+
+# --- bar-based weights (1M weekly ladder) ---
+
+
+def test_score_from_kline_bars_weekly_ladder():
+    # 30 行平盘 + 末尾跳 +10%: 每段累计收益都是 10% → (0.4+0.2+0.2+0.2)·0.1 = 0.10
+    from us_rs_3m import WEIGHTS_1M_BARS, _score_from_kline_bars
+    df = _flat_then_jump(100.0, jump_pct=10, n=30)
+    score, reason = _score_from_kline_bars(df, WEIGHTS_1M_BARS)
+    assert reason == "ok"
+    assert abs(score - 0.10) < 1e-9
+
+
+def test_score_from_kline_bars_min_rows_is_max_lag_plus_one():
+    from us_rs_3m import WEIGHTS_1M_BARS, _score_from_kline_bars
+    assert _score_from_kline_bars(_flat_then_jump(100.0, 10, n=20), WEIGHTS_1M_BARS)[1] == "short_history"
+    assert _score_from_kline_bars(_flat_then_jump(100.0, 10, n=21), WEIGHTS_1M_BARS)[1] == "ok"
+
+
+def test_score_from_kline_bars_recent_week_dominates():
+    # 前 15 根平盘 100, 第 16-20 根 120, 最后 5 根 (最近一周) 110:
+    # R1W = 110/110-1 = 0 (close[-6] 是第 20 根... 见下) — 直接用数字验证
+    from us_rs_3m import WEIGHTS_1M_BARS, _score_from_kline_bars
+    closes = [100.0] * 16 + [120.0] * 5 + [110.0] * 5  # 26 行
+    df = pd.DataFrame({"time_key": pd.date_range(end="2026-05-21", periods=26, freq="B"),
+                       "close": closes})
+    score, _ = _score_from_kline_bars(df, WEIGHTS_1M_BARS)
+    last = 110.0
+    expected = (0.4 * (last / closes[-6] - 1) + 0.2 * (last / closes[-11] - 1)
+                + 0.2 * (last / closes[-16] - 1) + 0.2 * (last / closes[-21] - 1))
+    assert abs(score - expected) < 1e-12
+
+
+def test_score_from_kline_months_delegates_to_bars():
+    # 3M 月权重 = 21 根/月; 两条路径必须给出同一个分数
+    from us_rs_3m import _score_from_kline_bars
+    df = _flat_then_jump(100.0, jump_pct=7, n=70)
+    bars = [(m * 21, w) for m, w in WEIGHTS_3M]
+    assert _score_from_kline(df) == _score_from_kline_bars(df, bars)
+
+
+def test_compute_table_accepts_bar_weights():
+    from us_rs_3m import WEIGHTS_1M_BARS
+    klines = {"AAA": _flat_then_jump(100.0, 20, n=30), "BBB": _flat_then_jump(100.0, 5, n=30),
+              "SHORT": _flat_then_jump(100.0, 50, n=20)}
+    spy = _flat_then_jump(100.0, 10, n=30)
+    table = compute_us_rs_3m_table(klines, spy, weights_bars=WEIGHTS_1M_BARS)
+    assert list(table.index) == ["AAA", "BBB"]  # SHORT: 20 行 < 21, 剔除
+    assert abs(table.loc["AAA", "raw_score"] - 0.10) < 1e-9   # 0.20 - 0.10
+    assert abs(table.loc["BBB", "raw_score"] + 0.05) < 1e-9   # 0.05 - 0.10

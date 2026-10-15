@@ -25,6 +25,12 @@ import pandas as pd
 logger = logging.getLogger(__name__)
 
 WEIGHTS_3M: list[tuple[int, float]] = [(1, 0.5), (2, 0.3), (3, 0.2)]
+BARS_PER_MONTH = 21
+
+# 1M weekly ladder, in bars: cumulative 1/2/3/4-week returns (5/10/15/20
+# trading days back from today, overlapping like the IBD 3/6/9/12M ladder)
+# weighted 0.4/0.2/0.2/0.2. Needs 21 rows. Used by the ETF 1M ranking only.
+WEIGHTS_1M_BARS: list[tuple[int, float]] = [(5, 0.4), (10, 0.2), (15, 0.2), (20, 0.2)]
 
 # Cloud-published CSV (written by .github/workflows/update_us_rs_3m.yml).
 # Local pipeline reads from raw.githubusercontent.com instead of computing
@@ -41,21 +47,26 @@ _CLOUD_CSV_URL_TEMPLATE = (
 _FALLBACK_MAX_AGE_DAYS = 3
 
 
-def _score_from_kline(
+def _months_to_bars(weights: list[tuple[int, float]]) -> list[tuple[int, float]]:
+    return [(m * BARS_PER_MONTH, w) for m, w in weights]
+
+
+def _score_from_kline_bars(
     df: pd.DataFrame,
-    weights: list[tuple[int, float]] = WEIGHTS_3M,
+    weights_bars: list[tuple[int, float]],
 ) -> tuple[float | None, str]:
-    """Compute Σ wᵢ·Rᵢ from a k-line DataFrame sorted ascending by ``time_key``.
+    """Compute Σ wᵢ·(close[-1] / close[-1-barsᵢ] − 1) from a k-line DataFrame
+    sorted ascending by ``time_key``; ``weights_bars`` = (lookback in bars,
+    weight). Lookbacks count rows, not calendar days.
 
     Returns (score, reason); score is None on rejection. Reason ∈
     {"ok", "no_data", "short_history", "zero_last", "zero_past"}.
 
-    Minimum rows = max(months) * 21 + 1 (64 for WEIGHTS_3M).
+    Minimum rows = max(bars) + 1 (64 for the 3M ladder, 21 for 1M).
     """
     if df is None or df.empty:
         return None, "no_data"
-    max_months = max(m for m, _ in weights)
-    min_rows = max_months * 21 + 1
+    min_rows = max(b for b, _ in weights_bars) + 1
     if len(df) < min_rows:
         return None, "short_history"
     closes = df["close"].astype(float).values
@@ -64,29 +75,43 @@ def _score_from_kline(
         return None, "zero_last"
 
     score = 0.0
-    for months, w in weights:
-        idx = -1 - months * 21
-        if abs(idx) > len(closes):
-            return None, "short_history"
-        past = float(closes[idx])
+    for bars, w in weights_bars:
+        past = float(closes[-1 - bars])
         if past <= 0:
             return None, "zero_past"
         score += w * ((last / past) - 1.0)
     return score, "ok"
 
 
+def _score_from_kline(
+    df: pd.DataFrame,
+    weights: list[tuple[int, float]] = WEIGHTS_3M,
+) -> tuple[float | None, str]:
+    """Month-ladder front of ``_score_from_kline_bars``: ``weights`` =
+    (months, weight), one month = ``BARS_PER_MONTH`` rows (64 rows minimum
+    for WEIGHTS_3M)."""
+    return _score_from_kline_bars(df, _months_to_bars(weights))
+
+
 def compute_us_rs_3m_table(
     klines: dict[str, pd.DataFrame],
     spy_kline: pd.DataFrame,
+    weights_bars: list[tuple[int, float]] | None = None,
 ) -> pd.DataFrame:
     """Return DataFrame indexed by ticker with columns ``raw_score`` and
     ``rs_percentile`` (0-99).
 
-    Tickers without enough history (< 64 rows) are excluded. ``raw_score``
-    is retained alongside the percentile so the US IPO ladder can score
-    out-of-universe candidates against the same Fred6725 distribution.
+    ``weights_bars`` defaults to the 3M month ladder (``WEIGHTS_3M``); pass
+    e.g. ``WEIGHTS_1M_BARS`` for another window — same benchmark-relative
+    score and percentile formula, only the lookbacks change.
+    Tickers without enough history (< max lookback + 1 rows; 64 for 3M) are
+    excluded. ``raw_score`` is retained alongside the percentile so the US
+    IPO ladder can score out-of-universe candidates against the same
+    Fred6725 distribution.
     """
-    spy_score, spy_reason = _score_from_kline(spy_kline)
+    if weights_bars is None:
+        weights_bars = _months_to_bars(WEIGHTS_3M)
+    spy_score, spy_reason = _score_from_kline_bars(spy_kline, weights_bars)
     if spy_score is None:
         logger.warning(
             f"[US RS 3M] SPY score rejected ({spy_reason}) — falling back to "
@@ -97,7 +122,7 @@ def compute_us_rs_3m_table(
     scores: dict[str, float] = {}
     reasons: dict[str, int] = {}
     for ticker, df in klines.items():
-        s, reason = _score_from_kline(df)
+        s, reason = _score_from_kline_bars(df, weights_bars)
         reasons[reason] = reasons.get(reason, 0) + 1
         if s is None:
             continue
