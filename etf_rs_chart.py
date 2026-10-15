@@ -211,7 +211,7 @@ _TEMPLATE = r"""<!doctype html>
   --ink: #0b0b0b; --ink2: #52514e; --muted: #898781;
   --grid: #e1e0d9; --axis: #c3c2b7; --border: rgba(11,11,11,0.10);
   --rest: #c9c8c0; --top: #6f6e69;
-  --up: #006300; --down: #c22f2f;
+  --up: #006300; --down: #c22f2f; --mend: #8fae7c;
   --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100;
   --s5: #e87ba4; --s6: #008300; --s7: #4a3aa7; --s8: #e34948;
 }
@@ -222,7 +222,7 @@ _TEMPLATE = r"""<!doctype html>
     --ink: #ffffff; --ink2: #c3c2b7; --muted: #898781;
     --grid: #2c2c2a; --axis: #383835; --border: rgba(255,255,255,0.10);
     --rest: #45453f; --top: #a9a8a0;
-    --up: #0ca30c; --down: #e66767;
+    --up: #0ca30c; --down: #e66767; --mend: #5f7d52;
     --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500;
     --s5: #d55181; --s6: #008300; --s7: #9085e9; --s8: #e66767;
   }
@@ -278,9 +278,10 @@ button:focus-visible { outline: 2px solid var(--s1); outline-offset: -2px; }
 .ln.hov { stroke-width: 3.5; }
 /* diff mode: unpinned lines tinted by today's 1M−3M sign (green = 1M ahead = gaining) */
 .ln.gain { stroke: var(--up); }
+.ln.mend { stroke: var(--mend); }
 .ln.loss { stroke: var(--down); }
-.ln.rest.gain, .ln.rest.loss { opacity: 0.55; }
-.ln.top.gain, .ln.top.loss { opacity: 0.8; }
+.ln.rest.gain, .ln.rest.mend, .ln.rest.loss { opacity: 0.55; }
+.ln.top.gain, .ln.top.mend, .ln.top.loss { opacity: 0.8; }
 svg.dim .ln.rest { opacity: 0.45; }
 svg.dim .ln.top { opacity: 0.16; }
 svg.dim .ln.pin { opacity: 0.35; }
@@ -321,7 +322,7 @@ svg.dim .lab:not(.is-hover) { opacity: 0.4; }
 .tip .r b { font-weight: 650; }
 .tip .r .t { color: var(--ink2); }
 .key { display: inline-block; width: 12px; height: 3px; border-radius: 2px; background: var(--top); vertical-align: middle; }
-.up { color: var(--up); } .down { color: var(--down); } .flat { color: var(--muted); }
+.up { color: var(--up); } .down { color: var(--down); } .flat { color: var(--muted); } .mend { color: var(--mend); }
 
 /* ranking list */
 .row {
@@ -454,11 +455,25 @@ svg.dim .lab:not(.is-hover) { opacity: 0.4; }
   // 3M rank − 1M rank: positive = the 1M ladder ranks it higher = gaining
   const diffOf = (k, i) => (ranks3[k][i] == null || ranks1[k][i] == null) ? null : ranks3[k][i] - ranks1[k][i];
   const fmtDiff = v => v == null ? '–' : v > 0 ? '▲' + v : v < 0 ? '▼' + (-v) : '=';
-  const diffCls = v => v == null || v === 0 ? 'flat' : v > 0 ? 'up' : 'down';
+  // diff group on day i: 0 走强 (1M ahead of 3M AND beating the benchmark on 1M),
+  // 1 止跌 (ahead of 3M but still trailing the benchmark — "less bad", not strong),
+  // 2 持平, 3 走弱, 4 only one window scored
+  const GROUPS = ['gain', 'mend', 'flat', 'loss', null];
+  const GROUP_WORD = ['走强', '止跌', '', '走弱', ''];
+  function diffGroup(k, i) {
+    const d = diffOf(k, i);
+    if (d == null) return 4;
+    if (d === 0) return 2;
+    if (d < 0) return 3;
+    return S[k].s1[i] > 0 ? 0 : 1;
+  }
+  const diffCls = (k, i) => ({ gain: 'up', mend: 'mend', flat: 'flat', loss: 'down' })[GROUPS[diffGroup(k, i)]] || 'flat';
   // today's top band (thick lines, end labels): the active window's top TOP,
   // or in diff mode the TOP largest 1M−3M differences (same order as the
   // list's diff sort), so the chart highlights the same names the list leads with
-  const byDiff = (a, b) => diffOf(b, n - 1) - diffOf(a, n - 1) || (ranks1[a][n - 1] - ranks1[b][n - 1]) || (a - b);
+  // 走强 first, then 止跌 / 持平 / 走弱; within a group by the difference, then 1M rank
+  const byDiff = (a, b) => (diffGroup(a, n - 1) - diffGroup(b, n - 1))
+    || (diffOf(b, n - 1) - diffOf(a, n - 1)) || (ranks1[a][n - 1] - ranks1[b][n - 1]) || (a - b);
   let topSet = new Set();
   function computeTop() {
     topSet = new Set();
@@ -474,10 +489,10 @@ svg.dim .lab:not(.is-hover) { opacity: 0.4; }
   // diff mode line tint by the latest day's sign; null when flat / unscored / not in diff mode
   const signClass = k => {
     if (state.mode !== 'diff') return null;
-    const d = diffOf(k, n - 1);
-    return d == null || d === 0 ? null : d > 0 ? 'gain' : 'loss';
+    const g = GROUPS[diffGroup(k, n - 1)];
+    return g === 'flat' ? null : g;
   };
-  const signColor = k => { const c = signClass(k); return c ? (c === 'gain' ? 'var(--up)' : 'var(--down)') : null; };
+  const signColor = k => { const c = signClass(k); return c ? 'var(--' + ({ gain: 'up', mend: 'mend', loss: 'down' })[c] + ')' : null; };
   const lineColor = k => colorOf(k) || signColor(k) || 'var(--ink)';
   function delta(k, i, RR) {
     RR = RR || R();
@@ -512,7 +527,7 @@ svg.dim .lab:not(.is-hover) { opacity: 0.4; }
     $('chart-title').textContent = state.mode === 'rs'
       ? wl + ' RS 评分走势(名单内 0–99 百分位;横线 = RS ' + RS_LINE + thick
       : state.mode === 'rank' ? wl + ' 名次走势(1 = 最强' + thick
-      : state.mode === 'diff' ? '1M−3M 名次差走势(3M 名次 − 1M 名次;绿 = 1M 领先,正在走强;红 = 落后,走弱;粗线 = 当日差值前 ' + TOP + ')'
+      : state.mode === 'diff' ? '1M−3M 名次差走势(3M 名次 − 1M 名次;绿 = 1M 领先且跑赢 ' + D.benchmark + ',走强;浅绿 = 领先但仍落后 ' + D.benchmark + ',止跌;红 = 走弱;粗线 = 当日走强前 ' + TOP + ')'
       : wl + ' 加权超额收益(相对 ' + D.benchmark + ',%;RS 评分的原始分数' + thick;
   }
   let hintTimer = 0;
@@ -780,7 +795,8 @@ svg.dim .lab:not(.is-hover) { opacity: 0.4; }
       if (dv != null) {
         const dEl = h('div', 'val', null, main);
         dEl.appendChild(document.createTextNode('1M−3M 名次差 '));
-        h('b', diffCls(dv), fmtDiff(dv) + (dv > 0 ? ' 走强' : dv < 0 ? ' 走弱' : ''), dEl);
+        const w = GROUP_WORD[diffGroup(k, i)];
+        h('b', diffCls(k, i), fmtDiff(dv) + (w ? ' ' + w : ''), dEl);
       }
       if (S[k].holdings) h('div', 'hold', '持仓:' + S[k].holdings, main);
     }
@@ -824,20 +840,19 @@ svg.dim .lab:not(.is-hover) { opacity: 0.4; }
       ? '1M−3M 名次差 · ' + dates[last] + '(差值大 = 1M 中快速上升)'
       : WL() + ' 当日排名 · ' + dates[last] + '(RS / 超额)';
     const byRank = (a, b) => (RR[a][last] == null) - (RR[b][last] == null) || (RR[a][last] - RR[b][last]) || (a - b);
-    const order = S.map((_, k) => k).sort(diffSort
-      ? ((a, b) => ((diffOf(a, last) == null) - (diffOf(b, last) == null)) || byDiff(a, b))
-      : byRank);
+    const order = S.map((_, k) => k).sort(diffSort ? byDiff : byRank);
     let phase = -1;
     const split = text => h('div', 'split', text, rowsEl);
     order.forEach((k, pos) => {
       if (diffSort) {
-        const dv = diffOf(k, last);
-        if (pos === TOP && N > TOP && state.mode === 'diff') split('差值前 ' + TOP + ' 之后(图中为细线)');
-        const ph = dv == null ? 3 : dv > 0 ? 0 : dv === 0 ? 1 : 2;
+        if (pos === TOP && N > TOP && state.mode === 'diff') split('前 ' + TOP + ' 之后(图中为细线)');
+        const ph = diffGroup(k, last);
         if (ph !== phase) {
           phase = ph;
-          split(['1M 名次领先 3M → 正在走强(差值越大越快)', '两窗口名次相同',
-                 '1M 名次落后 3M → 正在走弱', '仅一个窗口有评分(历史不足 64 天)'][ph]);
+          split(['走强:1M 名次领先 3M,且 1M 跑赢 ' + D.benchmark + '(差值越大上升越快)',
+                 '止跌:1M 名次领先 3M,但 1M 仍落后 ' + D.benchmark + '(跌得少了,还不算强)',
+                 '两窗口名次相同', '走弱:1M 名次落后 3M',
+                 '仅一个窗口有评分(历史不足 64 天)'][ph]);
         }
       } else {
         if (phase < 0 && pos > 0 && !(S[k][pk][last] >= RS_LINE)) { phase = 0; split('RS ' + RS_LINE + ' 以下'); }
@@ -862,7 +877,8 @@ svg.dim .lab:not(.is-hover) { opacity: 0.4; }
       const df = h('span', 'df', null, row);
       const r3 = ranks3[k][last], r1 = ranks1[k][last], dv = diffOf(k, last);
       df.appendChild(document.createTextNode('3M 第 ' + (r3 == null ? '–' : r3) + ' 名 · 1M 第 ' + (r1 == null ? '–' : r1) + ' 名 · '));
-      h('b', diffCls(dv), fmtDiff(dv), df);
+      const gw = GROUP_WORD[diffGroup(k, last)];
+      h('b', diffCls(k, last), fmtDiff(dv) + (gw ? ' ' + gw : ''), df);
       if (S[k].holdings) h('span', 'hd', S[k].holdings, row);
       row.addEventListener('pointerenter', () => setHover(k, null));
       row.addEventListener('pointerleave', () => setHover(null, null));
