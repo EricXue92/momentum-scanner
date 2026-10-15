@@ -455,11 +455,19 @@ svg.dim .lab:not(.is-hover) { opacity: 0.4; }
   const diffOf = (k, i) => (ranks3[k][i] == null || ranks1[k][i] == null) ? null : ranks3[k][i] - ranks1[k][i];
   const fmtDiff = v => v == null ? '–' : v > 0 ? '▲' + v : v < 0 ? '▼' + (-v) : '=';
   const diffCls = v => v == null || v === 0 ? 'flat' : v > 0 ? 'up' : 'down';
-  // today's top band of the active window (thick lines, end labels)
+  // today's top band (thick lines, end labels): the active window's top TOP,
+  // or in diff mode the TOP largest 1M−3M differences (same order as the
+  // list's diff sort), so the chart highlights the same names the list leads with
+  const byDiff = (a, b) => diffOf(b, n - 1) - diffOf(a, n - 1) || (ranks1[a][n - 1] - ranks1[b][n - 1]) || (a - b);
   let topSet = new Set();
   function computeTop() {
-    const RR = R();
     topSet = new Set();
+    if (state.mode === 'diff') {
+      S.map((_, k) => k).filter(k => diffOf(k, n - 1) != null).sort(byDiff).slice(0, TOP)
+        .forEach(k => topSet.add(k));
+      return;
+    }
+    const RR = R();
     for (let k = 0; k < N; k++) if (RR[k][n - 1] != null && RR[k][n - 1] <= TOP) topSet.add(k);
   }
   const isTop = k => topSet.has(k);
@@ -504,7 +512,7 @@ svg.dim .lab:not(.is-hover) { opacity: 0.4; }
     $('chart-title').textContent = state.mode === 'rs'
       ? wl + ' RS 评分走势(名单内 0–99 百分位;横线 = RS ' + RS_LINE + thick
       : state.mode === 'rank' ? wl + ' 名次走势(1 = 最强' + thick
-      : state.mode === 'diff' ? '1M−3M 名次差走势(3M 名次 − 1M 名次;绿 = 1M 领先,正在走强;红 = 落后,走弱' + thick
+      : state.mode === 'diff' ? '1M−3M 名次差走势(3M 名次 − 1M 名次;绿 = 1M 领先,正在走强;红 = 落后,走弱;粗线 = 当日差值前 ' + TOP + ')'
       : wl + ' 加权超额收益(相对 ' + D.benchmark + ',%;RS 评分的原始分数' + thick;
   }
   let hintTimer = 0;
@@ -817,14 +825,14 @@ svg.dim .lab:not(.is-hover) { opacity: 0.4; }
       : WL() + ' 当日排名 · ' + dates[last] + '(RS / 超额)';
     const byRank = (a, b) => (RR[a][last] == null) - (RR[b][last] == null) || (RR[a][last] - RR[b][last]) || (a - b);
     const order = S.map((_, k) => k).sort(diffSort
-      ? ((a, b) => { const da = diffOf(a, last), db = diffOf(b, last);
-          return (da == null) - (db == null) || (db - da) || (ranks1[a][last] - ranks1[b][last]) || (a - b); })
+      ? ((a, b) => ((diffOf(a, last) == null) - (diffOf(b, last) == null)) || byDiff(a, b))
       : byRank);
     let phase = -1;
     const split = text => h('div', 'split', text, rowsEl);
     order.forEach((k, pos) => {
       if (diffSort) {
         const dv = diffOf(k, last);
+        if (pos === TOP && N > TOP && state.mode === 'diff') split('差值前 ' + TOP + ' 之后(图中为细线)');
         const ph = dv == null ? 3 : dv > 0 ? 0 : dv === 0 ? 1 : 2;
         if (ph !== phase) {
           phase = ph;
