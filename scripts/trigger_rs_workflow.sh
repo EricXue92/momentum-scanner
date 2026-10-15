@@ -47,19 +47,38 @@ ntfy_alert() {
 echo
 echo "[$(ts)] [trigger:$MARKET] dispatching $WORKFLOW"
 
-if ! "$GH" --repo "$REPO" workflow run "$WORKFLOW" 2>&1; then
-    echo "[$(ts)] [trigger:$MARKET] gh workflow run FAILED (auth? rate limit?)"
-    ntfy_alert "$MARKET RS trigger failed" \
-        "gh workflow run $WORKFLOW failed — likely auth issue. Check 'gh auth status'."
-    exit 1
+# launchd runs a missed calendar slot on the next wake, often before the
+# network is back: 2026-10-15 fired at 09:00 with "error connecting to
+# api.github.com", gave up, and us-eod used a stale 3M table. Retry for up
+# to ~5 min (the ntfy alert needs the network too).
+DISPATCH_TRIES=10
+DISPATCH_GAP=30
+DISPATCH_OUT=""
+for ((i = 1; i <= DISPATCH_TRIES; i++)); do
+    if DISPATCH_OUT=$("$GH" --repo "$REPO" workflow run "$WORKFLOW" 2>&1); then
+        echo "$DISPATCH_OUT"
+        break
+    fi
+    echo "$DISPATCH_OUT"
+    if ((i == DISPATCH_TRIES)); then
+        echo "[$(ts)] [trigger:$MARKET] gh workflow run FAILED after $DISPATCH_TRIES tries (network? auth?)"
+        ntfy_alert "$MARKET RS trigger failed" \
+            "gh workflow run $WORKFLOW failed $DISPATCH_TRIES times — network or auth. Check 'gh auth status'."
+        exit 1
+    fi
+    echo "[$(ts)] [trigger:$MARKET] dispatch attempt $i/$DISPATCH_TRIES failed, retrying in ${DISPATCH_GAP}s"
+    sleep "$DISPATCH_GAP"
+done
+
+# gh prints the new run's URL (.../actions/runs/<id>); fall back to the
+# newest dispatch run if it ever stops doing so.
+RUN_ID=$(grep -oE 'actions/runs/[0-9]+' <<<"$DISPATCH_OUT" | head -1 | cut -d/ -f3)
+if [[ -z "$RUN_ID" ]]; then
+    sleep 5  # let the new run show up in `gh run list`
+    RUN_ID=$("$GH" --repo "$REPO" run list \
+        --workflow "$WORKFLOW" --event workflow_dispatch --limit 1 \
+        --json databaseId --jq '.[0].databaseId' 2>/dev/null)
 fi
-
-# Give the API a moment so the new run shows up in `gh run list`.
-sleep 5
-
-RUN_ID=$("$GH" --repo "$REPO" run list \
-    --workflow "$WORKFLOW" --event workflow_dispatch --limit 1 \
-    --json databaseId --jq '.[0].databaseId' 2>/dev/null)
 
 if [[ -z "$RUN_ID" ]]; then
     echo "[$(ts)] [trigger:$MARKET] could not resolve run ID — dispatched but not watched"

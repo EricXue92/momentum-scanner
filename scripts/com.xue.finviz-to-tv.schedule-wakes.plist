@@ -1,8 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
   Weekly rolling registration of pmset one-shot wakes for the US
-  morning-gap scans. Runs schedule_morning_gap_wakes.py every Sunday
-  18:00 HKT, reseeding the next 14 weekdays of 20:59 / 21:59 HKT wakes.
+  morning-gap scans and the RS-workflow triggers. Runs
+  schedule_morning_gap_wakes.py every Sunday 18:00 HKT, reseeding the next
+  14 weekdays of 20:59 / 21:59 HKT (morning-gap), 08:44 Tue-Sat
+  (us-rs-3m-trigger) and 18:44 Mon-Fri (hk-rs-trigger) wakes.
 
   Must be a LaunchDaemon (root) because `pmset schedule` requires root.
   Calls /usr/bin/python3 directly — the script is stdlib-only, so we

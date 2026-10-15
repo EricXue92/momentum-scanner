@@ -8,6 +8,11 @@ window's first (pre-market -20) scan:
   - 20:59 HKT covers EDT (NY 9:10 AM)
   - 21:59 HKT covers EST (NY 9:10 AM)
 
+It also wakes the Mac 1 min before the launchd RS-workflow triggers
+(us-rs-3m-trigger Tue-Sat 08:45, hk-rs-trigger Mon-Fri 18:45). Without a
+wake, launchd runs a missed slot on the next wake — 2026-10-15 the US one
+fired at 09:00 with no network, so us-eod got a stale 3M table.
+
 `pmset schedule` events are one-shot. Re-run periodically (e.g. weekly via
 cron/launchd or manually). Re-running is safe — past events expire on their
 own, duplicate future events are harmless extra wakes.
@@ -24,8 +29,39 @@ import sys
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
-WAKE_TIMES = ["20:59:00", "21:59:00"]
+MON_FRI = frozenset(range(5))
+TUE_SAT = frozenset(range(1, 6))
+# (HKT wall time, Python weekdays it applies to)
+WAKES = [
+    ("08:44:00", TUE_SAT),  # us-rs-3m-trigger 08:45
+    ("18:44:00", MON_FRI),  # hk-rs-trigger 18:45
+    ("20:59:00", MON_FRI),  # morning-gap, EDT
+    ("21:59:00", MON_FRI),  # morning-gap, EST
+]
 DEFAULT_DAYS = 14
+
+
+def wake_events(now_hk: datetime, n_days: int) -> list[datetime]:
+    """Future wake datetimes covering the next `n_days` Mon-Fri days (and
+    the Saturdays in between, for the Tue-Sat US trigger)."""
+    events = []
+    d = now_hk.date()
+    days_processed = 0
+    while days_processed < n_days:
+        for t, weekdays in WAKES:
+            if d.weekday() not in weekdays:
+                continue
+            wake_dt = datetime.combine(
+                d,
+                datetime.strptime(t, "%H:%M:%S").time(),
+                tzinfo=ZoneInfo("Asia/Hong_Kong"),
+            )
+            if wake_dt > now_hk:
+                events.append(wake_dt)
+        if d.weekday() < 5:
+            days_processed += 1
+        d += timedelta(days=1)
+    return events
 
 
 def main() -> int:
@@ -37,39 +73,23 @@ def main() -> int:
     now_hk = datetime.now(ZoneInfo("Asia/Hong_Kong"))
 
     scheduled = 0
-    skipped_past = 0
     failed = 0
-    d = now_hk.date()
-    days_processed = 0
-    while days_processed < n_days:
-        if d.weekday() < 5:  # Mon-Fri
-            for t in WAKE_TIMES:
-                wake_dt = datetime.combine(
-                    d,
-                    datetime.strptime(t, "%H:%M:%S").time(),
-                    tzinfo=ZoneInfo("Asia/Hong_Kong"),
-                )
-                if wake_dt <= now_hk:
-                    skipped_past += 1
-                    continue
-
-                schedule_str = f"{d:%m/%d/%y} {t}"
-                cmd = ["pmset", "schedule", "wake", schedule_str]
-                result = subprocess.run(cmd, capture_output=True, text=True)
-                if result.returncode == 0:
-                    print(f"  scheduled: {schedule_str}")
-                    scheduled += 1
-                else:
-                    print(
-                        f"  FAILED: {schedule_str} — {result.stderr.strip()}",
-                        file=sys.stderr,
-                    )
-                    failed += 1
-            days_processed += 1
-        d += timedelta(days=1)
+    for wake_dt in wake_events(now_hk, n_days):
+        schedule_str = f"{wake_dt:%m/%d/%y %H:%M:%S}"
+        cmd = ["pmset", "schedule", "wake", schedule_str]
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode == 0:
+            print(f"  scheduled: {schedule_str}")
+            scheduled += 1
+        else:
+            print(
+                f"  FAILED: {schedule_str} — {result.stderr.strip()}",
+                file=sys.stderr,
+            )
+            failed += 1
 
     print(
-        f"\nDone: {scheduled} scheduled, {skipped_past} in past skipped, {failed} failed."
+        f"\nDone: {scheduled} scheduled, {failed} failed."
     )
     print("Verify: pmset -g sched")
     return 1 if failed else 0

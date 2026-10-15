@@ -326,4 +326,13 @@ prev_close_price) / prev_close_price`. `pre_/after_change_rate` do exist.
   `hk-rs-trigger` (Mon-Fri 18:45) → `scripts/trigger_rs_workflow.sh`. The
   GH-side cron is kept as belt-and-suspenders; workflow's commit step is
   idempotent (`git diff --staged --quiet → exit 0`) so a double-fire is
-  harmless. Failures ntfy via the morning-gap topic.
+  harmless. Failures ntfy via the morning-gap topic. Each trigger has a
+  pmset wake 1 min before it (08:44 Tue-Sat / 18:44 Mon-Fri, seeded weekly by
+  `schedule_morning_gap_wakes.py` with the morning-gap wakes) and the script
+  retries the dispatch ~5 min — without both, launchd ran the missed 08:45
+  slot at the next wake with no network (2026-10-15) and us-eod got a stale
+  3M table.
+- **Finviz 1000-row cap:** pages past r=1000 403 without Elite and the
+  library swallows it. `run_screener` compares against the page's total and
+  re-queries `order="-ticker"` for the tail (covers ≤ 2000 rows; beyond that
+  it WARNs "still truncated"). Keep every Screener call inside `run_screener`.

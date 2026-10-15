@@ -625,8 +625,44 @@ def run_screener(
         stock_list = Screener(**kwargs)
     except NoResults:
         return []
+    tickers = _screener_tickers(stock_list.data, capture_caps)
 
-    rows = stock_list.data
+    # Finviz 403s every page past r=1000 without Elite and the library
+    # swallows it, so a larger screen silently came back as its first 1000
+    # rows (2026-10-15: 1864 → 1000). Re-query in descending ticker order for
+    # the tail; together the two halves cover up to 2000 rows.
+    total = int(getattr(stock_list, "_total_rows", 0) or 0)
+    if total > len(tickers):
+        logger.warning(
+            f"  Finviz returned {len(tickers)}/{total} rows (page cap); "
+            "fetching the tail in descending ticker order"
+        )
+        try:
+            tail_list = Screener(**kwargs, order="-ticker")
+            tail = tail_list.data
+            # Live data can drift a row between the two queries; judge
+            # completeness against the smaller of the two totals.
+            total = min(total, int(getattr(tail_list, "_total_rows", total) or total))
+        except NoResults:
+            tail = []
+        seen = set(tickers)
+        for t in _screener_tickers(tail, capture_caps):
+            if t not in seen:
+                seen.add(t)
+                tickers.append(t)
+        if len(tickers) < total:
+            logger.warning(
+                f"  Finviz screener still truncated: {len(tickers)}/{total} "
+                "rows — results are incomplete"
+            )
+    return tickers
+
+
+def _screener_tickers(
+    rows: list[dict], capture_caps: dict[str, float] | None
+) -> list[str]:
+    """Tickers from one finviz Screener page set, undoing the row shift and
+    recording market caps into ``capture_caps`` when given."""
     shifted = _finviz_row_shift(rows)
     keys = list(rows[0].keys()) if rows else []
 
