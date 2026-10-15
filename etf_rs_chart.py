@@ -527,7 +527,7 @@ svg.dim .lab:not(.is-hover) { opacity: 0.4; }
     $('chart-title').textContent = state.mode === 'rs'
       ? wl + ' RS 评分走势(名单内 0–99 百分位;横线 = RS ' + RS_LINE + thick
       : state.mode === 'rank' ? wl + ' 名次走势(1 = 最强' + thick
-      : state.mode === 'diff' ? '1M−3M 名次差走势(3M 名次 − 1M 名次;绿 = 1M 领先且跑赢 ' + D.benchmark + ',走强;浅绿 = 领先但仍落后 ' + D.benchmark + ',止跌;红 = 走弱;粗线 = 当日走强前 ' + TOP + ')'
+      : state.mode === 'diff' ? '1M−3M 名次差走势(3M 名次 − 1M 名次;上 = 走强组,下 = 止跌组,按当日分组;粗线 = 当日前 ' + TOP + ';走弱 / 持平只在列表里)'
       : wl + ' 加权超额收益(相对 ' + D.benchmark + ',%;RS 评分的原始分数' + thick;
   }
   let hintTimer = 0;
@@ -563,7 +563,7 @@ svg.dim .lab:not(.is-hover) { opacity: 0.4; }
     const W = Math.max(320, chartEl.clientWidth - 12), narrow = W < 640;
     const rankMode = state.mode === 'rank', rsMode = state.mode === 'rs', diffMode = state.mode === 'diff';
     const sk = SK(), pk = PK(), RR = R();
-    const H = rsMode ? 760 : rankMode ? 700 : 580;
+    const H = rsMode ? 760 : rankMode ? 700 : diffMode ? 760 : 580;
     const m = { l: 36, r: narrow ? 60 : 178, t: 12, b: 28 };
     const pw = W - m.l - m.r, ph = H - m.t - m.b;
     const cnt = state.range ? Math.min(state.range, n) : n, i0 = n - cnt;
@@ -583,8 +583,41 @@ svg.dim .lab:not(.is-hover) { opacity: 0.4; }
     el('rect', { x: m.l, y: m.t - 2, width: pw + 2, height: ph + 4 },
       el('clipPath', { id: clipId }, el('defs', {}, svg)));
 
-    let Y, note = null, offScale = () => false, G0 = null;
-    if (rsMode) {
+    // Yof(k, v): y of value v for series k — only diff mode makes it depend on
+    // k (two stacked panels); drawn(k): whether series k is plotted at all.
+    let Y, note = null, offScale = () => false, G0 = null, Yof = null, drawn = () => true;
+    if (diffMode) {
+      // Two panels split by today's group: 走强 (focus, top) over 止跌
+      // (context, bottom), each with its own scale; 持平 / 走弱 / single-window
+      // lines are not drawn here (the list still shows them).
+      const grp = k => diffGroup(k, n - 1);
+      drawn = k => grp(k) <= 1;
+      const gapH = 30, topH = Math.round(ph * 0.62);
+      const panels = [
+        { g: 0, y: m.t + 14, h: topH - 14, title: '走强:1M 名次领先 3M,且 1M 跑赢 ' + D.benchmark },
+        { g: 1, y: m.t + topH + gapH, h: ph - topH - gapH, title: '止跌:1M 名次领先 3M,但 1M 仍落后 ' + D.benchmark + '(跌得少了,还不算强)' },
+      ];
+      panels.forEach(p => {
+        let lo = 0, hi = 0, cnt = 0;
+        for (let k = 0; k < N; k++) {
+          if (grp(k) !== p.g) continue;
+          cnt++;
+          for (let i = i0; i < n; i++) { const v = diffOf(k, i); if (v != null) { if (v < lo) lo = v; if (v > hi) hi = v; } }
+        }
+        const t = niceTicks(lo, hi);
+        p.Y = v => p.y + (t.b - v) / (t.b - t.a) * p.h;
+        if (p.g === 1) el('rect', { class: 'bandbg', x: m.l, y: p.y - 14, width: pw, height: p.h + 16 }, svg);
+        t.ticks.forEach(v => {
+          el('line', { class: v === 0 ? 'zero' : 'gridl', x1: m.l, x2: m.l + pw, y1: p.Y(v), y2: p.Y(v) }, svg);
+          el('text', { class: 'tick', x: m.l - 8, y: p.Y(v) + 4, 'text-anchor': 'end' }, svg).textContent = v;
+        });
+        el('text', { class: 'note', x: m.l + 6, y: p.y - 4 }, svg).textContent = p.title + ' · ' + cnt + ' 只';
+      });
+      const sepY = panels[1].y - 16;
+      el('line', { class: 'thr', x1: m.l, x2: m.l + pw, y1: sepY, y2: sepY }, svg);
+      Y = panels[0].Y;
+      Yof = (k, v) => panels[Math.min(grp(k), 1)].Y(v);
+    } else if (rsMode) {
       Y = v => m.t + (100 - v) / 100 * ph;
       el('rect', { class: 'bandbg', x: m.l, y: Y(100), width: pw, height: Y(RS_LINE) - Y(100) }, svg);
       for (let v = 0; v <= 100; v += 10) {
@@ -650,13 +683,14 @@ svg.dim .lab:not(.is-hover) { opacity: 0.4; }
       el('text', { class: 'tick', x: X(i), y: H - 9, 'text-anchor': 'middle' }, svg).textContent = label;
     }
 
-    const Yline = G0 ? (v => m.t + (G0.b - v) / (G0.b - G0.a) * ph) : Y;
+    if (!Yof) Yof = (k, v) => Y(v);
+    const Ylineof = G0 ? ((k, v) => m.t + (G0.b - v) / (G0.b - G0.a) * ph) : Yof;
     function pathOf(k) {
       let d = '', pen = false;
       for (let i = i0; i < n; i++) {
         const v = val(k, i);
         if (v == null) { pen = false; continue; }
-        d += (pen ? 'L' : 'M') + X(i).toFixed(1) + ' ' + Yline(v).toFixed(1);
+        d += (pen ? 'L' : 'M') + X(i).toFixed(1) + ' ' + Ylineof(k, v).toFixed(1);
         pen = true;
       }
       return d;
@@ -665,6 +699,7 @@ svg.dim .lab:not(.is-hover) { opacity: 0.4; }
     const clip = { 'clip-path': 'url(#' + clipId + ')' };
     const layers = { rest: el('g', clip, svg), top: el('g', clip, svg), pin: el('g', clip, svg) };
     for (let k = N - 1; k >= 0; k--) {
+      if (!drawn(k)) continue;
       const c = colorOf(k), kind = c ? 'pin' : isTop(k) ? 'top' : 'rest';
       const sc = c ? null : signClass(k);
       const p = el('path', { class: 'ln ' + kind + (sc ? ' ' + sc : ''), d: pathOf(k) }, layers[kind]);
@@ -677,7 +712,7 @@ svg.dim .lab:not(.is-hover) { opacity: 0.4; }
     const labs = [];
     for (let k = 0; k < N; k++) {
       const v = val(k, n - 1);
-      if (v != null && (isTop(k) || slotOf(k) >= 0)) labs.push({ k, y0: Y(v), y: Y(v) });
+      if (v != null && drawn(k) && (isTop(k) || slotOf(k) >= 0)) labs.push({ k, y0: Yof(k, v), y: Yof(k, v) });
     }
     labs.sort((a, b) => a.y0 - b.y0);
     const gap = 13, floor = m.t + ph;
@@ -720,7 +755,7 @@ svg.dim .lab:not(.is-hover) { opacity: 0.4; }
     hit.addEventListener('pointerleave', () => setHover(null, null));
     hit.addEventListener('click', () => { if (state.hover != null) togglePin(state.hover); });
 
-    G = { W, H, m, pw, ph, cnt, i0, X, Y, val, pathOf, hovPath, cross, hovDot, labEls };
+    G = { W, H, m, pw, ph, cnt, i0, X, Yof, drawn, val, pathOf, hovPath, cross, hovDot, labEls };
   }
 
   function onMove(ev) {
@@ -732,9 +767,10 @@ svg.dim .lab:not(.is-hover) { opacity: 0.4; }
     // nearest line at that day; pinned, then thick, lines win near-ties
     let best = null, bd = 16;
     for (let k = 0; k < N; k++) {
+      if (!G.drawn(k)) continue;
       const v = G.val(k, i);
       if (v == null) continue;
-      const d = Math.abs(G.Y(v) - py) + (slotOf(k) >= 0 ? 0 : isTop(k) ? 2 : 4);
+      const d = Math.abs(G.Yof(k, v) - py) + (slotOf(k) >= 0 ? 0 : isTop(k) ? 2 : 4);
       if (d < bd) { bd = d; best = k; }
     }
     setHover(best, i, px, py);
@@ -760,9 +796,9 @@ svg.dim .lab:not(.is-hover) { opacity: 0.4; }
     const x = G.X(i);
     G.cross.setAttribute('x1', x); G.cross.setAttribute('x2', x);
     G.cross.setAttribute('visibility', 'visible');
-    const v = k != null ? G.val(k, i) : null;
+    const v = k != null && G.drawn(k) ? G.val(k, i) : null;
     if (v != null) {
-      G.hovDot.setAttribute('cx', x); G.hovDot.setAttribute('cy', G.Y(v));
+      G.hovDot.setAttribute('cx', x); G.hovDot.setAttribute('cy', G.Yof(k, v));
       G.hovDot.style.fill = lineColor(k);
       G.hovDot.setAttribute('visibility', 'visible');
     } else G.hovDot.setAttribute('visibility', 'hidden');
