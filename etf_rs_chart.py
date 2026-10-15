@@ -276,6 +276,11 @@ button:focus-visible { outline: 2px solid var(--s1); outline-offset: -2px; }
 .ln.top { stroke: var(--top); stroke-width: 2.25; opacity: 0.5; }
 .ln.pin { stroke-width: 2.75; }
 .ln.hov { stroke-width: 3.5; }
+/* diff mode: unpinned lines tinted by today's 1M−3M sign (green = 1M ahead = gaining) */
+.ln.gain { stroke: var(--up); }
+.ln.loss { stroke: var(--down); }
+.ln.rest.gain, .ln.rest.loss { opacity: 0.55; }
+.ln.top.gain, .ln.top.loss { opacity: 0.8; }
 svg.dim .ln.rest { opacity: 0.45; }
 svg.dim .ln.top { opacity: 0.16; }
 svg.dim .ln.pin { opacity: 0.35; }
@@ -458,6 +463,14 @@ svg.dim .lab:not(.is-hover) { opacity: 0.4; }
     for (let k = 0; k < N; k++) if (RR[k][n - 1] != null && RR[k][n - 1] <= TOP) topSet.add(k);
   }
   const isTop = k => topSet.has(k);
+  // diff mode line tint by the latest day's sign; null when flat / unscored / not in diff mode
+  const signClass = k => {
+    if (state.mode !== 'diff') return null;
+    const d = diffOf(k, n - 1);
+    return d == null || d === 0 ? null : d > 0 ? 'gain' : 'loss';
+  };
+  const signColor = k => { const c = signClass(k); return c ? (c === 'gain' ? 'var(--up)' : 'var(--down)') : null; };
+  const lineColor = k => colorOf(k) || signColor(k) || 'var(--ink)';
   function delta(k, i, RR) {
     RR = RR || R();
     const cur = RR[k][i], prev = i > 0 ? RR[k][i - 1] : null;
@@ -491,7 +504,7 @@ svg.dim .lab:not(.is-hover) { opacity: 0.4; }
     $('chart-title').textContent = state.mode === 'rs'
       ? wl + ' RS 评分走势(名单内 0–99 百分位;横线 = RS ' + RS_LINE + thick
       : state.mode === 'rank' ? wl + ' 名次走势(1 = 最强' + thick
-      : state.mode === 'diff' ? '1M−3M 名次差走势(3M 名次 − 1M 名次;正 = 1M 领先,正在走强;负 = 走弱' + thick
+      : state.mode === 'diff' ? '1M−3M 名次差走势(3M 名次 − 1M 名次;绿 = 1M 领先,正在走强;红 = 落后,走弱' + thick
       : wl + ' 加权超额收益(相对 ' + D.benchmark + ',%;RS 评分的原始分数' + thick;
   }
   let hintTimer = 0;
@@ -630,7 +643,8 @@ svg.dim .lab:not(.is-hover) { opacity: 0.4; }
     const layers = { rest: el('g', clip, svg), top: el('g', clip, svg), pin: el('g', clip, svg) };
     for (let k = N - 1; k >= 0; k--) {
       const c = colorOf(k), kind = c ? 'pin' : isTop(k) ? 'top' : 'rest';
-      const p = el('path', { class: 'ln ' + kind, d: pathOf(k) }, layers[kind]);
+      const sc = c ? null : signClass(k);
+      const p = el('path', { class: 'ln ' + kind + (sc ? ' ' + sc : ''), d: pathOf(k) }, layers[kind]);
       if (c) p.style.stroke = c;
     }
     if (note) el('text', { class: 'note', x: note.x, y: note.y }, svg).textContent = note.text;
@@ -657,8 +671,12 @@ svg.dim .lab:not(.is-hover) { opacity: 0.4; }
       el('path', { class: 'lead', d: 'M' + (xe + 6) + ' ' + y0.toFixed(1) + 'L' + (lx - 4) + ' ' + y.toFixed(1) }, g);
       if (c) el('circle', { class: 'dot', cx: xe, cy: y0, r: 4 }, g).style.fill = c;
       const t = el('text', { x: lx, y: y + 4 }, g);
-      if (!narrow) el('tspan', { class: 'rk' }, t).textContent =
-        (rsMode ? S[k][pk][n - 1] : diffMode ? fmtDiff(diffOf(k, n - 1)) : RR[k][n - 1]) + ' ';
+      if (!narrow) {
+        const rk = el('tspan', { class: 'rk' }, t);
+        rk.textContent = (rsMode ? S[k][pk][n - 1] : diffMode ? fmtDiff(diffOf(k, n - 1)) : RR[k][n - 1]) + ' ';
+        const scol = signColor(k);
+        if (scol) { rk.style.fill = scol; rk.style.fontWeight = '650'; }
+      }
       el('tspan', { class: 'tk' }, t).textContent = S[k].t;
       const sv = val(k, n - 1);
       if (G0 && !diffMode && offScale(sv)) {
@@ -704,7 +722,7 @@ svg.dim .lab:not(.is-hover) { opacity: 0.4; }
     svg.classList.toggle('dim', k != null);
     if (k != null) {
       G.hovPath.setAttribute('d', G.pathOf(k));
-      G.hovPath.style.stroke = colorOf(k) || 'var(--ink)';
+      G.hovPath.style.stroke = lineColor(k);
       G.hovPath.setAttribute('visibility', 'visible');
     } else G.hovPath.setAttribute('visibility', 'hidden');
     G.labEls.forEach((g, key) => g.classList.toggle('is-hover', key === k));
@@ -722,7 +740,7 @@ svg.dim .lab:not(.is-hover) { opacity: 0.4; }
     const v = k != null ? G.val(k, i) : null;
     if (v != null) {
       G.hovDot.setAttribute('cx', x); G.hovDot.setAttribute('cy', G.Y(v));
-      G.hovDot.style.fill = colorOf(k) || 'var(--ink)';
+      G.hovDot.style.fill = lineColor(k);
       G.hovDot.setAttribute('visibility', 'visible');
     } else G.hovDot.setAttribute('visibility', 'hidden');
     showTip(i, k, px, py);
@@ -736,7 +754,7 @@ svg.dim .lab:not(.is-hover) { opacity: 0.4; }
       const main = h('div', 'main', null, tip);
       const who = h('div', 'who', null, main);
       const key = h('span', 'key', null, who);
-      key.style.background = colorOf(k) || 'var(--ink)';
+      key.style.background = lineColor(k);
       key.style.marginRight = '6px';
       who.appendChild(document.createTextNode(S[k].t));
       if (S[k].name) h('span', 'n', S[k].name, who);
