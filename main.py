@@ -1876,12 +1876,23 @@ def filter_relative_volume(
     return result
 
 
+def _finviz_day_change(quote: dict) -> float:
+    """Day % change from a finviz get_stock() dict. Finviz renamed the ETF
+    field `Change` → `Change %` (2026-10); the old key KeyError'd and the
+    conditional RS group silently skipped. Price vs Prev Close is the last
+    resort if the label moves again."""
+    for key in ("Change %", "Change"):
+        if key in quote:
+            return float(quote[key].strip("%"))
+    price = float(quote["Price"].replace(",", ""))
+    prev = float(quote["Prev Close"].replace(",", ""))
+    return (price - prev) / prev * 100
+
+
 def check_market_down(threshold: float = -1.0) -> bool:
     """Check if both SPY and QQQ are down at least |threshold|%."""
-    spy = get_stock("SPY")
-    qqq = get_stock("QQQ")
-    spy_change = float(spy["Change"].strip("%"))
-    qqq_change = float(qqq["Change"].strip("%"))
+    spy_change = _finviz_day_change(get_stock("SPY"))
+    qqq_change = _finviz_day_change(get_stock("QQQ"))
     logger.info(f"  SPY: {spy_change:+.2f}%  QQQ: {qqq_change:+.2f}%")
     return spy_change <= threshold and qqq_change <= threshold
 
