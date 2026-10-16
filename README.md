@@ -342,12 +342,20 @@ Optional, **off by default** (`[tv_sync]`). Uses TradingView's unofficial REST A
 
 The companion chart indicator used when working through the imported watchlists lives in [`docs/tradingview/adaptive_ma_pack_alerts.md`](docs/tradingview/adaptive_ma_pack_alerts.md) (Pine Script v6, overlay). Paste the code block into TradingView's Pine Editor and add it to the chart.
 
+配套的 TradingView 图表指标,用于逐个查看导入的 watchlist:代码和说明见 [`docs/tradingview/adaptive_ma_pack_alerts.md`](docs/tradingview/adaptive_ma_pack_alerts.md)(Pine Script v6,叠加在 K 线上)。把代码块粘贴到 Pine Editor 并添加到图表即可。
+
 - **Adaptive MA pack** — EMA 5 / 10 / 20 and SMA 50 / 200 follow the chart's timeframe (daily, weekly or monthly); 15m / 30m / 65m charts also draw a true 65-minute EMA 20.
+  **自适应均线组** — EMA 5 / 10 / 20 和 SMA 50 / 200 跟随图表周期(日 / 周 / 月);15m / 30m / 65m 图上额外画真实的 65 分钟 EMA 20。
 - **Close-confirmed alerts** (30m / 65m charts) — bar close reclaims the Daily EMA20, previous-day low, previous-week low or previous-day high from below (wick-break-and-recover included); at most one alert per level per day.
+  **收盘确认提醒**(30m / 65m 图)— K 线收盘从下往上站回日线 EMA20、前日低点、前周低点或前日高点(含影线跌破后收回);每条线每天最多提醒一次。
 - **Live alerts** (any intraday chart) — price crosses the previous-day low / previous-week low / previous-day high without waiting for the bar to close.
+  **实时提醒**(任意日内周期)— 价格盘中穿越前日低点 / 前周低点 / 前日高点,不等收盘。
 - **Level lines** — previous-day low / high and previous-week low extended to the right with price labels; optional "gap-down day only" filter for every alert.
+  **价位线** — 前日低点 / 高点和前周低点延伸到右侧并标注价格;所有提醒可选"只在 Gap Down 当天触发"。
 
 One "Any alert() function call" alert covers all seven conditions; the file's table lists the per-condition frequency if you prefer separate alerts.
+
+建一条 "Any alert() function call" 提醒即可覆盖全部 7 个条件;想分开建的话,文件里的表格列出了每个条件对应的频率设置。
 
 ### ntfy Notifications
 
