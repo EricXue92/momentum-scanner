@@ -17,7 +17,7 @@ A scheduled momentum scanner for US and HK stocks. Every day it screens long and
 - [Dedup and Pruning](#dedup-and-pruning)
 - [Output](#output)
 - [Sync and Notifications](#sync-and-notifications)
-  - [Futu Sync](#futu-sync) · [TradingView Sync](#tradingview-sync) · [ntfy Notifications](#ntfy-notifications)
+  - [Futu Sync](#futu-sync) · [TradingView Sync](#tradingview-sync) · [TradingView Indicator](#tradingview-indicator) · [ntfy Notifications](#ntfy-notifications)
 - [LLM Reports](#llm-reports)
   - [CANSLIM Report](#canslim-report) · [Pre-Market Catalyst Report](#pre-market-catalyst-report)
 - [Automation](#automation)
@@ -337,6 +337,17 @@ All groups are append-only — clear them in the client when full (Futu limits: 
 ### TradingView Sync
 
 Optional, **off by default** (`[tv_sync]`). Uses TradingView's unofficial REST API with your `sessionid` cookie: env `TV_SESSIONID` / `TV_SESSIONID_SIGN`, or `~/.config/momentum-scanner/tv_cookie.json`. Create the 19 lists by hand first (exact, case-sensitive names: the 18 Futu names plus a separate `MorningGap`); unmatched names are skipped with a warning. Same soft-fail contract as Futu.
+
+### TradingView Indicator
+
+The companion chart indicator used when working through the imported watchlists lives in [`docs/tradingview/adaptive_ma_pack_alerts.md`](docs/tradingview/adaptive_ma_pack_alerts.md) (Pine Script v6, overlay). Paste the code block into TradingView's Pine Editor and add it to the chart.
+
+- **Adaptive MA pack** — EMA 5 / 10 / 20 and SMA 50 / 200 follow the chart's timeframe (daily, weekly or monthly); 15m / 30m / 65m charts also draw a true 65-minute EMA 20.
+- **Close-confirmed alerts** (30m / 65m charts) — bar close reclaims the Daily EMA20, previous-day low, previous-week low or previous-day high from below (wick-break-and-recover included); at most one alert per level per day.
+- **Live alerts** (any intraday chart) — price crosses the previous-day low / previous-week low / previous-day high without waiting for the bar to close.
+- **Level lines** — previous-day low / high and previous-week low extended to the right with price labels; optional "gap-down day only" filter for every alert.
+
+One "Any alert() function call" alert covers all seven conditions; the file's table lists the per-condition frequency if you prefer separate alerts.
 
 ### ntfy Notifications
 
