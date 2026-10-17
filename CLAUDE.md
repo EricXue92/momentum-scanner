@@ -97,7 +97,7 @@ Output: `output/TV/{US,HK}/` (TradingView, comma-sep) mirrored to
 - **Cleanup** (`cleanup_old_outputs`) is driven by an explicit regex rule table
   (`_RETENTION_RULES`, not globs) and soft-fails; **never touches** the
   `eod_seen_*.txt` masters, `ntfy_last_seen.txt`, `edgar_cache/`, logs. The
-  pruners' `eod_seen_<MKT>.txt.bak.<stamp>` backups age out after 14 days.
+  pruners' `eod_seen_<MKT>.txt.bak.<stamp>` backups age out after 2 days.
 - **HK data-day rule:** only the 20:00 HKT slot uses today's close; earlier runs
   trim today's incomplete bar (and skip the conditional HSI-trigger RS group).
   Weekends map to the previous Friday (`hk_effective_data_day`): Friday's close

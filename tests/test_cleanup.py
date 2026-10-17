@@ -316,21 +316,21 @@ def test_premarket_markdown_state_uses_two_day_window(output_tree: Path) -> None
     assert not (output_tree / "state/premarket_catalyst_2026_05_13.md").exists()
 
 
-def test_master_backups_age_out_after_fourteen_days(tmp_path: Path) -> None:
+def test_master_backups_use_two_day_window(tmp_path: Path) -> None:
     """`eod_seen_*.txt.bak.<stamp>` is written on every prune (SMA50 prune runs
-    daily); keep 14 days, never touch the masters themselves."""
+    daily); keep today + yesterday, never touch the masters themselves."""
     state = tmp_path / "state"
     state.mkdir()
     _touch(state / "eod_seen_US.txt")
     _touch(state / "eod_seen_HK.txt")
-    _touch(state / "eod_seen_US.txt.bak.20260515_100000")   # today
-    _touch(state / "eod_seen_US.txt.bak.20260502_100000")   # 13 days old: kept
-    _touch(state / "eod_seen_US.txt.bak.20260501_100000")   # 14 days old: pruned
+    _touch(state / "eod_seen_US.txt.bak.20260515_100000")   # today: kept
+    _touch(state / "eod_seen_US.txt.bak.20260514_100000")   # yesterday: kept
+    _touch(state / "eod_seen_US.txt.bak.20260513_100000")   # 2 days old: pruned
     _touch(state / "eod_seen_HK.txt.bak.20260401_200000")
     cleanup_old_outputs(tmp_path, date(2026, 5, 15))
     assert (state / "eod_seen_US.txt").exists()
     assert (state / "eod_seen_HK.txt").exists()
     assert (state / "eod_seen_US.txt.bak.20260515_100000").exists()
-    assert (state / "eod_seen_US.txt.bak.20260502_100000").exists()
-    assert not (state / "eod_seen_US.txt.bak.20260501_100000").exists()
+    assert (state / "eod_seen_US.txt.bak.20260514_100000").exists()
+    assert not (state / "eod_seen_US.txt.bak.20260513_100000").exists()
     assert not (state / "eod_seen_HK.txt.bak.20260401_200000").exists()

@@ -49,11 +49,11 @@ _RETENTION_RULES: tuple[_Rule, ...] = (
     _Rule("state", re.compile(rf"^premarket_catalyst_{_DATE_U}\.md$"),
           "%Y_%m_%d", 2),
     # Master backups written by every prune (rs-line audit, daily SMA50
-    # prune): eod_seen_<MKT>.txt.bak.<YYYYmmdd_HHMMSS>. 14-day window. The
-    # masters themselves (eod_seen_<MKT>.txt) match no rule and are never
-    # touched.
+    # prune): eod_seen_<MKT>.txt.bak.<YYYYmmdd_HHMMSS>. 2-day window (today +
+    # yesterday) like the other state files. The masters themselves
+    # (eod_seen_<MKT>.txt) match no rule and are never touched.
     _Rule("state", re.compile(r"^eod_seen_(?:US|HK|IPO|HKIPO)\.txt\.bak\.(\d{8})_\d{6}$"),
-          "%Y%m%d", 14),
+          "%Y%m%d", 2),
     # Per-day state caches — 2-day retention.
     _Rule("state", re.compile(rf"^morning_gap_seen_(?:pre|post)_{_DATE_U}\.txt$"),
           "%Y_%m_%d", 2),
