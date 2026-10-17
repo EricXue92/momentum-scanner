@@ -20,4 +20,7 @@ exec >> "$LOG" 2>&1
 UV=/Users/xue/.local/bin/uv
 PROJECT=/Users/xue/momentum-scanner
 
-exec "$UV" run --directory "$PROJECT" main.py --mode hk-morning-gap
+# caffeinate -i -s: hold a sleep assertion for the scan's lifetime (same
+# battery/DarkWake failure mode as run_eod.sh, 2026-10-17); exits with the
+# scan's status.
+exec /usr/bin/caffeinate -i -s "$UV" run --directory "$PROJECT" main.py --mode hk-morning-gap

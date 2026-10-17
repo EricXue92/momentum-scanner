@@ -14,6 +14,10 @@
 
   Uses `uv run main.py` directly (no wrapper): the catalyst-report
   subprocess loads API keys itself via report.state.load_dotenv().
+  Wrapped in `caffeinate -i -s` so the scan holds a sleep assertion for
+  its lifetime — on battery the Mac idle-sleeps (`sleep 1`) minutes after
+  a wake and a running scan only advances in DarkWake slivers with no
+  network (2026-10-17 us-eod). caffeinate exits with the scan's status.
 
   Install:
     cp scripts/com.xue.finviz-to-tv.morning-gap.plist ~/Library/LaunchAgents/
@@ -28,6 +32,9 @@
 
     <key>ProgramArguments</key>
     <array>
+        <string>/usr/bin/caffeinate</string>
+        <string>-i</string>
+        <string>-s</string>
         <string>/Users/xue/.local/bin/uv</string>
         <string>run</string>
         <string>main.py</string>

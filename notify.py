@@ -199,3 +199,51 @@ def notify_opend_down(
         marker.write_text(f"{mode}\n")
     except OSError as e:
         logger.warning(f"[Notify] could not write {marker.name}: {e}")
+
+
+def notify_on_battery(
+    mode: str, percent: int | None, config: dict, output_dir: Path, today: str
+) -> None:
+    """Push a high-priority ntfy warning when a scheduled run starts on battery.
+
+    2026-10-17: us-eod ran on battery (12%) with the lid closed. `sleep 1`
+    on battery put the Mac to sleep 3 minutes in; the run only advanced in
+    5-15s DarkWake windows with no Wi-Fi/DNS — 55 minutes, yfinance empty,
+    Futu 网络中断, and the conditional RS group (SPY -1.1% / QQQ -2.5%) lost
+    to NameResolutionError. The caffeinate wrapper now prevents the idle
+    sleep, but a battery run is still degraded, so the first run of the day
+    on battery says so. Fires **once per day** across all modes — marker
+    `state/on_battery_alerted_<today>.txt`, written only after a successful
+    POST so a failed push is retried by the next run.
+    """
+    notify_cfg = config.get("notify") or {}
+    if not notify_cfg.get("enabled", False):
+        return
+
+    topic = notify_cfg.get("ntfy_topic")
+    if not topic:
+        logger.warning("[Notify] ntfy_topic missing for on-battery alert")
+        return
+
+    marker = output_dir / "state" / f"on_battery_alerted_{today}.txt"
+    try:
+        if marker.exists():
+            return
+    except OSError:
+        pass
+
+    server = notify_cfg.get("ntfy_server", "https://ntfy.sh").rstrip("/")
+    title = "Scanner running on battery: plug in the Mac"
+    pct = f"{percent}%" if percent is not None else "unknown %"
+    body = (
+        f"{mode}: Mac is on battery ({pct}). Scheduled scans need AC power — "
+        "on battery the Mac sleeps minutes after the wake and the scan stalls "
+        "or fails on network errors (2026-10-17: RS list lost)."
+    )
+    if not _ntfy_post(server, topic, title, body, priority="high"):
+        return
+    try:
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text(f"{mode}\n")
+    except OSError as e:
+        logger.warning(f"[Notify] could not write {marker.name}: {e}")

@@ -342,6 +342,26 @@ prev_close_price) / prev_close_price`. `pre_/after_change_rate` do exist.
   error path** (missed wakes are silent by design).
 - pmset wake keyword is **`wakeorpoweron`** on macOS 26+ (`wakepoweron` no longer
   parses). US EOD uses mode `us-eod` not `eod` (HK bar is incomplete at 10:00 HKT).
+- **The schedule assumes AC power; every scheduled job holds a `caffeinate
+  -i -s` assertion** (`run_eod.sh` / `run_hk_eod.sh` / `trigger_rs_workflow.sh`
+  via `caffeinate -i -s -w $$ &`, `run_hk_morning_gap.sh` + the morning-gap
+  plist via `exec caffeinate -i -s uv run …`). Do not remove. On battery
+  `pmset -g` has `sleep 1`: 2026-10-17 (12%, lid closed) us-eod idle-slept
+  3 min in and only advanced inside 5-15s DarkWake windows with no Wi-Fi/DNS
+  — 55 min, yfinance empty, Futu 网络中断, conditional RS (SPY -1.1%/QQQ
+  -2.5%) lost to NameResolutionError; the 08:45 trigger ran at a 09:01
+  DarkWake and slept 2s after dispatching. `-i` works on battery, `-s` is
+  AC-only; a lid-close by the user still sleeps the Mac. Belt-and-suspenders:
+  EOD/in-window morning-gap runs probe `pmset -g batt` (`power.py`,
+  `main._alert_if_on_battery`) and ntfy once per HKT day
+  (`state/on_battery_alerted_<date>.txt`, 2-day cleanup); the conditional
+  RS group retries network errors (`_retry_on_network_error`: wait for
+  finviz reachable ≤ 180s, 3 attempts; non-network errors propagate); and
+  the trigger script polls `gh run view` status/conclusion for up to ~20 min
+  before alerting — `completed`+non-success → "failed", never confirmed →
+  "unconfirmed" (default priority, exit 2), so a watch killed by sleep /
+  no network no longer pushes a false "failed (conclusion=unknown)".
+  `TRIGGER_*` env overrides exist only for `tests/test_trigger_rs_workflow.py`.
 - **RS workflow self-trigger:** GH Actions' scheduled cron is unreliable
   (delayed hours; sometimes skipped — observed 2026-06-16: today's 3M CSV
   missing because GH cron never fired). Launchd dispatches the workflow via

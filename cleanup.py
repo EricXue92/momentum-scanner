@@ -56,6 +56,9 @@ _RETENTION_RULES: tuple[_Rule, ...] = (
     # OpenD-down ntfy marker (notify.notify_opend_down) — one alert per day.
     _Rule("state", re.compile(rf"^opend_down_alerted_{_DATE_U}\.txt$"),
           "%Y_%m_%d", 2),
+    # On-battery ntfy marker (notify.notify_on_battery) — one alert per day.
+    _Rule("state", re.compile(rf"^on_battery_alerted_{_DATE_U}\.txt$"),
+          "%Y_%m_%d", 2),
     # 3M variant first — its filename starts with hk_rs_rating_3m_, which
     # would otherwise be a no-match against the 12M regex below (the 12M
     # regex anchors on hk_rs_rating_<date>.csv with no '3m_' segment).

@@ -14,6 +14,18 @@ fi
 
 exec >> "$LOG" 2>&1
 
+# Hold a sleep assertion for the life of this wrapper (EOD + audit). The
+# schedule assumes AC power; on battery `pmset -g` has `sleep 1`, and on
+# 2026-10-17 the 10:00 us-eod idle-slept 3 min in (lid closed, 12%): the
+# process then only advanced inside 5-15s DarkWake windows with no Wi-Fi/DNS
+# — 55 min, yfinance empty, Futu 网络中断, conditional RS lost to
+# NameResolutionError. -i prevents idle sleep (works on battery), -s system
+# sleep (AC only). A lid-close by the user still sleeps the Mac. -w $$
+# releases the assertion when this script exits; the watchdog's pgrp kill
+# below does not reach it (caffeinate stays in the wrapper's group).
+/usr/bin/caffeinate -i -s -w $$ &
+echo "[$(date '+%Y-%m-%d %H:%M:%S')] power: $(/usr/bin/pmset -g batt | head -1)"
+
 # Load secrets from the project's .env (gitignored) — kept for parity with
 # run_eod.sh even though HK no longer runs the report step. Launchd does NOT
 # inherit the user's interactive shell environment.

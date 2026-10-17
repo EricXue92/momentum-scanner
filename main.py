@@ -37,7 +37,9 @@ from futu_sync import (
 from tv_sync import sync_to_tv
 from cleanup import cleanup_old_outputs
 from hk_eod import fetch_hkex_equities, filter_hk_shorts, run_hk_eod
-from notify import notify_morning_gap, notify_opend_down
+from net_ready import wait_for_network
+from notify import notify_morning_gap, notify_on_battery, notify_opend_down
+from power import power_status
 from rs_rating import fetch_rs_table, filter_by_rs
 
 logger = logging.getLogger(__name__)
@@ -115,6 +117,90 @@ def _alert_if_opend_down(
         notify_opend_down(mode, host, port, config, output_dir, today)
     except Exception as e:
         logger.warning(f"[Notify] OpenD-down check failed: {e}")
+
+
+def _alert_if_on_battery(
+    mode: str, config: dict, output_dir: Path, today: str
+) -> None:
+    """Probe the power source once and ntfy (once per day) when on battery.
+
+    Pure side-effect, never raises, never changes the run. Scheduled scans
+    assume AC: on battery the Mac idle-sleeps minutes after the pmset wake
+    (`sleep 1`) and the scan only advances inside DarkWake slivers with no
+    network (2026-10-17 — see notify.notify_on_battery). Called at the same
+    sites as `_alert_if_opend_down`, so out-of-window fires stay silent."""
+    try:
+        status = power_status()
+        if status is None or not status.on_battery:
+            return
+        logger.warning(
+            f"[power] Running on battery ({status.percent}%) — scheduled "
+            "scans expect AC power; the run may stall or lose network"
+        )
+        notify_on_battery(mode, status.percent, config, output_dir, today)
+    except Exception as e:
+        logger.warning(f"[Notify] on-battery check failed: {e}")
+
+
+_NETWORK_ERROR_MARKERS = ("Too many requests",)
+
+
+def _is_network_error(exc: BaseException) -> bool:
+    """Transient network / upstream failures worth retrying.
+
+    OSError covers socket errors (gaierror = DNS) and every
+    `requests.exceptions.RequestException` (it subclasses IOError). finviz's
+    own `ConnectionTimeout` is a bare Exception, and `finviz_timeout`
+    re-raises the library's rate-limit sentinel as Exception("Too many
+    requests.") — both are transient too. Parsing/logic errors (KeyError,
+    ValueError, ...) are not retried."""
+    if isinstance(exc, OSError):
+        return True
+    from finviz.helper_functions.error_handling import ConnectionTimeout
+    if isinstance(exc, ConnectionTimeout):
+        return True
+    msg = str(exc)
+    return any(marker in msg for marker in _NETWORK_ERROR_MARKERS)
+
+
+def _default_network_wait() -> bool:
+    """Wait for finviz to be DNS+TCP reachable again (bounded) before a retry."""
+    return wait_for_network(
+        ["finviz.com"], max_wait_seconds=180.0, settle_seconds=10.0
+    )
+
+
+def _retry_on_network_error(
+    fn,
+    *,
+    label: str,
+    attempts: int = 3,
+    wait=_default_network_wait,
+):
+    """Call `fn()`; on a network error wait for the network and retry.
+
+    2026-10-17: the conditional RS group (SPY -1.11% / QQQ -2.50%) fired but
+    its single Finviz call died on NameResolutionError and the day's RS list
+    was lost. The RS group is the most valuable list on exactly such a day,
+    so a network error now waits (condition-based: finviz reachable again,
+    bounded) and retries. `wait` returning False does not abort — the retry
+    itself is the real test. Non-network errors propagate immediately; the
+    last network error propagates after `attempts`.
+    """
+    for attempt in range(1, attempts + 1):
+        try:
+            return fn()
+        except Exception as e:
+            if not _is_network_error(e) or attempt == attempts:
+                raise
+            logger.warning(
+                f"{label} network error on attempt {attempt}/{attempts}: {e} "
+                f"— waiting for network, then retrying"
+            )
+            try:
+                wait()
+            except Exception as we:  # noqa: BLE001 — the wait is a courtesy
+                logger.warning(f"{label} network wait failed: {we}")
 
 
 def _morning_gap_seen_path(
@@ -2119,7 +2205,6 @@ def main() -> int:
     # NXDOMAINs and the pipeline writes 0-byte .txt files. EOD modes return 1
     # on timeout (loud failure → launchd retries next slot); morning-gap modes
     # exit 0 silently to honor the "no hard error path" rule in CLAUDE.md.
-    from net_ready import wait_for_network
     eod_modes = {"eod", "us-eod", "hk-eod"}
     morning_modes = {"morning-gap", "hk-morning-gap"}
     if args.mode in eod_modes or args.mode in morning_modes:
@@ -2152,6 +2237,7 @@ def main() -> int:
         # evening HKT launchd slot, after HK market has closed and k-line data
         # is finalized.
         _alert_if_opend_down(args.mode, config, output_dir, today)
+        _alert_if_on_battery(args.mode, config, output_dir, today)
         try:
             run_hk_eod(
                 config=config,
@@ -2178,6 +2264,7 @@ def main() -> int:
 
     if args.mode in ("eod", "us-eod"):
         _alert_if_opend_down(args.mode, config, output_dir, today)
+        _alert_if_on_battery(args.mode, config, output_dir, today)
         # --- Cross-day master 'seen' files (per market) ---
         # Each EOD group's daily output is filtered against this master so a
         # ticker only ever appears once across all days/groups. Master grows
@@ -2416,14 +2503,23 @@ def main() -> int:
         if rs_cfg:
             _log_section("[RS] Checking market condition...")
             try:
-                if check_market_down():
+                def _rs_condition_and_screen():
+                    # One retriable unit: both calls hit Finviz, and a
+                    # re-check of the (cheap) condition on retry is harmless.
+                    if not check_market_down():
+                        return None
                     logger.info("[RS] Condition met, running screener...")
                     time.sleep(delay)
-                    found = run_screener(
+                    return run_screener(
                         rs_cfg["filters"],
                         rs_cfg.get("signal"),
                         capture_caps=ipo_finviz_caps,
                     )
+
+                found = _retry_on_network_error(
+                    _rs_condition_and_screen, label="[RS]"
+                )
+                if found is not None:
                     logger.info(f"  Found {len(found)} tickers")
                     if min_rs_percentile_rs > 0 and found:
                         found = filter_by_rs(
@@ -2663,6 +2759,7 @@ def main() -> int:
         if offset is None:
             return 0  # Outside scan window — not an error
         _alert_if_opend_down(args.mode, config, output_dir, today)
+        _alert_if_on_battery(args.mode, config, output_dir, today)
 
         # Pre-market and post-open scans write to separate files / Futu groups
         # so each gets its own drop-guard baseline (filter strictness differs).
@@ -2732,6 +2829,7 @@ def main() -> int:
         if offset is None:
             return 0  # Outside scan window — not an error
         _alert_if_opend_down(args.mode, config, output_dir, today)
+        _alert_if_on_battery(args.mode, config, output_dir, today)
 
         # Convert yfinance format "0700.HK" → TradingView "HKEX:700"
         # (leading zeros stripped — TradingView rejects HKEX:0148 imports).

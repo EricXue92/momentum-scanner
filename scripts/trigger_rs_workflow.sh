@@ -10,14 +10,19 @@
 #
 # Usage: trigger_rs_workflow.sh <workflow-file> <market-label>
 #   e.g.: trigger_rs_workflow.sh update_us_rs_3m.yml US
+#
+# TRIGGER_* env overrides exist for the test suite (fake gh/curl, tmp log,
+# zero sleeps) — tests/test_trigger_rs_workflow.py runs this script for real.
 set -uo pipefail
 
 WORKFLOW="${1:?workflow file required (e.g. update_us_rs_3m.yml)}"
 MARKET="${2:?market label required (US or HK)}"
 REPO="EricXue92/momentum-scanner"
-GH=/opt/homebrew/bin/gh
+GH="${TRIGGER_GH:-/opt/homebrew/bin/gh}"
+CURL="${TRIGGER_CURL:-/usr/bin/curl}"
+CAFFEINATE="${TRIGGER_CAFFEINATE:-/usr/bin/caffeinate}"
 
-LOG=/Users/xue/momentum-scanner/output/launchd_rs_trigger.log
+LOG="${TRIGGER_LOG:-/Users/xue/momentum-scanner/output/launchd_rs_trigger.log}"
 mkdir -p "$(dirname "$LOG")"
 
 # Rotate on date change (same pattern as run_eod.sh).
@@ -29,6 +34,17 @@ exec >> "$LOG" 2>&1
 
 ts() { date '+%Y-%m-%d %H:%M:%S'; }
 
+# Hold an idle-sleep assertion for the life of this script. On battery the
+# Mac has `sleep 1`: 2026-10-17 it dark-woke for the 08:44 pmset wake, slept
+# again 10s later, ran this slot at the next DarkWake (09:01:47) and slept
+# 2s after dispatching — `gh run watch` froze until the lid was opened,
+# then exited non-zero on a dead connection. -i prevents idle sleep (works
+# on battery), -s system sleep (AC only); a closed-lid sleep by the user
+# cannot be prevented. -w $$ releases it when this script exits.
+if [[ -x "$CAFFEINATE" ]]; then
+    "$CAFFEINATE" -i -s -w $$ &
+fi
+
 # launchd inherits no PATH; gh shells out to git which expects a usable PATH.
 export PATH="/opt/homebrew/bin:/usr/bin:/bin"
 
@@ -37,9 +53,10 @@ export PATH="/opt/homebrew/bin:/usr/bin:/bin"
 NTFY_TOPIC="xue-finviz-morning-gap-9f3k2"
 ntfy_alert() {
     local title="$1" body="$2"
-    /usr/bin/curl -fsS -m 10 \
+    local priority="${3:-high}"
+    "$CURL" -fsS -m 10 \
         -H "Title: $title" \
-        -H "Priority: high" \
+        -H "Priority: $priority" \
         -d "$body" \
         "https://ntfy.sh/$NTFY_TOPIC" >/dev/null 2>&1 || true
 }
@@ -52,7 +69,7 @@ echo "[$(ts)] [trigger:$MARKET] dispatching $WORKFLOW"
 # api.github.com", gave up, and us-eod used a stale 3M table. Retry for up
 # to ~5 min (the ntfy alert needs the network too).
 DISPATCH_TRIES=10
-DISPATCH_GAP=30
+DISPATCH_GAP="${TRIGGER_DISPATCH_GAP:-30}"
 DISPATCH_OUT=""
 for ((i = 1; i <= DISPATCH_TRIES; i++)); do
     if DISPATCH_OUT=$("$GH" --repo "$REPO" workflow run "$WORKFLOW" 2>&1); then
@@ -91,19 +108,52 @@ echo "[$(ts)] [trigger:$MARKET] dispatched run $RUN_ID, watching"
 # runtimes: US ~10-12 min, HK ~3-5 min.
 if "$GH" --repo "$REPO" run watch "$RUN_ID" --exit-status >/dev/null 2>&1; then
     echo "[$(ts)] [trigger:$MARKET] run $RUN_ID completed successfully"
-else
-    # `gh run watch` can race with the final job state (or hiccup on a GH
-    # services blip during post-job cleanup) and exit non-zero on a run
-    # that actually concluded success. Re-check the authoritative conclusion
-    # before firing an alert.
-    CONCLUSION=$("$GH" --repo "$REPO" run view "$RUN_ID" \
-        --json conclusion --jq '.conclusion' 2>/dev/null)
-    if [[ "$CONCLUSION" == "success" ]]; then
-        echo "[$(ts)] [trigger:$MARKET] run $RUN_ID watch exited non-zero but conclusion=success — suppressing alert"
-    else
-        echo "[$(ts)] [trigger:$MARKET] run $RUN_ID FAILED (conclusion=${CONCLUSION:-unknown}) — EOD will use stale fallback"
-        ntfy_alert "$MARKET RS workflow failed" \
-            "Run $RUN_ID failed (conclusion=${CONCLUSION:-unknown}). EOD will fall back to yesterday's CSV (≤3 days OK)."
-        exit 1
+    exit 0
+fi
+
+# `gh run watch` exits non-zero for more than a failed run: a race with the
+# final job state, a GH services blip, or (2026-10-17) the Mac sleeping
+# under it and the connection dying. Only the run's own status/conclusion
+# is authoritative — poll it until the run reports `completed` (a still
+# running run keeps us waiting; an unreachable GH is retried), and decide
+# only then. 2026-10-17 the single re-check ran before Wi-Fi was back,
+# got an empty conclusion and pushed "failed (conclusion=unknown)" for a
+# run that went green 3 minutes later.
+POLL_TRIES="${TRIGGER_POLL_TRIES:-40}"   # 40 × 30s ≈ 20 min — longer than any US run
+POLL_GAP="${TRIGGER_POLL_GAP:-30}"
+STATUS=""
+CONCLUSION=""
+for ((i = 1; i <= POLL_TRIES; i++)); do
+    STATE=$("$GH" --repo "$REPO" run view "$RUN_ID" \
+        --json status,conclusion --jq '.status + " " + (.conclusion // "")' 2>/dev/null) || STATE=""
+    STATUS="${STATE%% *}"
+    CONCLUSION="${STATE#* }"
+    [[ "$CONCLUSION" == "$STATE" ]] && CONCLUSION=""   # no space → no conclusion
+    if [[ "$STATUS" == "completed" ]]; then
+        break
     fi
+    if [[ -z "$STATE" ]]; then
+        echo "[$(ts)] [trigger:$MARKET] run $RUN_ID: gh run view unreachable (check $i/$POLL_TRIES)"
+    else
+        echo "[$(ts)] [trigger:$MARKET] run $RUN_ID: status=$STATUS, still running (check $i/$POLL_TRIES)"
+    fi
+    if ((i < POLL_TRIES)); then
+        sleep "$POLL_GAP"
+    fi
+done
+
+if [[ "$STATUS" == "completed" && "$CONCLUSION" == "success" ]]; then
+    echo "[$(ts)] [trigger:$MARKET] run $RUN_ID watch exited non-zero but conclusion=success — no alert"
+    exit 0
+elif [[ "$STATUS" == "completed" ]]; then
+    echo "[$(ts)] [trigger:$MARKET] run $RUN_ID FAILED (conclusion=${CONCLUSION:-unknown}) — EOD will use stale fallback"
+    ntfy_alert "$MARKET RS workflow failed" \
+        "Run $RUN_ID failed (conclusion=${CONCLUSION:-unknown}). EOD will fall back to yesterday's CSV (≤3 days OK)."
+    exit 1
+else
+    echo "[$(ts)] [trigger:$MARKET] run $RUN_ID: could not confirm the outcome within the poll window (last status=${STATUS:-unreachable}) — not claiming failure"
+    ntfy_alert "$MARKET RS workflow unconfirmed" \
+        "Run $RUN_ID: outcome not confirmed (last status=${STATUS:-unreachable}). Check GitHub Actions; EOD falls back to yesterday's CSV if it did not publish." \
+        default
+    exit 2
 fi
