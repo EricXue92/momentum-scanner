@@ -403,6 +403,7 @@ name = "HK Short Candidates"
 # 3M RS 单闸 (对齐美股 Shorts): 在 yfinance 批量下载前先筛 universe;
 # 表中缺失的票保留; 缺省继承 [hk_settings].min_rs_percentile_longs_3m; 设 0 关闭。
 min_rs_percentile_3m = 90
+min_adr_percent = 4.0                 # 显式写出: 缺省继承 [settings] 的 4.0 (美股值), 不是 [hk_settings] 的 3.0
 min_avg_volume = 1_000_000            # 日均成交量 (股) — Shorts 独有
 min_market_cap = 50_000_000            # HKD
 min_dollar_volume = 50_000_000         # HKD; 对齐美股 Shorts $50M (2026-09-23 放宽)

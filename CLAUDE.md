@@ -78,7 +78,9 @@ Output: `output/TV/{US,HK}/` (TradingView, comma-sep) mirrored to
   day when intraday has nothing either. The rest of us-eod still `dropna`s
   and runs a day stale on such days.
 - **EMA20 first-break list (US, read-only):** `ema20_break.py`
-  (`[ema20_break]`) runs right before the SMA50 prune over the same master —
+  (`[ema20_break]`) runs right before the SMA50 prune over the same master
+  (`main._run_us_master_lists` fetches the master's 6mo closes ONCE and
+  passes `closes=` to both; each step is still independently soft) —
   latest close < EMA20 AND prior close ≥ prior EMA20 (cross-down day only) →
   `output/TV/US/<date>_EMA20Break.txt` (comma-sep). Never touches the master.
   Empty → no file; same-day rerun overwrites; keeps only the newest
@@ -93,8 +95,9 @@ Output: `output/TV/{US,HK}/` (TradingView, comma-sep) mirrored to
   persistent states). Futu/TV mappings ship commented out (groups must be
   hand-created), so sync is a no-op until you enable them.
 - **Cleanup** (`cleanup_old_outputs`) is driven by an explicit regex rule table
-  (`_RETENTION_RULES`, not globs) and soft-fails; **never touches**
-  `eod_seen_*`, `ntfy_last_seen.txt`, `edgar_cache/`, logs.
+  (`_RETENTION_RULES`, not globs) and soft-fails; **never touches** the
+  `eod_seen_*.txt` masters, `ntfy_last_seen.txt`, `edgar_cache/`, logs. The
+  pruners' `eod_seen_<MKT>.txt.bak.<stamp>` backups age out after 14 days.
 - **HK data-day rule:** only the 20:00 HKT slot uses today's close; earlier runs
   trim today's incomplete bar (and skip the conditional HSI-trigger RS group).
   Weekends map to the previous Friday (`hk_effective_data_day`): Friday's close
@@ -317,7 +320,10 @@ local (throttle-prone) k-line fetch.
   in `ipo_drops` (2026-10-17: 43 Leaders names incl. ABBV/CRM went in from
   one throttled batch). `rs_rating.fetch_rs_table` also catches
   `http.client.HTTPException` / `UnicodeDecodeError` (neither is an
-  OSError; they aborted us-eod before any `.txt`).
+  OSError; they aborted us-eod before any `.txt`). `_yf_download_with_retry`
+  waits `_YF_RETRY_DELAYS` (5s, 20s) between its 3 attempts — an empty batch
+  is Yahoo's throttle and its window is ≥ 30s. A Longs group downloads its
+  2mo batch once (`_longs_group_batch`, `batch=` on both filters).
 
 ## Futu sync
 
@@ -355,8 +361,13 @@ prev_close_price) / prev_close_price`. `pre_/after_change_rate` do exist.
   parses). US EOD uses mode `us-eod` not `eod` (HK bar is incomplete at 10:00 HKT).
 - **The schedule assumes AC power; every scheduled job holds a `caffeinate
   -i -s` assertion** (`run_eod.sh` / `run_hk_eod.sh` / `trigger_rs_workflow.sh`
-  via `caffeinate -i -s -w $$ &`, `run_hk_morning_gap.sh` + the morning-gap
-  plist via `exec caffeinate -i -s uv run …`). Do not remove. On battery
+  source `scripts/lib/hold_awake.sh` → `caffeinate -i -s -w $$ &`;
+  `run_morning_gap.sh` / `run_hk_morning_gap.sh` `exec caffeinate -i -s uv
+  run …`; the detached catalyst subprocess prepends its own
+  `/usr/bin/caffeinate -i -s`, `main._CAFFEINATE_BIN`). Do not remove. The
+  US morning-gap plist runs `run_morning_gap.sh` (log rotated daily like the
+  other wrappers; it used to write `launchd_morning_gap.log` via
+  StandardOutPath and grew unbounded). On battery
   `pmset -g` has `sleep 1`: 2026-10-17 (12%, lid closed) us-eod idle-slept
   3 min in and only advanced inside 5-15s DarkWake windows with no Wi-Fi/DNS
   — 55 min, yfinance empty, Futu 网络中断, conditional RS (SPY -1.1%/QQQ
@@ -389,4 +400,8 @@ prev_close_price) / prev_close_price`. `pre_/after_change_rate` do exist.
 - **Finviz 1000-row cap:** pages past r=1000 403 without Elite and the
   library swallows it. `run_screener` compares against the page's total and
   re-queries `order="-ticker"` for the tail (covers ≤ 2000 rows; beyond that
-  it WARNs "still truncated"). Keep every Screener call inside `run_screener`.
+  it WARNs "still truncated"). Keep every Screener call inside `run_screener`
+  — it (and `check_market_down`) also retries transient network errors via
+  `_retry_on_network_error` (DNS/reset/5xx/finviz timeout/"Too many
+  requests"; a Finviz 4xx is deterministic and NOT retried). Nothing else
+  needs its own wrapper.

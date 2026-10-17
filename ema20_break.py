@@ -57,10 +57,15 @@ def _prune_old_lists(out_dir: Path, keep_files: int) -> None:
             logger.warning(f"[{_LABEL}] could not delete {old}: {e}")
 
 
-def write_ema20_break_list(seen_path: Path, cfg: dict, out_path: Path) -> list[str]:
+def write_ema20_break_list(
+    seen_path: Path, cfg: dict, out_path: Path,
+    closes: dict[str, pd.Series] | None = None,
+) -> list[str]:
     """Write today's first-break-below-EMA20 tickers to ``out_path``. Returns
     them. No-op when disabled, when the master is missing/empty, or when the
-    batch download fails (warned)."""
+    batch download fails (warned). ``closes`` (``{ticker: close series}``)
+    skips the download — us-eod fetches the master once and shares it with
+    the SMA50 prune."""
     if not cfg.get("enabled", False):
         return []
     if not seen_path.exists():
@@ -72,7 +77,8 @@ def write_ema20_break_list(seen_path: Path, cfg: dict, out_path: Path) -> list[s
         return []
 
     ema_period = int(cfg.get("ema_period", 20))
-    closes = _fetch_daily_closes(tickers)
+    if closes is None:
+        closes = _fetch_daily_closes(tickers)
     if closes is None:
         logger.warning(f"[{_LABEL}] yfinance batch download failed — skipping")
         return []

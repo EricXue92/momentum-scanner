@@ -154,6 +154,13 @@ def _is_network_error(exc: BaseException) -> bool:
     re-raises the library's rate-limit sentinel as Exception("Too many
     requests.") — both are transient too. Parsing/logic errors (KeyError,
     ValueError, ...) are not retried."""
+    import requests
+    if isinstance(exc, requests.exceptions.HTTPError):
+        # finviz_timeout calls raise_for_status(): a 4xx (bad filter, Elite
+        # page cap) is deterministic — retrying only burns the wait. 5xx is
+        # an upstream blip and stays retriable.
+        status = getattr(getattr(exc, "response", None), "status_code", None)
+        return status is None or status >= 500
     if isinstance(exc, OSError):
         return True
     from finviz.helper_functions.error_handling import ConnectionTimeout
@@ -343,6 +350,9 @@ def _fetch_snapshot_rows(
     return rows
 
 
+_CAFFEINATE_BIN = "/usr/bin/caffeinate"
+
+
 def _spawn_catalyst_report(
     *,
     fresh: list[str],
@@ -385,8 +395,14 @@ def _spawn_catalyst_report(
             f"{len(fresh)} fresh tickers (snapshot at {tmpname})"
         )
         uv_path = shutil.which("uv") or "/Users/xue/.local/bin/uv"
+        # start_new_session detaches the report from the scan's caffeinate
+        # assertion, so it carries its own (on battery the Mac idle-sleeps
+        # minutes after the scan exits — see run_eod.sh).
+        caffeinate = (
+            [_CAFFEINATE_BIN, "-i", "-s"] if os.path.exists(_CAFFEINATE_BIN) else []
+        )
         subprocess.Popen(
-            [
+            caffeinate + [
                 uv_path, "run", "python", "-m", "report.morning",
                 "--snapshot", tmpname,
                 "--date", today_iso,
@@ -551,15 +567,25 @@ def _is_flat_frame(data) -> bool:
     return not isinstance(cols, pd.MultiIndex)
 
 
+# Waits between the attempts of _yf_download_with_retry. A fully empty batch
+# is almost always Yahoo's throttle, whose window is >= 30s — the old fixed 3s
+# retried inside the same window (2026-10-17: 7 of 7 retries empty).
+_YF_RETRY_DELAYS = (5.0, 20.0)
+
+
 def _yf_download_with_retry(tickers, max_retries=3, **kwargs):
-    """Download yfinance data with retries on failure."""
+    """Download yfinance data with retries on failure (backoff: _YF_RETRY_DELAYS)."""
     for attempt in range(max_retries):
         data = _flatten_single_ticker_frame(yf.download(tickers, **kwargs), tickers)
         if data is not None and not data.empty:
             return data
         if attempt < max_retries - 1:
-            time.sleep(3)
-            logger.warning(f"  yfinance download returned empty, retrying ({attempt + 2}/{max_retries})...")
+            delay = _YF_RETRY_DELAYS[min(attempt, len(_YF_RETRY_DELAYS) - 1)]
+            logger.warning(
+                f"  yfinance download returned empty, retrying in {delay:.0f}s "
+                f"({attempt + 2}/{max_retries})..."
+            )
+            time.sleep(delay)
     return data
 
 
@@ -714,6 +740,54 @@ def _download_daily_batch(
     return again, throttled
 
 
+def _longs_group_batch(
+    tickers: list[str], screener_cfg: dict, adr_days: int, dv_days: int = 20
+):
+    """One 2mo batch for a Longs group, wide enough for every filter the group
+    runs (dollar volume, ADR%, relative volume) — the loop used to download it
+    once per filter. Returns the ``_download_daily_batch`` tuple."""
+    min_rows = max(adr_days, dv_days)
+    if screener_cfg.get("min_relative_volume"):
+        min_rows = max(min_rows, int(screener_cfg.get("relative_volume_days", 20)) + 1)
+    return _download_daily_batch(tickers, period="2mo", min_rows=min_rows)
+
+
+def _run_us_master_lists(
+    seen_path: Path, config: dict, us_output_dir: Path, today: str
+) -> None:
+    """EMA20 first-break list + SMA50 prune over the US master, sharing ONE
+    6mo batch of closes (both used to fetch the same tickers back to back).
+    Each step is soft: a failure logs and the other still runs. Must run
+    before the master is loaded (the prune rewrites it)."""
+    from ema20_break import write_ema20_break_list
+    from sma50_prune import _fetch_daily_closes, prune_us_master
+
+    closes = None
+    ema_cfg = config.get("ema20_break", {})
+    sma_cfg = config.get("sma50_prune", {})
+    if ema_cfg.get("enabled", False) and sma_cfg.get("enabled", False) and seen_path.exists():
+        try:
+            tickers = [ln.strip() for ln in seen_path.read_text().splitlines() if ln.strip()]
+            if tickers:
+                closes = _fetch_daily_closes(tickers)
+        except Exception as e:
+            logger.warning(f"[master-lists] shared fetch failed, each step fetches itself: {e}")
+            closes = None
+    try:
+        write_ema20_break_list(
+            seen_path, ema_cfg, us_output_dir / f"{today}_EMA20Break.txt", closes=closes,
+        )
+    except Exception as e:
+        logger.warning(f"[ema20-break] failed, skipped: {e}")
+    try:
+        prune_us_master(
+            seen_path, sma_cfg,
+            pruned_path=us_output_dir / f"{today}_SMA50Pruned.txt", closes=closes,
+        )
+    except Exception as e:
+        logger.warning(f"[sma50-prune] failed, master untouched: {e}")
+
+
 def load_config(config_path: Path) -> dict:
     with open(config_path, "rb") as f:
         return tomllib.load(f)
@@ -767,8 +841,12 @@ def run_screener(
         kwargs["signal"] = signal
     if capture_caps is not None:
         kwargs["table"] = "Ownership"
+    # Every Finviz screen retries on a transient network error (DNS blip,
+    # reset, 5xx). 2026-10-17 only the conditional RS group was wrapped; a
+    # Longs / Leaders / Shorts screen hit by the same blip was lost for the day.
+    label = f"[screener {'/'.join(filters)[:40]}]"
     try:
-        stock_list = Screener(**kwargs)
+        stock_list = _retry_on_network_error(lambda: Screener(**kwargs), label=label)
     except NoResults:
         return []
     tickers = _screener_tickers(stock_list.data, capture_caps)
@@ -784,7 +862,9 @@ def run_screener(
             "fetching the tail in descending ticker order"
         )
         try:
-            tail_list = Screener(**kwargs, order="-ticker")
+            tail_list = _retry_on_network_error(
+                lambda: Screener(**kwargs, order="-ticker"), label=label
+            )
             tail = tail_list.data
             # Live data can drift a row between the two queries; judge
             # completeness against the smaller of the two totals.
@@ -1486,8 +1566,11 @@ def filter_dollar_volume_and_adr_yf(
     ipo_drops: set[str] | None = None,
     adr_bypass_gap_pct: float | None = None,
     adr_bypass_min_pct: float | None = None,
+    batch: "tuple[pd.DataFrame | None, bool] | None" = None,
 ) -> list[str]:
     """Apply dollar-volume and ADR% filters via a single yfinance download.
+    ``batch`` = a prefetched ``_download_daily_batch`` result (shared with
+    `filter_relative_volume` by the Longs loop) — skips the download.
     Either filter is skipped when its threshold is 0. Strict: tickers with
     insufficient data are dropped. If `ipo_drops` is provided, tickers
     dropped due to missing/insufficient yfinance history are recorded there
@@ -1500,7 +1583,7 @@ def filter_dollar_volume_and_adr_yf(
     if not tickers:
         return []
 
-    data, degraded = _download_daily_batch(
+    data, degraded = batch if batch is not None else _download_daily_batch(
         tickers, period="2mo", min_rows=max(adr_days, dv_days)
     )
     if data is None or data.empty:
@@ -2015,8 +2098,10 @@ def filter_relative_volume(
     min_rvol: float,
     days: int = 20,
     ipo_drops: set[str] | None = None,
+    batch: "tuple[pd.DataFrame | None, bool] | None" = None,
 ) -> list[str]:
     """Filter tickers by relative volume: latest day's volume / N-day average volume >= min_rvol.
+    ``batch`` = a prefetched ``_download_daily_batch`` result — skips the download.
     Uses yfinance to fetch daily volume data.
     Strict: tickers with missing/insufficient data are dropped. When
     `ipo_drops` is given, tickers dropped for missing/insufficient yfinance
@@ -2024,7 +2109,9 @@ def filter_relative_volume(
     if not tickers:
         return []
 
-    data, degraded = _download_daily_batch(tickers, period="2mo", min_rows=days + 1)
+    data, degraded = batch if batch is not None else _download_daily_batch(
+        tickers, period="2mo", min_rows=days + 1
+    )
     if data is None or data.empty:
         return []
     if degraded:
@@ -2080,8 +2167,12 @@ def _finviz_day_change(quote: dict) -> float:
 
 def check_market_down(threshold: float = -1.0) -> bool:
     """Check if both SPY and QQQ are down at least |threshold|%."""
-    spy_change = _finviz_day_change(get_stock("SPY"))
-    qqq_change = _finviz_day_change(get_stock("QQQ"))
+    spy_change = _finviz_day_change(
+        _retry_on_network_error(lambda: get_stock("SPY"), label="[RS] SPY")
+    )
+    qqq_change = _finviz_day_change(
+        _retry_on_network_error(lambda: get_stock("QQQ"), label="[RS] QQQ")
+    )
     logger.info(f"  SPY: {spy_change:+.2f}%  QQQ: {qqq_change:+.2f}%")
     return spy_change <= threshold and qqq_change <= threshold
 
@@ -2340,32 +2431,9 @@ def main() -> int:
         us_seen_path = _eod_seen_path(output_dir, "US")
         hk_seen_path = _eod_seen_path(output_dir, "HK")
 
-        # --- EMA20 first-break list (US master, read-only) ---
-        # Before the SMA50 prune so the list covers the full master.
-        # Soft-fail: any error skips the list, EOD proceeds.
-        try:
-            from ema20_break import write_ema20_break_list
-            write_ema20_break_list(
-                us_seen_path,
-                config.get("ema20_break", {}),
-                us_output_dir / f"{today}_EMA20Break.txt",
-            )
-        except Exception as e:
-            logger.warning(f"[ema20-break] failed, skipped: {e}")
-
-        # --- SMA50 prune (US master, before load) ---
-        # Tickers whose close sat below SMA50 for N consecutive completed days
-        # are removed from the master (backed up first) so they can re-qualify
-        # later. Soft-fail: any error skips the prune, EOD proceeds.
-        try:
-            from sma50_prune import prune_us_master
-            prune_us_master(
-                us_seen_path,
-                config.get("sma50_prune", {}),
-                pruned_path=us_output_dir / f"{today}_SMA50Pruned.txt",
-            )
-        except Exception as e:
-            logger.warning(f"[sma50-prune] failed, master untouched: {e}")
+        # --- EMA20 first-break list + SMA50 prune (US master, one shared fetch) ---
+        # Before the master is loaded: the prune rewrites it. Both soft-fail.
+        _run_us_master_lists(us_seen_path, config, us_output_dir, today)
 
         us_seen = _load_seen(us_seen_path)
         hk_seen = _load_seen(hk_seen_path)
@@ -2438,6 +2506,9 @@ def main() -> int:
                     )
                 elif min_rs_percentile_longs > 0:
                     logger.info(f"  [Longs/{key}] 12M RS gate disabled for this group")
+                # One 2mo batch per group, shared by the dollar-volume/ADR%
+                # and relative-volume filters (was one download each).
+                batch = _longs_group_batch(tickers, screener_cfg, adr_days) if tickers else None
                 if (min_dollar_volume > 0 or min_adr_percent > 0) and tickers:
                     adr_bypass_pct = screener_cfg.get("adr_bypass_gap_percent", 0)
                     adr_bypass_min = screener_cfg.get("adr_bypass_min_percent", 0)
@@ -2446,6 +2517,7 @@ def main() -> int:
                         ipo_drops=ipo_drops,
                         adr_bypass_gap_pct=adr_bypass_pct,
                         adr_bypass_min_pct=adr_bypass_min,
+                        batch=batch,
                     )
                     bypass_note = (
                         f", floor {adr_bypass_min}% at gap>={adr_bypass_pct}%"
@@ -2460,7 +2532,7 @@ def main() -> int:
                 if min_rvol and tickers:
                     rvol_days = screener_cfg.get("relative_volume_days", 20)
                     tickers = filter_relative_volume(
-                        tickers, min_rvol, rvol_days, ipo_drops=ipo_drops,
+                        tickers, min_rvol, rvol_days, ipo_drops=ipo_drops, batch=batch,
                     )
                     logger.info(f"  {len(tickers)} after relative volume filter (>= {min_rvol}x {rvol_days}-day avg)")
                 longs_per_strategy.append((key, name, set(tickers)))
@@ -2570,22 +2642,17 @@ def main() -> int:
         if rs_cfg:
             _log_section("[RS] Checking market condition...")
             try:
-                def _rs_condition_and_screen():
-                    # One retriable unit: both calls hit Finviz, and a
-                    # re-check of the (cheap) condition on retry is harmless.
-                    if not check_market_down():
-                        return None
+                # Network retry lives inside check_market_down / run_screener
+                # (every Finviz call site), so no outer wrapper here.
+                found = None
+                if check_market_down():
                     logger.info("[RS] Condition met, running screener...")
                     time.sleep(delay)
-                    return run_screener(
+                    found = run_screener(
                         rs_cfg["filters"],
                         rs_cfg.get("signal"),
                         capture_caps=ipo_finviz_caps,
                     )
-
-                found = _retry_on_network_error(
-                    _rs_condition_and_screen, label="[RS]"
-                )
                 if found is not None:
                     logger.info(f"  Found {len(found)} tickers")
                     if min_rs_percentile_rs > 0 and found:

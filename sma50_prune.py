@@ -171,13 +171,16 @@ def _write_pruned_list(pruned_path: Path, drops: list[str]) -> None:
 
 
 def prune_us_master(
-    seen_path: Path, cfg: dict, pruned_path: Path | None = None
+    seen_path: Path, cfg: dict, pruned_path: Path | None = None,
+    closes: dict[str, pd.Series] | None = None,
 ) -> list[str]:
     """Prune SMA50 breakdowns from the US master. Returns the dropped tickers.
 
     No-op when disabled, when the master is missing/empty, or when the batch
     download fails (warned, master untouched). ``pruned_path``, when given,
     receives the day's dropped tickers (see ``_write_pruned_list``).
+    ``closes`` (``{ticker: close series}``) skips the download — us-eod
+    fetches the master once and shares it with the EMA20 break list.
     """
     if not cfg.get("enabled", False):
         return []
@@ -190,7 +193,8 @@ def prune_us_master(
         return []
 
     consecutive_days = int(cfg.get("consecutive_days", 2))
-    closes = _fetch_daily_closes(tickers)
+    if closes is None:
+        closes = _fetch_daily_closes(tickers)
     if closes is None:
         logger.warning(
             f"[{_LABEL}] yfinance batch download failed — skipping prune, "

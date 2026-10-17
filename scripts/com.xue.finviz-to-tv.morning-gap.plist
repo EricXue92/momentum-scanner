@@ -12,12 +12,10 @@
   (pmset one-shots at 20:59 / 21:59 HKT, reseeded weekly by the
   schedule-wakes LaunchDaemon).
 
-  Uses `uv run main.py` directly (no wrapper): the catalyst-report
-  subprocess loads API keys itself via report.state.load_dotenv().
-  Wrapped in `caffeinate -i -s` so the scan holds a sleep assertion for
-  its lifetime — on battery the Mac idle-sleeps (`sleep 1`) minutes after
-  a wake and a running scan only advances in DarkWake slivers with no
-  network (2026-10-17 us-eod). caffeinate exits with the scan's status.
+  Runs scripts/run_morning_gap.sh, which rotates and owns the log
+  (output/launchd_morning_gap.log) and wraps the scan in `caffeinate -i -s`
+  — deliberately NO StandardOutPath/StandardErrorPath here (see
+  com.xue.finviz-to-tv.plist for why, and the log used to grow unbounded).
 
   Install:
     cp scripts/com.xue.finviz-to-tv.morning-gap.plist ~/Library/LaunchAgents/
@@ -32,14 +30,7 @@
 
     <key>ProgramArguments</key>
     <array>
-        <string>/usr/bin/caffeinate</string>
-        <string>-i</string>
-        <string>-s</string>
-        <string>/Users/xue/.local/bin/uv</string>
-        <string>run</string>
-        <string>main.py</string>
-        <string>--mode</string>
-        <string>morning-gap</string>
+        <string>/Users/xue/momentum-scanner/scripts/run_morning_gap.sh</string>
     </array>
 
     <key>StartCalendarInterval</key>
@@ -150,11 +141,6 @@
 
     <key>RunAtLoad</key>
     <false/>
-
-    <key>StandardOutPath</key>
-    <string>/Users/xue/momentum-scanner/output/launchd_morning_gap.log</string>
-    <key>StandardErrorPath</key>
-    <string>/Users/xue/momentum-scanner/output/launchd_morning_gap.log</string>
 
     <key>WorkingDirectory</key>
     <string>/Users/xue/momentum-scanner</string>

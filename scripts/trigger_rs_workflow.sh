@@ -34,16 +34,11 @@ exec >> "$LOG" 2>&1
 
 ts() { date '+%Y-%m-%d %H:%M:%S'; }
 
-# Hold an idle-sleep assertion for the life of this script. On battery the
-# Mac has `sleep 1`: 2026-10-17 it dark-woke for the 08:44 pmset wake, slept
-# again 10s later, ran this slot at the next DarkWake (09:01:47) and slept
-# 2s after dispatching — `gh run watch` froze until the lid was opened,
-# then exited non-zero on a dead connection. -i prevents idle sleep (works
-# on battery), -s system sleep (AC only); a closed-lid sleep by the user
-# cannot be prevented. -w $$ releases it when this script exits.
-if [[ -x "$CAFFEINATE" ]]; then
-    "$CAFFEINATE" -i -s -w $$ &
-fi
+# Sleep assertion for the life of this script (see scripts/lib/hold_awake.sh;
+# 2026-10-17 `gh run watch` froze when the Mac slept 2s after dispatching).
+# shellcheck source=lib/hold_awake.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/hold_awake.sh"
+hold_awake "$CAFFEINATE"
 
 # launchd inherits no PATH; gh shells out to git which expects a usable PATH.
 export PATH="/opt/homebrew/bin:/usr/bin:/bin"
