@@ -397,6 +397,10 @@ prev_close_price) / prev_close_price`. `pre_/after_change_rate` do exist.
   retries the dispatch ~5 min — without both, launchd ran the missed 08:45
   slot at the next wake with no network (2026-10-15) and us-eod got a stale
   3M table.
+  HK jobs get the same 1-min-lead wakes (Mon-Fri): one per hk-morning-gap
+  slot (09:39 … 10:29 — `pmset sleep 1` re-sleeps an idle Mac within a
+  minute and caffeinate only holds during a scan, so one wake covers one
+  slot) and 19:59 for hk-eod (2026-10-16 it ran only when the lid opened).
 - **Finviz 1000-row cap:** pages past r=1000 403 without Elite and the
   library swallows it. `run_screener` compares against the page's total and
   re-queries `order="-ticker"` for the tail (covers ≤ 2000 rows; beyond that

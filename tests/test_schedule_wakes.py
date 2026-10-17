@@ -1,8 +1,9 @@
-"""pmset wakes must cover the launchd RS-workflow triggers.
+"""pmset wakes must cover the launchd RS-workflow triggers and HK jobs.
 
 2026-10-15: no wake at 08:45, so launchd ran us-rs-3m-trigger at the next
 wake (09:00) before the network was up; the dispatch failed and us-eod fell
-back to a stale 3M table."""
+back to a stale 3M table. 2026-10-16: no wake at 20:00, hk-eod on battery
+with the lid closed only finished when the lid was opened at 20:18."""
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -26,18 +27,22 @@ def test_one_week_from_sunday():
     # Sunday 2026-10-18 18:00 — when the weekly LaunchDaemon reseeds.
     events = wake_events(datetime(2026, 10, 18, 18, 0, tzinfo=HKT), 5)
     days = _by_day(events)
-    weekday = ["18:44", "20:59", "21:59"]
-    assert days["Mon"] == weekday  # no US trigger on Monday
+    hk_gap = ["09:39", "09:49", "09:59", "10:09", "10:19", "10:29"]
+    evening = ["18:44", "19:59", "20:59", "21:59"]
+    assert days["Mon"] == hk_gap + evening  # no US trigger on Monday
     for d in ("Tue", "Wed", "Thu", "Fri"):
-        assert days[d] == ["08:44"] + weekday
+        assert days[d] == ["08:44"] + hk_gap + evening
     assert "Sat" not in days  # 5 weekdays end on Friday
     assert "Sun" not in days
 
 
 def test_saturday_us_trigger_and_past_skipped():
-    # Friday 2026-10-16 19:00: 08:44 and 18:44 already passed.
+    # Friday 2026-10-16 19:00: 08:44, HK gap and 18:44 already passed.
     events = wake_events(datetime(2026, 10, 16, 19, 0, tzinfo=HKT), 2)
     days = _by_day(events)
-    assert days["Fri"] == ["20:59", "21:59"]
-    assert days["Sat"] == ["08:44"]
-    assert days["Mon"] == ["18:44", "20:59", "21:59"]
+    assert days["Fri"] == ["19:59", "20:59", "21:59"]
+    assert days["Sat"] == ["08:44"]  # HK jobs are Mon-Fri only
+    assert days["Mon"] == [
+        "09:39", "09:49", "09:59", "10:09", "10:19", "10:29",
+        "18:44", "19:59", "20:59", "21:59",
+    ]
