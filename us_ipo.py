@@ -88,10 +88,13 @@ def filter_us_ipo_candidates(
     rs_table_3m_full: pd.DataFrame | None,
     spy_kline: pd.DataFrame | None,
     settings: dict,
+    candidates: list[str] | None = None,
 ) -> tuple[list[str], dict[str, int]]:
     """Filter US IPO candidates through the depth-conditional ladder.
 
     Drop buckets (first hit wins, mirrors HK filter_hk_ipo_candidates):
+      - in ``candidates`` but absent from ``klines``   → drops['no_data']
+        (the yfinance fetch failed; the name is re-evaluated next run)
       - len(df) < 20                                   → drops['min_history']
       - cap < min_market_cap                           → drops['cap']
       - price < min_price                              → drops['price']
@@ -118,6 +121,7 @@ def filter_us_ipo_candidates(
     min_perf_4w = settings.get("ipo_min_perf_4w")  # unset = direction gate off
 
     drops: dict[str, int] = {
+        "no_data": len([t for t in (candidates or []) if t not in klines]),
         "min_history": 0,
         "cap": 0, "price": 0,
         "avg_vol": 0, "dvol": 0, "adr": 0,

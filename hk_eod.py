@@ -107,8 +107,7 @@ def filter_hk_shorts(
     data via yfinance, apply SMA20/volume/cap/dollar-volume/performance/up-days
     filters. Returns (universe_size, filtered_tickers_in_tv_format)."""
     from main import (
-        _yf_download_with_retry,
-        _retry_sparse_in_batch,
+        _download_daily_batch,
         _get_market_cap,
         _get_closes_volumes,
         _get_ohlc,
@@ -154,20 +153,20 @@ def filter_hk_shorts(
     for start in range(0, len(yf_tickers), batch_size):
         batch = yf_tickers[start : start + batch_size]
         logger.info(f"  Batch {start // batch_size + 1}/{(len(yf_tickers) - 1) // batch_size + 1} ({len(batch)} tickers)...")
-        batch_data = _yf_download_with_retry(
-            batch, period="3mo", progress=False, group_by="ticker", threads=True,
+        # A batch download routinely reports a handful of legitimate tickers
+        # as "possibly delisted" (all-NaN) — 20 of 25 such names on
+        # 2026-09-25 had full 3mo history on a single-ticker retry. Without
+        # that pass they fall out silently at the len(closes) < 50 check
+        # below (US Shorts / Longs already do this). min_rows=50 matches
+        # the SMA50 requirement of phase 1. _download_daily_batch runs it,
+        # and on a throttled (> 50% sparse) batch cools down 30s and
+        # downloads once more instead of accepting the holes.
+        batch_data, _degraded = _download_daily_batch(
+            batch, period="3mo", min_rows=50, threads=True,
         )
         if batch_data is None or batch_data.empty:
             logger.warning(f"  Batch failed after retries, skipping")
             continue
-
-        # A batch download routinely reports a handful of legitimate tickers
-        # as "possibly delisted" (all-NaN) — 20 of 25 such names on
-        # 2026-09-25 had full 3mo history on a single-ticker retry. Without
-        # this pass they fall out silently at the len(closes) < 50 check
-        # below (US Shorts / Longs already do this). min_rows=50 matches
-        # the SMA50 requirement of phase 1.
-        _retry_sparse_in_batch(batch_data, batch, period="3mo", min_rows=50)
 
         single = len(batch) == 1
         for ticker in batch:
@@ -371,6 +370,11 @@ def fetch_hk_klines_yf(
     per batch with ``threads=True``, a 5s pause between batches to be
     polite to yfinance, and ``_trim_today`` of in-progress bars during HK
     market hours. Total runtime ~5–10 min for the full ~2,400 universe.
+
+    A batch that fails outright or comes back throttled (> 50% sparse) used
+    to lose its names for the day — 500 at a time. Those that ended up with
+    no usable bars get ONE recovery pass after a 30s cooldown (same rule as
+    ``us_rs_3m.fetch_us_klines_yf``); a short-but-real history is not retried.
     """
     if not codes_4d:
         return {}
@@ -391,77 +395,115 @@ def fetch_hk_klines_yf(
         logger.info("[HK Longs] HK market in session — _trim_today will drop today's incomplete bar.")
 
     result: dict[str, pd.DataFrame] = {}
-    drop_buckets = {"missing": 0, "sparse": 0, "shape_err": 0, "ok": 0}
-    n_batches = (len(yf_tickers) - 1) // batch_size + 1
-    for bidx, start in enumerate(range(0, len(yf_tickers), batch_size), start=1):
-        batch = yf_tickers[start:start + batch_size]
-        logger.info(f"[HK Longs] yfinance batch {bidx}/{n_batches} ({len(batch)} tickers)...")
-        batch_data = _yf_download_with_retry(
-            batch, period=period, progress=False, group_by="ticker", threads=True,
-        )
-        if batch_data is None or batch_data.empty:
-            logger.warning(f"[HK Longs]   batch failed after retries, skipping {len(batch)} tickers")
-            drop_buckets["missing"] += len(batch)
-            continue
+    # Last outcome per ticker, so a recovered name is not also counted missing.
+    status: dict[str, str] = {}
+    shape_errs = 0
 
-        # yfinance batch responses occasionally drop legitimate tickers (all-
-        # NaN columns) due to transient Yahoo errors; the single-ticker retry
-        # usually recovers them. Without this we lose ~30-40% of the universe
-        # on a flaky-yfinance day (e.g. 1384/2420 = 57% on 2026-05-06 13:57).
-        _retry_sparse_in_batch(batch_data, batch, period=period, min_rows=20)
-
-        # Build OHLCV per ticker by reading directly from the batch_data
-        # MultiIndex (rather than calling _get_closes_volumes / _get_ohlc
-        # which each do their own .dropna() and risk shape mismatch).
-        # A one-ticker batch comes back with flat field columns
-        # (_yf_download_with_retry flattens it) — the frame IS that ticker.
-        flat_single = (
-            len(batch) == 1 and not isinstance(batch_data.columns, pd.MultiIndex)
-        )
-        for ticker in batch:
-            try:
-                if flat_single:
-                    sub = batch_data
-                elif ticker not in batch_data.columns.get_level_values(0).unique():
-                    drop_buckets["missing"] += 1
-                    continue
-                else:
-                    sub = batch_data[ticker]
-                df = pd.DataFrame({
-                    "time_key": pd.to_datetime(sub.index),
-                    "open": sub["Open"].values,
-                    "high": sub["High"].values,
-                    "low": sub["Low"].values,
-                    "close": sub["Close"].values,
-                    "volume": sub["Volume"].values,
-                })
-                df = df.dropna(subset=["close"]).reset_index(drop=True)
-                # Trim today's incomplete bar during HK market hours
-                if market_open and len(df) and df["time_key"].iloc[-1].date() == today:
-                    df = df.iloc[:-1].reset_index(drop=True)
-                if len(df) < 2:
-                    drop_buckets["sparse"] += 1
-                    continue
-                # 4-digit yfinance ticker '0700.HK' → 5-digit Futu code 'HK.00700'
-                code_4d_only = ticker.replace(".HK", "")
-                futu_code = f"HK.0{code_4d_only}"
-                result[futu_code] = df
-                drop_buckets["ok"] += 1
-            except (KeyError, TypeError, ValueError) as e:
-                drop_buckets["shape_err"] += 1
-                if drop_buckets["shape_err"] <= 5:
-                    logger.warning(f"[HK Longs]   {ticker}: {type(e).__name__}: {e}")
+    def _fetch_pass(tickers: list[str]) -> list[str]:
+        """Fill ``result``/``status``; return the names a failed or throttled
+        batch left without usable bars (the recovery pool)."""
+        nonlocal shape_errs
+        lost: list[str] = []
+        n_batches = (len(tickers) - 1) // batch_size + 1
+        for bidx, start in enumerate(range(0, len(tickers), batch_size), start=1):
+            batch = tickers[start:start + batch_size]
+            logger.info(f"[HK Longs] yfinance batch {bidx}/{n_batches} ({len(batch)} tickers)...")
+            batch_data = _yf_download_with_retry(
+                batch, period=period, progress=False, group_by="ticker", threads=True,
+            )
+            if batch_data is None or batch_data.empty:
+                logger.warning(f"[HK Longs]   batch failed after retries, skipping {len(batch)} tickers")
+                status.update({t: "missing" for t in batch})
+                lost.extend(batch)
                 continue
 
-        if bidx < n_batches:
-            time.sleep(5)
+            # yfinance batch responses occasionally drop legitimate tickers (all-
+            # NaN columns) due to transient Yahoo errors; the single-ticker retry
+            # usually recovers them. Without this we lose ~30-40% of the universe
+            # on a flaky-yfinance day (e.g. 1384/2420 = 57% on 2026-05-06 13:57).
+            throttled = _retry_sparse_in_batch(batch_data, batch, period=period, min_rows=20)
 
+            # Build OHLCV per ticker by reading directly from the batch_data
+            # MultiIndex (rather than calling _get_closes_volumes / _get_ohlc
+            # which each do their own .dropna() and risk shape mismatch).
+            # A one-ticker batch comes back with flat field columns
+            # (_yf_download_with_retry flattens it) — the frame IS that ticker.
+            flat_single = (
+                len(batch) == 1 and not isinstance(batch_data.columns, pd.MultiIndex)
+            )
+            for ticker in batch:
+                try:
+                    if flat_single:
+                        sub = batch_data
+                    elif ticker not in batch_data.columns.get_level_values(0).unique():
+                        status[ticker] = "missing"
+                        continue
+                    else:
+                        sub = batch_data[ticker]
+                    df = pd.DataFrame({
+                        "time_key": pd.to_datetime(sub.index),
+                        "open": sub["Open"].values,
+                        "high": sub["High"].values,
+                        "low": sub["Low"].values,
+                        "close": sub["Close"].values,
+                        "volume": sub["Volume"].values,
+                    })
+                    df = df.dropna(subset=["close"]).reset_index(drop=True)
+                    # Trim today's incomplete bar during HK market hours
+                    if market_open and len(df) and df["time_key"].iloc[-1].date() == today:
+                        df = df.iloc[:-1].reset_index(drop=True)
+                    if len(df) < 2:
+                        status[ticker] = "sparse"
+                        continue
+                    # 4-digit yfinance ticker '0700.HK' → 5-digit Futu code 'HK.00700'
+                    code_4d_only = ticker.replace(".HK", "")
+                    futu_code = f"HK.0{code_4d_only}"
+                    result[futu_code] = df
+                    status[ticker] = "ok"
+                except (KeyError, TypeError, ValueError) as e:
+                    status[ticker] = "shape_err"
+                    shape_errs += 1
+                    if shape_errs <= 5:
+                        logger.warning(f"[HK Longs]   {ticker}: {type(e).__name__}: {e}")
+                    continue
+            if throttled:
+                lost.extend(t for t in batch if status.get(t) in ("missing", "sparse"))
+
+            if bidx < n_batches:
+                time.sleep(5)
+        return lost
+
+    t0 = time.monotonic()
+    lost = _fetch_pass(yf_tickers)
+    elapsed = time.monotonic() - t0
+    if lost and elapsed > _RECOVERY_MAX_ELAPSED_SEC:
+        logger.warning(
+            f"[HK Longs] {len(lost)} ticker(s) without data, but the first pass took "
+            f"{elapsed / 60:.0f} min — skipping the recovery pass"
+        )
+    elif lost:
+        logger.warning(
+            f"[HK Longs] {len(lost)} ticker(s) left without data by failed/throttled "
+            "batches — throttle cooldown 30s, one recovery pass"
+        )
+        time.sleep(30)
+        still = _fetch_pass(lost)
+        logger.info(f"[HK Longs] recovery pass: {len(lost) - len(still)}/{len(lost)} recovered")
+
+    drop_buckets = {"missing": 0, "sparse": 0, "shape_err": 0, "ok": 0}
+    for outcome in status.values():
+        drop_buckets[outcome] += 1
     logger.info(
         f"[HK Longs] yfinance fetch done: {len(result)}/{len(yf_tickers)} tickers "
         f"(ok={drop_buckets['ok']}, missing={drop_buckets['missing']}, "
         f"sparse={drop_buckets['sparse']}, shape_err={drop_buckets['shape_err']})"
     )
     return result
+
+
+# Skip the recovery pass after a first pass this slow (cloud job: timeout-
+# minutes 30, ~4 min normally) — see us_rs_3m._RECOVERY_MAX_ELAPSED_SEC.
+_RECOVERY_MAX_ELAPSED_SEC = 12 * 60.0
 
 
 def fetch_hsi_kline_yf(period: str = "2y") -> pd.DataFrame | None:

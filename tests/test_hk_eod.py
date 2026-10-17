@@ -566,3 +566,38 @@ def test_fetch_hk_klines_yf_accepts_flat_single_ticker_frame(monkeypatch):
     klines = fetch_hk_klines_yf(["0700"], period="2y")
     assert list(klines) == ["HK.00700"]
     assert len(klines["HK.00700"]) == 60
+
+
+def test_filter_hk_shorts_recovers_after_throttled_batch(monkeypatch):
+    # A throttled batch (> 50% sparse) used to be accepted as is: its missing
+    # names fell out at the len(closes) < 50 check with no cooldown/re-download
+    # (US Longs/Leaders got that defence 2026-10-17; HK Shorts had not).
+    import main, hk_eod
+    good = _shorts_grid()
+    nan = good.astype(float) * float("nan")
+    throttled = pd.concat({"0001.HK": good, "0002.HK": nan, "0003.HK": nan}, axis=1)
+    full = pd.concat({"0001.HK": good, "0002.HK": good, "0003.HK": good}, axis=1)
+    frames = [throttled, full]
+    downloads = []
+
+    def fake_download(tickers, **kwargs):
+        downloads.append(kwargs.get("threads"))
+        return frames.pop(0)
+
+    def fake_retry(data, tickers, period, min_rows):
+        return data[("0002.HK", "Close")].isna().all()  # throttle signal
+
+    monkeypatch.setattr(hk_eod, "fetch_hkex_equities", lambda: ["0001", "0002", "0003"])
+    monkeypatch.setattr(main, "_yf_download_with_retry", fake_download)
+    monkeypatch.setattr(main, "_retry_sparse_in_batch", fake_retry)
+    monkeypatch.setattr(main, "_get_market_cap", lambda t, **k: 20_000_000_000.0)
+    monkeypatch.setattr(main.time, "sleep", lambda s: None)
+    monkeypatch.setattr(hk_eod.time, "sleep", lambda s: None)
+
+    cfg = {"min_avg_volume": 1_000_000, "min_market_cap": 50_000_000,
+           "min_dollar_volume": 50_000_000, "min_consecutive_up_days": 3,
+           "min_adr_percent": 4.0, "adr_days": 20}
+    _, tv = hk_eod.filter_hk_shorts(cfg, futu_cfg=None, rs_table_3m=None)
+
+    assert sorted(tv) == ["HKEX:1", "HKEX:2", "HKEX:3"]
+    assert downloads == [True, True]  # HK keeps its threaded download

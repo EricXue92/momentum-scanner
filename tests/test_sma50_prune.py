@@ -258,3 +258,69 @@ def test_unwritable_pruned_path_does_not_undo_the_prune(tmp_path, monkeypatch):
     drops = sma50_prune.prune_us_master(seen, {"enabled": True}, pruned_path=out)
     assert drops == ["AAA"]
     assert seen.read_text().split() == ["BBB"]
+
+
+# --- stale series (delisted / halted): no decision on old bars ---
+
+
+def test_fetch_daily_closes_excludes_series_stale_by_two_sessions(monkeypatch, caplog):
+    """QRVO 2026-10-17: no daily bar since 10-02 (merged away). The batch's
+    union index runs to 10-16 with NaN for QRVO; the old code dropped one NaN
+    row, then dropna'd, and judged SMA50/EMA20 on two-week-old closes while
+    logging "evaluated one day stale". A series two or more sessions behind
+    the batch is now left out of the checks (KEPT in the master)."""
+    import main
+
+    idx = pd.bdate_range(end="2026-10-16", periods=60)
+    stale = [100.0] * 48 + [92.0, 90.0] + [float("nan")] * 10
+    frame = pd.DataFrame(
+        {("QRVO", "Close"): stale, ("QRVO", "Volume"): [1e6] * 60,
+         ("ZZ", "Close"): [100.0] * 60, ("ZZ", "Volume"): [1e6] * 60},
+        index=idx,
+    )
+    monkeypatch.setattr(main, "_yf_download_with_retry", lambda *a, **k: frame)
+
+    def no_intraday(tickers, day):
+        raise AssertionError(f"stale names must not hit the intraday fill: {tickers}")
+
+    monkeypatch.setattr(sma50_prune, "_fetch_intraday_last_close", no_intraday)
+    with caplog.at_level("WARNING", logger="momentum_scanner"):
+        got = sma50_prune._fetch_daily_closes(["QRVO", "ZZ"])
+    assert sorted(got) == ["ZZ"]
+    assert "QRVO" in caplog.text and "delisted" in caplog.text
+
+
+def test_fetch_daily_closes_one_session_lag_still_goes_to_intraday_fill(monkeypatch):
+    import main
+
+    idx = pd.bdate_range(end="2026-09-22", periods=60)
+    frame = pd.DataFrame(
+        {("CF", "Close"): [100.0] * 59 + [float("nan")], ("CF", "Volume"): [1e6] * 60},
+        index=idx,
+    )
+    frame[("ZZ", "Close")] = 100.0
+    frame[("ZZ", "Volume")] = 1e6
+    monkeypatch.setattr(main, "_yf_download_with_retry", lambda *a, **k: frame)
+    monkeypatch.setattr(sma50_prune, "_fetch_intraday_last_close", lambda t, d: {})
+    got = sma50_prune._fetch_daily_closes(["CF", "ZZ"])
+    assert len(got["CF"]) == 59  # one day stale, as before — not excluded
+
+
+def test_stray_late_rows_of_one_name_do_not_make_the_master_stale():
+    idx = pd.bdate_range(end="2026-10-16", periods=60)
+    full = pd.Series(100.0, index=idx)
+    stray = full.copy()
+    stray.loc[pd.Timestamp("2026-10-19")] = 101.0  # one name has bogus later bars
+    stray.loc[pd.Timestamp("2026-10-20")] = 102.0
+    others = {t: full.reindex(stray.index) for t in ("AAA", "BBB", "CCC")}
+    out = sma50_prune.drop_stale_series({"ODD": stray, **others})
+    assert sorted(out) == ["AAA", "BBB", "CCC", "ODD"]
+
+
+def test_yahoo_lag_day_with_every_last_close_nan_excludes_nothing():
+    # 2026-09-22: every ticker's latest daily row had NaN Close. Nobody is
+    # stale — all go on to the intraday fill.
+    idx = pd.bdate_range(end="2026-09-22", periods=60)
+    lag = pd.Series([100.0] * 59 + [float("nan")], index=idx)
+    out = sma50_prune.drop_stale_series({t: lag.copy() for t in ("AAA", "BBB", "CCC")})
+    assert sorted(out) == ["AAA", "BBB", "CCC"]

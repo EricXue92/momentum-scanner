@@ -48,8 +48,51 @@ def _fetch_daily_closes(tickers: list[str]) -> dict[str, pd.Series] | None:
             continue
         if series.notna().any():
             raw[t] = series
+    raw = drop_stale_series(raw)
     filled = fill_missing_last_close(raw)
     return {t: s.dropna() for t, s in filled.items() if s.notna().any()}
+
+
+# A trailing NaN Close for ONE session is Yahoo's daily-row lag (filled from
+# intraday below). Two or more sessions with no bar while the rest of the
+# batch has them is a delisting / merger / halt, not lag.
+_MAX_LAG_SESSIONS = 1
+
+
+def drop_stale_series(closes: dict[str, pd.Series]) -> dict[str, pd.Series]:
+    """Leave out tickers whose last valid close is more than
+    ``_MAX_LAG_SESSIONS`` sessions behind the batch's latest session.
+
+    A "session" is a date on which at least half of the tickers have a close,
+    so one name's stray extra row cannot make the whole master look stale,
+    and the all-NaN last row of a Yahoo-lag day does not count either.
+
+    The batch frame's index is the union of every ticker's dates, so a name
+    that stopped trading carries trailing NaN rows; a plain ``dropna`` then
+    evaluates SMA50 / EMA20 on its last real (weeks-old) closes — QRVO and
+    FBRX 2026-10-17. Excluded names are reported and, like any ticker with
+    missing data, KEPT in the master by the callers.
+    """
+    if not closes:
+        return closes
+    valid = pd.concat(closes.values(), axis=1).notna().sum(axis=1)
+    session_index = valid.index[valid >= max(1, len(closes) / 2)]
+    stale: dict[str, pd.Timestamp] = {}
+    out: dict[str, pd.Series] = {}
+    for t, s in closes.items():
+        last = s.last_valid_index()
+        if last is not None and int((session_index > last).sum()) > _MAX_LAG_SESSIONS:
+            stale[t] = pd.Timestamp(last)
+        else:
+            out[t] = s
+    if stale:
+        logger.warning(
+            f"[{_LABEL}] no daily bar for >{_MAX_LAG_SESSIONS} session(s) for "
+            f"{len(stale)} ticker(s) — delisted/halted? excluded from the SMA50/EMA20 "
+            "checks, KEPT in the master: "
+            + ", ".join(f"{t} (last {d.date()})" for t, d in sorted(stale.items()))
+        )
+    return out
 
 
 def _fetch_intraday_last_close(tickers: list[str], day: date) -> dict[str, float]:

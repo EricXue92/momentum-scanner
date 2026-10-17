@@ -239,6 +239,7 @@ def fetch_us_klines_yf(
     period: str = "6mo",
     batch_size: int = 100,
     include_ohlcv: bool = False,
+    recover: bool = True,
 ) -> dict[str, pd.DataFrame]:
     """Batch-download daily closes (or full OHLCV) for US tickers via yfinance.
 
@@ -262,11 +263,59 @@ def fetch_us_klines_yf(
     - When a batch returns fully empty after retries → 30s throttle cooldown
     - When a batch returns ≥50% sparse → also 30s cooldown (signal from
       _retry_sparse_in_batch); 5s spacing is not enough for Yahoo's window
+    - ``recover`` (default on): ONE more pass, after a 30s cooldown, over the
+      tickers a failed / throttled batch left with no data at all. A name
+      with a short but real history (fresh IPO) is not retried. Without it a
+      one-batch call (SPY benchmark, IPO candidates, the rs-line audit) had
+      no second chance — 2026-10-17 the audit scored 13/91 and called the
+      other 78 "insufficient history".
     """
     if not tickers:
         return {}
 
     result: dict[str, pd.DataFrame] = {}
+    t0 = time.monotonic()
+    lost = _fetch_us_batches(tickers, period, batch_size, include_ohlcv, result)
+    elapsed = time.monotonic() - t0
+    if recover and lost and elapsed > _RECOVERY_MAX_ELAPSED_SEC:
+        logger.warning(
+            f"[US RS 3M] {len(lost)} ticker(s) without data, but the first pass took "
+            f"{elapsed / 60:.0f} min — skipping the recovery pass (Yahoo down, not a blip)"
+        )
+    elif recover and lost:
+        logger.warning(
+            f"[US RS 3M] {len(lost)} ticker(s) left without data by failed/throttled "
+            f"batches — throttle cooldown {_RECOVERY_COOLDOWN_SEC:.0f}s, one recovery pass"
+        )
+        time.sleep(_RECOVERY_COOLDOWN_SEC)
+        still = _fetch_us_batches(lost, period, batch_size, include_ohlcv, result)
+        logger.info(
+            f"[US RS 3M] recovery pass: {len(lost) - len(still)}/{len(lost)} recovered"
+            + (f"; still missing: {','.join(still[:20])}" if still else "")
+        )
+    return result
+
+
+# Yahoo's throttle window is >= 30s (see main._retry_sparse_in_batch).
+_RECOVERY_COOLDOWN_SEC = 30.0
+# A first pass this slow means Yahoo is down, not blipping: a second pass
+# would push the cloud job (timeout-minutes: 60, ~12 min normally) into the
+# GH kill instead of its `if not klines: return 1`.
+_RECOVERY_MAX_ELAPSED_SEC = 25 * 60.0
+
+
+def _fetch_us_batches(
+    tickers: list[str],
+    period: str,
+    batch_size: int,
+    include_ohlcv: bool,
+    result: dict[str, pd.DataFrame],
+) -> list[str]:
+    """One pass of ``fetch_us_klines_yf``: fill ``result`` in place and return
+    the tickers that a failed or throttled batch left without any data (the
+    recovery pool). Misses from a healthy batch are real (delisted / bad
+    symbol) and are not returned."""
+    lost: list[str] = []
     n_batches = (len(tickers) - 1) // batch_size + 1
     for bidx, start in enumerate(range(0, len(tickers), batch_size), start=1):
         batch = tickers[start:start + batch_size]
@@ -276,6 +325,7 @@ def fetch_us_klines_yf(
         )
         if batch_data is None or batch_data.empty:
             logger.warning(f"[US RS 3M]   batch failed; skipping {len(batch)} tickers")
+            lost.extend(batch)
             if bidx < n_batches:
                 logger.info("[US RS 3M]   throttle cooldown 30s before next batch...")
                 time.sleep(30)
@@ -319,6 +369,8 @@ def fetch_us_klines_yf(
                     "time_key": closes.index,
                     "close": closes.values,
                 })
+        if throttled:
+            lost.extend(t for t in batch if t not in result)
         # Cooldown selection: if the batch came back ≥50% sparse (rate-limit
         # signal from _retry_sparse_in_batch), back off the full 30s instead
         # of the normal 5s — Yahoo's throttle window is ≥30s and 5s spacing
@@ -330,7 +382,7 @@ def fetch_us_klines_yf(
                 time.sleep(30)
             else:
                 time.sleep(5)
-    return result
+    return lost
 
 
 def fetch_universe_from_rs_csv(rs_table_12m: dict[str, int] | None) -> list[str]:

@@ -398,3 +398,36 @@ def test_filter_direction_gate_off_when_key_unset():
     )
     assert kept == ["T"]
     assert drops["perf_4w"] == 0
+
+
+def test_filter_counts_candidates_without_klines_as_no_data():
+    # 2026-10-17 10:53: the IPO batch failed, the log said
+    # "0/6 kept; drops={... all 0}" and the 6 names vanished unaccounted.
+    from us_ipo import filter_us_ipo_candidates
+    klines = {"NEW1": _make_kline([25.0] * 15)}
+    kept, drops = filter_us_ipo_candidates(
+        klines=klines,
+        finviz_caps={"NEW1": 5e9},
+        rs_table_3m_full=None,
+        spy_kline=None,
+        settings=_us_settings_default(),
+        candidates=["NEW1", "GONE1", "GONE2"],
+    )
+    assert kept == []
+    assert drops["min_history"] == 1
+    assert drops["no_data"] == 2
+
+
+def test_filter_no_data_when_every_fetch_failed():
+    from us_ipo import filter_us_ipo_candidates
+    kept, drops = filter_us_ipo_candidates(
+        klines={},
+        finviz_caps={},
+        rs_table_3m_full=None,
+        spy_kline=None,
+        settings=_us_settings_default(),
+        candidates=["GONE1", "GONE2"],
+    )
+    assert kept == []
+    assert drops["no_data"] == 2
+    assert drops["min_history"] == 0
