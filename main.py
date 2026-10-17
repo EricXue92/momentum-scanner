@@ -699,7 +699,7 @@ _THROTTLE_COOLDOWN_SEC = 30.0
 
 
 def _download_daily_batch(
-    tickers: list[str], period: str, min_rows: int
+    tickers: list[str], period: str, min_rows: int, threads: bool = False
 ) -> tuple["pd.DataFrame | None", bool]:
     """One EOD-filter batch download with the throttle defences the RS
     fetchers already have. Returns ``(data, degraded)``:
@@ -712,8 +712,8 @@ def _download_daily_batch(
     A degraded batch is a Yahoo problem, not evidence about any ticker:
     callers must not record its drops as IPO candidates (2026-10-17 10:29 —
     43 Leaders names incl. ABBV/CRM/DDOG went into `ipo_drops` from one
-    throttled batch)."""
-    kwargs = dict(period=period, progress=False, group_by="ticker", threads=False)
+    throttled batch). ``threads=True`` is for the 500-ticker HK Shorts batches."""
+    kwargs = dict(period=period, progress=False, group_by="ticker", threads=threads)
     data = _yf_download_with_retry(tickers, **kwargs)
     if data is None or data.empty:
         logger.warning(
@@ -1081,7 +1081,7 @@ def run_morning_gap(
     """Run the morning-gap scan. Negative offset = pre-market (skips
     intraday cumulative-volume filter); positive offset = post-open.
     Returns (offset, tickers), or (None, []) if outside scan window."""
-    scan_offsets = config.get("scan_offsets", [-20, -10, 10, 15, 20, 25, 30])
+    scan_offsets = config.get("scan_offsets", _US_GAP_DEFAULT_OFFSETS)
     tolerance = config.get("offset_tolerance_minutes", 2)
     offset = _get_et_scan_offset(scan_offsets, tolerance)
     if offset is None:
@@ -1320,7 +1320,7 @@ def run_hk_morning_gap(
     any scan window. Tickers are e.g. `["0700.HK", "1810.HK"]` — the caller
     converts to TradingView `HKEX:N` before writing.
     """
-    scan_offsets = config.get("scan_offsets", [10, 20, 30, 40, 50, 60])
+    scan_offsets = config.get("scan_offsets", _HK_GAP_DEFAULT_OFFSETS)
     tolerance = config.get("offset_tolerance_minutes", 2)
     offset = _get_hkt_scan_offset(scan_offsets, tolerance)
     if offset is None:
@@ -2199,6 +2199,32 @@ def _get_et_scan_offset(
     return None
 
 
+_US_GAP_DEFAULT_OFFSETS = [-20, -10, 10, 15, 20, 25, 30]
+_HK_GAP_DEFAULT_OFFSETS = [10, 20, 30, 40, 50, 60]
+
+
+def _morning_gap_in_window(mode: str, config: dict) -> bool:
+    """Cheap scan-window check for the morning-gap modes, run BEFORE the
+    network gate: most launchd fires land outside the window (both DST
+    variants, weekends) and used to spend the 20s settle — or, offline, the
+    full 300s wait plus a false "scan skipped" alert — before finding out.
+    The run path re-checks after the wait (that answer is the one that
+    counts). A missing config section returns True so the run path reports
+    it as before."""
+    if mode == "hk-morning-gap":
+        cfg = config.get("hk_morning_gap")
+        get_offset, defaults = _get_hkt_scan_offset, _HK_GAP_DEFAULT_OFFSETS
+    else:
+        cfg = config.get("morning_gap")
+        get_offset, defaults = _get_et_scan_offset, _US_GAP_DEFAULT_OFFSETS
+    if not cfg:
+        return True
+    offset = get_offset(
+        cfg.get("scan_offsets", defaults), cfg.get("offset_tolerance_minutes", 2)
+    )
+    return offset is not None
+
+
 def _gap_scan_stem(offset_min: int, *, hk: bool = False) -> str:
     """Per-scan morning-gap file stem: each offset gets its own dated file
     (`MorningGapPre20`, `MorningGap5`, `HKMorningGap10`) so every scan's
@@ -2365,6 +2391,10 @@ def main() -> int:
     # exit 0 silently to honor the "no hard error path" rule in CLAUDE.md.
     eod_modes = {"eod", "us-eod", "hk-eod"}
     morning_modes = {"morning-gap", "hk-morning-gap"}
+    if args.mode in morning_modes and not _morning_gap_in_window(args.mode, config):
+        prefix = "[HK Morning Gap]" if args.mode == "hk-morning-gap" else "[Morning Gap]"
+        logger.info(f"{prefix} Not in scan window, exiting")
+        return 0
     if args.mode in eod_modes or args.mode in morning_modes:
         # finviz is the heaviest US dep; raw.githubusercontent.com hosts both
         # US/HK RS cloud CSVs; query1.finance.yahoo.com is the yfinance endpoint
@@ -2818,10 +2848,16 @@ def main() -> int:
                 rs_table_3m_full=rs_table_3m,
                 spy_kline=spy_kline,
                 settings=settings,
+                candidates=ipo_tickers,
             )
             logger.info(
                 f"[IPO] {len(ipo_kept)}/{len(ipo_tickers)} kept; drops={ipo_drop_counts}"
             )
+            if ipo_drop_counts.get("no_data"):
+                logger.warning(
+                    f"[IPO] {ipo_drop_counts['no_data']} candidate(s) got no k-lines "
+                    "(yfinance fetch failed) — not evaluated today, re-checked next run"
+                )
 
         sorted_ipo = sorted(ipo_kept)
         sorted_ipo = _dedup_seen("[IPO]", sorted_ipo, ipo_seen, ipo_seen_path)

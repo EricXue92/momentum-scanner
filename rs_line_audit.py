@@ -92,6 +92,7 @@ def render_report(
     market: str,
     as_of: str,
     anomaly_ids: set[str] | None = None,
+    missing_ids: set[str] | None = None,
 ) -> str:
     """Build the audit text. ``direction`` indexed by id (rs_ema, rs_ema_chg_5d);
     ``reversal`` indexed by id (adr_pct, ret_lb, ret_per_adr). A direction-cut
@@ -100,13 +101,17 @@ def render_report(
 
     ``anomaly_ids`` (optional) lets the report split the unknown bucket into
     "data anomaly" (split / bad quote) vs "insufficient history" — same KEPT
-    semantics either way."""
+    semantics either way. ``missing_ids`` (optional) are ids for which no
+    k-lines came back at all (Yahoo throttle / fetch failure) — reported as
+    "no data fetched", not as short history (they are also KEPT)."""
     buckets = classify(ids, direction, reversal, tolerance, adr_mult)
     scored = buckets["scored_asc"]
     unknown = buckets["unknowns"]
     anomaly_ids = anomaly_ids or set()
+    missing_ids = missing_ids or set()
     anomaly_unknown = [u for u in unknown if u in anomaly_ids]
-    short_unknown   = [u for u in unknown if u not in anomaly_ids]
+    nodata_unknown  = [u for u in unknown if u in missing_ids and u not in anomaly_ids]
+    short_unknown   = [u for u in unknown if u not in anomaly_ids and u not in missing_ids]
     drop_set = set(buckets["drops"])
     exempt_set = set(buckets["exempts"])
 
@@ -145,9 +150,14 @@ def render_report(
         lines.append(
             f"unknown — data anomaly e.g. split (KEPT): {', '.join(anomaly_unknown)}"
         )
+    if nodata_unknown:
+        lines.append(
+            f"unknown — no data fetched, e.g. Yahoo throttle (KEPT): {', '.join(nodata_unknown)}"
+        )
     lines.append(
         f"scanned: {len(ids)} | scored: {len(scored)} | "
-        f"unknown: {len(unknown)} (short-hist: {len(short_unknown)}, anomaly: {len(anomaly_unknown)}) | "
+        f"unknown: {len(unknown)} (short-hist: {len(short_unknown)}, anomaly: {len(anomaly_unknown)}, "
+        f"no-data: {len(nodata_unknown)}) | "
         f"direction-cut: {cut} -> exempt(reversing): {exempt}, drop: {cut - exempt}"
     )
     return "\n".join(lines)
@@ -237,6 +247,11 @@ def _prune_master(
 
 AUDIT_SUBDIR = "rs-audit"
 
+# Below this share of the master with k-lines, the strongest-N snapshot is a
+# ranking of whatever Yahoo happened to return (13/91 on 2026-10-17 10:53),
+# so it is not written — an earlier same-day snapshot is left in place.
+MIN_SNAPSHOT_COVERAGE = 0.5
+
 
 def write_audit_files(
     text: str,
@@ -301,6 +316,16 @@ def _audit_market(
         fetched = fetch_hk_klines_yf(codes_4d, period="2y")
         klines = {e: fetched.get(_hk_master_to_futu(e)) for e in ids}
 
+    missing_ids = {e for e in ids if klines.get(e) is None or len(klines[e]) == 0}
+    coverage = 1 - len(missing_ids) / len(ids)
+    if bench is None:
+        logger.warning(f"[rs-line-audit] {market.upper()}: benchmark k-line missing — nothing can be scored")
+    elif missing_ids:
+        logger.warning(
+            f"[rs-line-audit] {market.upper()}: no k-lines for {len(missing_ids)}/{len(ids)} "
+            f"master entries (fetch failure, KEPT as unknown)"
+        )
+
     direction = rs_line.compute_rs_direction(klines, bench, **direction_kwargs)
     reversal = rs_line.compute_rs_reversal(klines, lookback=direction_kwargs["lookback"])
     anomaly_ids = rs_line.find_anomaly_ids(klines, bench, lookback=direction_kwargs["lookback"])
@@ -308,7 +333,7 @@ def _audit_market(
     as_of = date.today().strftime("%Y-%m-%d")
     text = render_report(
         ids, direction, reversal, tolerance, adr_mult, market.upper(), as_of,
-        anomaly_ids=anomaly_ids,
+        anomaly_ids=anomaly_ids, missing_ids=missing_ids,
     )
 
     buckets = classify(ids, direction, reversal, tolerance, adr_mult)
@@ -319,11 +344,18 @@ def _audit_market(
     logger.info(f"[rs-line-audit] wrote {drop_file} ({len(buckets['drops'])} ids)")
     logger.info(f"[rs-line-audit] wrote {keep_file} ({len(buckets['keeps_ranked'])} ids)")
 
-    top_file = write_top_n(
-        buckets, market, as_of, output_dir, rs_line.top_n_from_config(config)
-    )
-    if top_file is not None:
-        logger.info(f"[rs-line-audit] wrote {top_file} (strongest top-N)")
+    if coverage < MIN_SNAPSHOT_COVERAGE:
+        logger.warning(
+            f"[rs-line-audit] {market.upper()}: k-line coverage {coverage:.0%} < "
+            f"{MIN_SNAPSHOT_COVERAGE:.0%} — strongest top-N snapshot NOT written "
+            "(an earlier one from today, if any, is kept)"
+        )
+    else:
+        top_file = write_top_n(
+            buckets, market, as_of, output_dir, rs_line.top_n_from_config(config)
+        )
+        if top_file is not None:
+            logger.info(f"[rs-line-audit] wrote {top_file} (strongest top-N)")
 
     print("\n" + text + "\n")
 

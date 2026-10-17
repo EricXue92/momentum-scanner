@@ -177,3 +177,83 @@ def test_write_audit_files_hk_and_empty_buckets(tmp_path):
     assert report.name == "rs_line_audit_HK_2026-09-10.txt"
     assert drop.read_text() == ""
     assert keep.read_text() == ""
+
+
+# --- no-data vs short history; degraded fetch keeps the snapshot honest ---
+
+
+def test_render_separates_no_data_from_short_history():
+    # 2026-10-17 10:53: a throttled batch left 78/91 names with no k-lines and
+    # the report called all 78 "insufficient history".
+    text = render_report(
+        ["AAA", "ZZZ", "YYY"], _frame({"AAA": (0.01, 0.06)}), _rev({}),
+        tolerance=0.005, adr_mult=1.5, market="US", as_of="2026-10-17",
+        missing_ids={"YYY"},
+    )
+    lines = text.splitlines()
+    short_line = next(l for l in lines if "insufficient history" in l)
+    nodata_line = next(l for l in lines if "no data fetched" in l)
+    assert "ZZZ" in short_line and "YYY" not in short_line
+    assert "YYY" in nodata_line and "ZZZ" not in nodata_line
+    assert "short-hist: 1, anomaly: 0, no-data: 1" in text
+
+
+def _stub_us_audit(monkeypatch, klines, bench):
+    import rs_line
+    import us_rs_3m
+
+    def fake_fetch(tickers, **kwargs):
+        return {"SPY": bench} if tickers == ["SPY"] else klines
+
+    scored = [t for t, df in klines.items() if df is not None]
+    direction = _frame({t: (0.1, 0.01 * (i + 1)) for i, t in enumerate(scored)})
+    monkeypatch.setattr(us_rs_3m, "fetch_us_klines_yf", fake_fetch)
+    monkeypatch.setattr(rs_line, "compute_rs_direction", lambda *a, **k: direction)
+    monkeypatch.setattr(rs_line, "compute_rs_reversal", lambda *a, **k: _rev({}))
+    monkeypatch.setattr(rs_line, "find_anomaly_ids", lambda *a, **k: set())
+
+
+def _seed_master(tmp_path, ids):
+    state = tmp_path / "state"
+    state.mkdir()
+    (state / "eod_seen_US.txt").write_text("\n".join(ids) + "\n")
+
+
+def test_audit_skips_snapshot_when_most_klines_missing(tmp_path, monkeypatch):
+    from rs_line_audit import _audit_market
+    ids = [f"T{i}" for i in range(10)]
+    _seed_master(tmp_path, ids)
+    df = pd.DataFrame({"close": [1.0]})
+    klines = {t: df for t in ids[:3]}  # 3/10 fetched
+    _stub_us_audit(monkeypatch, klines, bench=df)
+    text = _audit_market("us", {}, tmp_path, dry_run=True)
+    assert "no-data: 7" in text
+    assert not list(tmp_path.glob("TV/US/rs_us_*.txt"))
+    # the report + sidecars are still written (the record that it ran)
+    assert list((tmp_path / "rs-audit").glob("rs_line_audit_US_*.txt"))
+
+
+def test_audit_degraded_rerun_keeps_earlier_snapshot(tmp_path, monkeypatch):
+    from rs_line_audit import _audit_market
+    ids = [f"T{i}" for i in range(10)]
+    _seed_master(tmp_path, ids)
+    df = pd.DataFrame({"close": [1.0]})
+    _stub_us_audit(monkeypatch, {t: df for t in ids}, bench=df)
+    _audit_market("us", {}, tmp_path, dry_run=True)
+    snap = next((tmp_path / "TV" / "US").glob("rs_us_*.txt"))
+    good = snap.read_text()
+    assert len(good.strip().split(",")) == 10
+    _stub_us_audit(monkeypatch, {t: df for t in ids[:2]}, bench=df)
+    _audit_market("us", {}, tmp_path, dry_run=True)
+    assert snap.read_text() == good
+
+
+def test_audit_writes_snapshot_with_healthy_coverage(tmp_path, monkeypatch):
+    from rs_line_audit import _audit_market
+    ids = [f"T{i}" for i in range(10)]
+    _seed_master(tmp_path, ids)
+    df = pd.DataFrame({"close": [1.0]})
+    _stub_us_audit(monkeypatch, {t: df for t in ids[:8]}, bench=df)
+    _audit_market("us", {}, tmp_path, dry_run=True)
+    snap = next((tmp_path / "TV" / "US").glob("rs_us_*.txt"))
+    assert len(snap.read_text().strip().split(",")) == 8

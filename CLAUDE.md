@@ -66,7 +66,12 @@ Output: `output/TV/{US,HK}/` (TradingView, comma-sep) mirrored to
   close (still declining; a rebound under the line is kept) → removed, can
   re-qualify later.
   Soft-fail: total yfinance failure skips the prune; missing/short-history
-  tickers are KEPT. US only. The day's removed names are written to
+  tickers are KEPT. **Stale series are KEPT too** (`drop_stale_series`, in
+  `_fetch_daily_closes`, so EMA20 shares it): last valid close > 1 session
+  behind the batch (session = a date ≥ half the tickers have a close) →
+  delisted/halted, excluded from both checks with a WARNING — the union
+  index used to let a plain `dropna` judge QRVO/FBRX on weeks-old closes
+  (2026-10-17). A 1-session lag is still Yahoo lag → intraday fill. US only. The day's removed names are written to
   `output/TV/US/<date>_SMA50Pruned.txt` (comma-sep; absent when nothing was
   pruned; a same-day rerun **merges** into it, since the rerun no longer sees
   names the first run removed; no Webull mirror / Futu / TV sync; aged out by
@@ -208,7 +213,11 @@ local (throttle-prone) k-line fetch.
   `[rs_line].top_n` (10) of `keep_ranked` (unknowns excluded, never padded) to
   `output/TV/US/rs_us_<date>.txt` / `output/hk_rs_<date>.txt` — dated, skipped
   when empty, overwritten on same-day rerun (ranking snapshot, no dedup
-  semantics; not Webull-mirrored, no eod_seen effect).
+  semantics; not Webull-mirrored, no eod_seen effect). **Not written when
+  k-line coverage of the master < 50%** (`MIN_SNAPSHOT_COVERAGE`; an earlier
+  same-day snapshot stays) — 2026-10-17 10:53 a throttled batch left 78/91
+  without data and the top-10 was cut from 13 names. The report lists such
+  names as `no data fetched` (KEPT), separate from `insufficient history`.
   Cleanup: snapshots 4-day window; audit report + sidecars (`rs-audit/`)
   5-day window.
 
@@ -323,7 +332,18 @@ local (throttle-prone) k-line fetch.
   OSError; they aborted us-eod before any `.txt`). `_yf_download_with_retry`
   waits `_YF_RETRY_DELAYS` (5s, 20s) between its 3 attempts — an empty batch
   is Yahoo's throttle and its window is ≥ 30s. A Longs group downloads its
-  2mo batch once (`_longs_group_batch`, `batch=` on both filters).
+  2mo batch once (`_longs_group_batch`, `batch=` on both filters). HK Shorts
+  goes through `_download_daily_batch(threads=True)` too. **K-line fetchers
+  recover once:** `us_rs_3m.fetch_us_klines_yf` (`recover=True`) and
+  `hk_eod.fetch_hk_klines_yf` re-download, after a 30s cooldown, the tickers
+  a failed or throttled batch left with NO data (a short-but-real history,
+  e.g. a fresh IPO, is not retried) — one pass, no loop, and skipped when
+  the first pass already took > 25 min (US) / 12 min (HK)
+  (`_RECOVERY_MAX_ELAPSED_SEC`: a dead Yahoo must not push the cloud job
+  past its GH timeout before `return 1`). One-batch callers
+  (SPY benchmark, IPO candidates, rs-line audit, ETF RS) had no second
+  chance before. IPO candidates still without k-lines are counted as
+  `drops['no_data']` (warned; re-evaluated next run), not silently lost.
 
 ## Futu sync
 
@@ -356,7 +376,11 @@ prev_close_price) / prev_close_price`. `pre_/after_change_rate` do exist.
 
 - US EOD Tue-Sat 10:00; HK EOD Mon-Fri 20:00; morning-gap modes fire many entries
   and **self-validate their window, clean-exiting outside it — do not add a hard
-  error path** (missed wakes are silent by design).
+  error path** (missed wakes are silent by design). The window is checked
+  once **before** the network gate (`_morning_gap_in_window`) and again in
+  the run path after it: an out-of-window fire exits in < 1s instead of
+  paying the 20s settle — or, offline, the 300s wait plus a false
+  "scan skipped" ntfy.
 - pmset wake keyword is **`wakeorpoweron`** on macOS 26+ (`wakepoweron` no longer
   parses). US EOD uses mode `us-eod` not `eod` (HK bar is incomplete at 10:00 HKT).
 - **The schedule assumes AC power; every scheduled job holds a `caffeinate
