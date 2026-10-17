@@ -539,6 +539,18 @@ def _flatten_single_ticker_frame(data, tickers):
     return data
 
 
+def _is_flat_frame(data) -> bool:
+    """True when `data` carries flat field columns (one-ticker download,
+    already flattened by `_flatten_single_ticker_frame`); False for a
+    (ticker, field) MultiIndex batch. Filters must index by the frame's own
+    shape, never by how many tickers survived an earlier stage: the frame was
+    downloaded once for the whole discovery list, so a lone survivor of a
+    later gate is still looked up inside a batch frame (PENG/DUOL/IONQ/2162.HK
+    2026-10 were dropped with "check failed ('Close')")."""
+    cols = getattr(data, "columns", None)
+    return not isinstance(cols, pd.MultiIndex)
+
+
 def _yf_download_with_retry(tickers, max_retries=3, **kwargs):
     """Download yfinance data with retries on failure."""
     for attempt in range(max_retries):
@@ -652,6 +664,54 @@ def _retry_sparse_in_batch(data, tickers: list[str], period: str, min_rows: int)
         except Exception as e:
             logger.warning(f"  yfinance: single retry failed for {t}: {e}")
     return False
+
+
+
+# Yahoo's throttle window is >= 30s (see _retry_sparse_in_batch); a 2mo
+# EOD batch that comes back mostly sparse gets one cooldown + re-download.
+_THROTTLE_COOLDOWN_SEC = 30.0
+
+
+def _download_daily_batch(
+    tickers: list[str], period: str, min_rows: int
+) -> tuple["pd.DataFrame | None", bool]:
+    """One EOD-filter batch download with the throttle defences the RS
+    fetchers already have. Returns ``(data, degraded)``:
+
+    - empty / None after `_yf_download_with_retry` → ``(data, True)``;
+    - > 50% sparse (rate-limit signal from `_retry_sparse_in_batch`) → sleep
+      `_THROTTLE_COOLDOWN_SEC`, download once more; ``degraded`` is True only
+      when the second batch is still throttled.
+
+    A degraded batch is a Yahoo problem, not evidence about any ticker:
+    callers must not record its drops as IPO candidates (2026-10-17 10:29 —
+    43 Leaders names incl. ABBV/CRM/DDOG went into `ipo_drops` from one
+    throttled batch)."""
+    kwargs = dict(period=period, progress=False, group_by="ticker", threads=False)
+    data = _yf_download_with_retry(tickers, **kwargs)
+    if data is None or data.empty:
+        logger.warning(
+            f"  yfinance: batch of {len(tickers)} came back empty after retries "
+            "— dropping the group for today (not recorded as IPO drops)"
+        )
+        return data, True
+    throttled = _retry_sparse_in_batch(data, tickers, period=period, min_rows=min_rows)
+    if not throttled:
+        return data, False
+    logger.warning(
+        f"  yfinance: throttle cooldown {_THROTTLE_COOLDOWN_SEC:.0f}s, then one re-download"
+    )
+    time.sleep(_THROTTLE_COOLDOWN_SEC)
+    again = _yf_download_with_retry(tickers, **kwargs)
+    if again is None or again.empty:
+        return data, True
+    throttled = _retry_sparse_in_batch(again, tickers, period=period, min_rows=min_rows)
+    if throttled:
+        logger.warning(
+            "  yfinance: batch still throttled after cooldown — missing names "
+            "are dropped for today, NOT recorded as IPO drops"
+        )
+    return again, throttled
 
 
 def load_config(config_path: Path) -> dict:
@@ -865,7 +925,7 @@ def filter_shorts(
     if market_open:
         logger.info("  US market still open, excluding today's incomplete data")
 
-    single = len(tickers) == 1
+    single = _is_flat_frame(data)
 
     # 1. Performance filter (cap-conditional, 2/3/4-week windows)
     perf_weeks = [2, 3, 4]
@@ -1002,12 +1062,13 @@ def run_morning_gap(
     now_et = datetime.now(ZoneInfo("America/New_York"))
     market_open = True  # always trim today's partial bar (pre- or post-open)
     today_et = now_et.date()
+    single = _is_flat_frame(daily_data)  # frame shape, not survivor count
 
     # Phase 3: Dollar volume filter
     min_dv = config.get("min_dollar_volume", 0)
     if min_dv > 0:
         tickers = _filter_dollar_volume_from_data(
-            tickers, daily_data, min_dv, market_open, today_et, len(tickers) == 1
+            tickers, daily_data, min_dv, market_open, today_et, single
         )
         logger.info(f"  {len(tickers)} after dollar volume filter (>= ${min_dv:,.0f})")
     if not tickers:
@@ -1025,6 +1086,7 @@ def run_morning_gap(
             tickers, daily_data, min_adr, adr_days, today_et,
             gaps={t: q.gap for t, q in quotes.items()},
             bypass_gap_pct=adr_bypass_pct, bypass_min_pct=adr_bypass_min,
+        single=single,
         )
         logger.info(
             f"  {len(tickers)} after ADR% filter (>= {min_adr}%, {adr_days}d, "
@@ -1058,7 +1120,7 @@ def run_morning_gap(
     min_avg_vol = config.get("min_avg_volume", 500_000)
     avg_days = config.get("avg_volume_days", 20)
     tickers = _filter_avg_volume(
-        tickers, daily_data, min_avg_vol, avg_days, today_et
+        tickers, daily_data, min_avg_vol, avg_days, today_et, single=single,
     )
     logger.info(
         f"  {len(tickers)} after 20d avg volume filter (>= {min_avg_vol:,.0f})"
@@ -1076,7 +1138,8 @@ def run_morning_gap(
     if offset < 0:
         pre_vol_ratio = config.get("min_pre_volume_ratio", 0.05)
         tickers = _filter_pre_market_volume(
-            tickers, daily_data, quotes, pre_vol_ratio, avg_days, today_et
+            tickers, daily_data, quotes, pre_vol_ratio, avg_days, today_et,
+            single=single,
         )
         logger.info(
             f"  {len(tickers)} after pre-market volume filter "
@@ -1086,7 +1149,6 @@ def run_morning_gap(
 
     # Phase 4: Compute 20-day avg daily volume per ticker
     avg_days = config.get("avg_volume_days", 20)
-    single = len(tickers) == 1
     avg_daily_volumes: dict[str, float] = {}
     for ticker in tickers:
         try:
@@ -1225,12 +1287,13 @@ def run_hk_morning_gap(
     now_hk = datetime.now(ZoneInfo("Asia/Hong_Kong"))
     market_open = True  # always trim today's partial bar
     today_hk = now_hk.date()
+    single = _is_flat_frame(daily_data)  # frame shape, not survivor count
 
     # Phase 3: Dollar volume filter (HK$100M default — matches long-side baseline)
     min_dv = config.get("min_dollar_volume", 0)
     if min_dv > 0:
         tickers = _filter_dollar_volume_from_data(
-            tickers, daily_data, min_dv, market_open, today_hk, len(tickers) == 1
+            tickers, daily_data, min_dv, market_open, today_hk, single
         )
         logger.info(f"  {len(tickers)} after dollar volume filter (>= HK${min_dv:,.0f})")
     if not tickers:
@@ -1246,6 +1309,7 @@ def run_hk_morning_gap(
             tickers, daily_data, min_adr, adr_days, today_hk,
             gaps={t: q.gap for t, q in quotes.items()},
             bypass_gap_pct=adr_bypass_pct, bypass_min_pct=adr_bypass_min,
+        single=single,
         )
         logger.info(
             f"  {len(tickers)} after ADR% filter (>= {min_adr}%, {adr_days}d, "
@@ -1276,7 +1340,7 @@ def run_hk_morning_gap(
     min_avg_vol = config.get("min_avg_volume", 1_000_000)
     avg_days = config.get("avg_volume_days", 20)
     tickers = _filter_avg_volume(
-        tickers, daily_data, min_avg_vol, avg_days, today_hk
+        tickers, daily_data, min_avg_vol, avg_days, today_hk, single=single,
     )
     logger.info(
         f"  {len(tickers)} after 20d avg volume filter (>= {min_avg_vol:,.0f} shares)"
@@ -1285,7 +1349,6 @@ def run_hk_morning_gap(
         return offset, []
 
     # Phase 4: Compute 20-day avg daily volume per ticker for the cumulative gate
-    single = len(tickers) == 1
     avg_daily_volumes: dict[str, float] = {}
     for ticker in tickers:
         try:
@@ -1343,7 +1406,7 @@ def filter_consecutive_up_days(tickers: list[str], min_days: int) -> list[str]:
 
     for ticker in tickers:
         try:
-            if len(tickers) == 1:
+            if _is_flat_frame(data):
                 closes = data["Close"].dropna()
             else:
                 closes = data[ticker]["Close"].dropna()
@@ -1437,15 +1500,17 @@ def filter_dollar_volume_and_adr_yf(
     if not tickers:
         return []
 
-    data = _flatten_single_ticker_frame(
-        yf.download(tickers, period="2mo", progress=False, group_by="ticker", threads=False),
-        tickers,
+    data, degraded = _download_daily_batch(
+        tickers, period="2mo", min_rows=max(adr_days, dv_days)
     )
-    _retry_sparse_in_batch(data, tickers, period="2mo", min_rows=max(adr_days, dv_days))
+    if data is None or data.empty:
+        return []
+    if degraded:
+        ipo_drops = None  # unreliable batch: its drops say nothing about IPO status
     now_et = datetime.now(ZoneInfo("America/New_York"))
     market_open = 9 <= now_et.hour < 16 and now_et.weekday() < 5
     today_et = now_et.date()
-    single = len(tickers) == 1
+    single = _is_flat_frame(data)
 
     if min_dollar_volume > 0:
         tickers = _filter_dollar_volume_from_data(
@@ -1502,7 +1567,7 @@ def _filter_dollar_volume_from_data(
     min_dollar_volume: float,
     market_open: bool,
     today_date,
-    single: bool,
+    single: bool | None = None,
     days: int = 20,
     ipo_drops: set[str] | None = None,
 ) -> list[str]:
@@ -1513,6 +1578,8 @@ def _filter_dollar_volume_from_data(
     recorded there."""
     if not tickers:
         return []
+    if single is None:
+        single = _is_flat_frame(data)
 
     result = []
     for ticker in tickers:
@@ -1628,7 +1695,7 @@ def _filter_adr_percent(
     if not tickers:
         return []
     if single is None:
-        single = len(tickers) == 1
+        single = _is_flat_frame(daily_data)
 
     result = []
     for ticker in tickers:
@@ -1721,7 +1788,7 @@ def _filter_sma_trend(
     if not tickers:
         return []
     if single is None:
-        single = len(tickers) == 1
+        single = _is_flat_frame(daily_data)
 
     result = []
     for ticker in tickers:
@@ -1799,7 +1866,7 @@ def _filter_avg_volume(
     if not tickers:
         return []
     if single is None:
-        single = len(tickers) == 1
+        single = _is_flat_frame(daily_data)
 
     result = []
     for ticker in tickers:
@@ -1852,7 +1919,7 @@ def _filter_pre_market_volume(
     if not min_ratio or min_ratio <= 0:
         return list(tickers)
     if single is None:
-        single = len(tickers) == 1
+        single = _is_flat_frame(daily_data)
 
     result = []
     for ticker in tickers:
@@ -1908,7 +1975,7 @@ def _filter_intraday_cumulative_volume(
     open_ts = datetime.combine(today_et, datetime.min.time(), tzinfo=et).replace(hour=9, minute=30)
     end_ts = open_ts + timedelta(minutes=offset_minutes)
 
-    single = len(tickers) == 1
+    single = _is_flat_frame(intraday_data)
     result = []
     for ticker in tickers:
         try:
@@ -1957,11 +2024,11 @@ def filter_relative_volume(
     if not tickers:
         return []
 
-    data = _flatten_single_ticker_frame(
-        yf.download(tickers, period="2mo", progress=False, group_by="ticker", threads=False),
-        tickers,
-    )
-    _retry_sparse_in_batch(data, tickers, period="2mo", min_rows=days + 1)
+    data, degraded = _download_daily_batch(tickers, period="2mo", min_rows=days + 1)
+    if data is None or data.empty:
+        return []
+    if degraded:
+        ipo_drops = None  # unreliable batch: its drops say nothing about IPO status
     result = []
 
     now_et = datetime.now(ZoneInfo("America/New_York"))
@@ -1969,7 +2036,7 @@ def filter_relative_volume(
 
     for ticker in tickers:
         try:
-            if len(tickers) == 1:
+            if _is_flat_frame(data):
                 volumes = data["Volume"].dropna()
             else:
                 volumes = data[ticker]["Volume"].dropna()

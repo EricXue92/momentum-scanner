@@ -13,6 +13,7 @@ becomes a logged no-op so the pipeline still produces results.
 from __future__ import annotations
 
 import csv
+import http.client
 import io
 import logging
 import time
@@ -103,7 +104,11 @@ def fetch_rs_table(
                     csv_text = resp.read().decode("utf-8")
                 last_err = None
                 break
-            except (URLError, TimeoutError, OSError) as e:
+            # IncompleteRead (truncated body) is an HTTPException, not an
+            # OSError; a garbage body raises UnicodeDecodeError. Both used
+            # to escape and abort us-eod before any .txt was written.
+            except (URLError, TimeoutError, OSError,
+                    http.client.HTTPException, UnicodeDecodeError) as e:
                 last_err = e
                 if i < len(_FETCH_RETRY_DELAYS):
                     delay = _FETCH_RETRY_DELAYS[i]

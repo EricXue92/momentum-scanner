@@ -307,6 +307,17 @@ local (throttle-prone) k-line fetch.
   the same latent bug. Both accept flat frames now. **Test fakes must mimic
   the runtime shape** (flat for one ticker) — the old MultiIndex-only fake is
   why the single-ticker test stayed green.
+  **Filters decide flat-vs-batch by the frame's shape** (`_is_flat_frame`),
+  never by `len(tickers) == 1`: morning-gap downloads `daily_data` once for
+  the whole discovery list, so a lone survivor of a later gate is still
+  inside a MultiIndex batch — the old heuristic KeyError'd and dropped it
+  (PENG/DUOL/IONQ, 2162.HK, 2026-10). EOD Longs/Leaders batch downloads go
+  through `_download_daily_batch`: empty-after-retry or still-throttled
+  after one 30s cooldown = *degraded* → the group's drops are NOT recorded
+  in `ipo_drops` (2026-10-17: 43 Leaders names incl. ABBV/CRM went in from
+  one throttled batch). `rs_rating.fetch_rs_table` also catches
+  `http.client.HTTPException` / `UnicodeDecodeError` (neither is an
+  OSError; they aborted us-eod before any `.txt`).
 
 ## Futu sync
 
