@@ -14,7 +14,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
-from schedule_morning_gap_wakes import WAKES, wake_events  # noqa: E402
+from schedule_morning_gap_wakes import WAKES, queued_wakes, wake_events  # noqa: E402
 
 HKT = ZoneInfo("Asia/Hong_Kong")
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
@@ -77,3 +77,15 @@ def test_every_plist_slot_has_a_wake_one_min_before(plist):
         py_weekday = (slot["Weekday"] - 1) % 7  # launchd 0=Sun → Python 6
         assert key in wakes, f"{plist} {slot} has no wake at {key}"
         assert py_weekday in wakes[key], f"{plist} {slot}: {key} misses weekday"
+
+
+def test_queued_wakes_counts_pmset_owned_copies_only():
+    sched = """Repeating power events:
+  wakepoweron at 9:59AM Some days
+Scheduled power events:
+ [0]  wake at 10/17/2026 18:44:22 by 'com.apple.alarm.user-invisible-com.apple.calaccessd'
+ [1]  wake at 10/19/2026 18:44:00 by 'pmset'
+ [2]  wake at 10/19/2026 18:44:00 by 'pmset'
+ [3]  wake at 10/19/2026 20:59:00 by 'pmset'
+"""
+    assert queued_wakes(sched) == {"10/19/26 18:44:00": 2, "10/19/26 20:59:00": 1}

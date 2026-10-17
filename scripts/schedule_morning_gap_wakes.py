@@ -21,8 +21,11 @@ HK jobs get the same 1-min lead: every hk-morning-gap slot (Mon-Fri
 lid closed and only finished at 20:18, when the lid was opened.
 
 `pmset schedule` events are one-shot. Re-run periodically (e.g. weekly via
-cron/launchd or manually). Re-running is safe — past events expire on their
-own, duplicate future events are harmless extra wakes.
+cron/launchd or manually). Re-running is idempotent: it first cancels extra
+copies of any pmset-owned wake (the weekly reseed of a 14-day window, the
+RunAtLoad on every boot and manual runs had stacked up to 7 copies of one
+time), then only schedules times not already queued. Past events expire on
+their own.
 
 Usage:
     sudo uv run scripts/schedule_morning_gap_wakes.py [days]
@@ -31,8 +34,10 @@ Default: schedules next 14 weekdays. Verify with `pmset -g sched`.
 """
 
 import os
+import re
 import subprocess
 import sys
+from collections import Counter
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -91,6 +96,33 @@ def wake_events(now_hk: datetime, n_days: int) -> list[datetime]:
     return events
 
 
+_SCHED_WAKE_RE = re.compile(
+    r"\bwake at (\d{2}/\d{2}/\d{4} \d{2}:\d{2}:\d{2}) by 'pmset'"
+)
+
+
+def queued_wakes(sched_text: str) -> Counter:
+    """pmset-owned one-shot wakes in `pmset -g sched` output, keyed by the
+    `pmset schedule` date string (MM/DD/YY HH:MM:SS) with their copy count."""
+    return Counter(
+        f"{datetime.strptime(m.group(1), '%m/%d/%Y %H:%M:%S'):%m/%d/%y %H:%M:%S}"
+        for m in _SCHED_WAKE_RE.finditer(sched_text)
+    )
+
+
+def _read_queue() -> Counter:
+    result = subprocess.run(["pmset", "-g", "sched"], capture_output=True, text=True)
+    return queued_wakes(result.stdout)
+
+
+def _pmset(*args: str) -> bool:
+    result = subprocess.run(["pmset", "schedule", *args], capture_output=True, text=True)
+    if result.returncode != 0:
+        print(f"  FAILED: pmset schedule {' '.join(args)} — {result.stderr.strip()}",
+              file=sys.stderr)
+    return result.returncode == 0
+
+
 def main() -> int:
     if os.geteuid() != 0:
         print("ERROR: pmset schedule requires root. Re-run with sudo.", file=sys.stderr)
@@ -99,24 +131,31 @@ def main() -> int:
     n_days = int(sys.argv[1]) if len(sys.argv) > 1 else DEFAULT_DAYS
     now_hk = datetime.now(ZoneInfo("Asia/Hong_Kong"))
 
-    scheduled = 0
+    # One `pmset schedule cancel` removes one copy, so cancel n-1 of each.
+    cancelled = 0
     failed = 0
+    for when, n in _read_queue().items():
+        for _ in range(n - 1):
+            if _pmset("cancel", "wake", when, "pmset"):
+                cancelled += 1
+            else:
+                failed += 1
+
+    queued = _read_queue()
+    scheduled = 0
     for wake_dt in wake_events(now_hk, n_days):
         schedule_str = f"{wake_dt:%m/%d/%y %H:%M:%S}"
-        cmd = ["pmset", "schedule", "wake", schedule_str]
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        if result.returncode == 0:
+        if queued[schedule_str]:
+            continue
+        if _pmset("wake", schedule_str):
             print(f"  scheduled: {schedule_str}")
             scheduled += 1
         else:
-            print(
-                f"  FAILED: {schedule_str} — {result.stderr.strip()}",
-                file=sys.stderr,
-            )
             failed += 1
 
     print(
-        f"\nDone: {scheduled} scheduled, {failed} failed."
+        f"\nDone: {scheduled} scheduled, {cancelled} duplicates cancelled, "
+        f"{failed} failed."
     )
     print("Verify: pmset -g sched")
     return 1 if failed else 0
