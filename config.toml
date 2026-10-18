@@ -89,6 +89,10 @@ keep_files = 3
 [sma50_prune]
 enabled = true
 consecutive_days = 2
+# 退市剔除: 日线连续 >= N 个交易日没有新 bar (其余票都有) 且单独重下一次确认,
+# 视为退市/被收购, 从 master 移除 (同一次备份; 只记日志, 不写 SMA50Pruned.txt)。
+# 不足 N 天的停牌保留; 重下失败或发现新 bar 也保留。0 / 删除此键 = 关闭。
+delisted_after_sessions = 10
 
 # ETF 3M RS 排名: 每天 us-eod 末尾对下面固定 ETF 名单跑一遍 3M RS 算法
 # (0.5·R1M + 0.3·R2M + 0.2·R3M, 减去 benchmark 同期得分, 名单内 0-99 百分位),
