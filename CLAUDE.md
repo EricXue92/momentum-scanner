@@ -71,7 +71,13 @@ Output: `output/TV/{US,HK}/` (TradingView, comma-sep) mirrored to
   behind the batch (session = a date ≥ half the tickers have a close) →
   delisted/halted, excluded from both checks with a WARNING — the union
   index used to let a plain `dropna` judge QRVO/FBRX on weeks-old closes
-  (2026-10-17). A 1-session lag is still Yahoo lag → intraday fill. US only. The day's removed names are written to
+  (2026-10-17). A 1-session lag is still Yahoo lag → intraday fill.
+  **Delistings are the one removal for missing data:** stale ≥
+  `delisted_after_sessions` (10; unset/0 = off) AND a separate 6mo
+  re-download (`_confirm_no_new_bars`) shows no newer bar → removed from the
+  master in the same backup/prune, logged, NOT written to `SMA50Pruned.txt`.
+  A failed recheck removes nothing. Stale info rides on the shared closes as
+  `MasterCloses.stale`; a plain dict (test fakes) means no delistings. US only. The day's removed names are written to
   `output/TV/US/<date>_SMA50Pruned.txt` (comma-sep; absent when nothing was
   pruned; a same-day rerun **merges** into it, since the rerun no longer sees
   names the first run removed; no Webull mirror / Futu / TV sync; aged out by

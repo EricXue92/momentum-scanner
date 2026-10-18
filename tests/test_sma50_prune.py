@@ -324,3 +324,134 @@ def test_yahoo_lag_day_with_every_last_close_nan_excludes_nothing():
     lag = pd.Series([100.0] * 59 + [float("nan")], index=idx)
     out = sma50_prune.drop_stale_series({t: lag.copy() for t in ("AAA", "BBB", "CCC")})
     assert sorted(out) == ["AAA", "BBB", "CCC"]
+
+
+# --- delisted names leave the master (delisted_after_sessions) ---
+
+
+def _stale_closes(stale: dict[str, int]) -> "sma50_prune.MasterCloses":
+    """Shared closes as _fetch_daily_closes returns them: fresh series plus
+    ``.stale`` = {ticker: (last close date, sessions behind)}."""
+    out = sma50_prune.MasterCloses({"OK": _series([100.0] * 60)})
+    out.stale = {t: (pd.Timestamp("2026-08-26"), lag) for t, lag in stale.items()}
+    return out
+
+
+def _confirm(monkeypatch, result):
+    calls = []
+
+    def fake(tickers, last_seen):
+        calls.append(sorted(tickers))
+        return result(tickers) if callable(result) else result
+
+    monkeypatch.setattr(sma50_prune, "_confirm_no_new_bars", fake)
+    return calls
+
+
+def test_long_stale_names_are_removed_after_confirmation(tmp_path, monkeypatch):
+    seen = _write_master(tmp_path, ["FBRX", "OK", "QRVO"])
+    calls = _confirm(monkeypatch, lambda t: list(t))
+    pruned = tmp_path / "2026_10_20_SMA50Pruned.txt"
+    drops = sma50_prune.prune_us_master(
+        seen, {"enabled": True, "delisted_after_sessions": 10},
+        pruned_path=pruned, closes=_stale_closes({"FBRX": 36, "QRVO": 11}),
+    )
+    assert drops == []  # SMA50 drops only — delistings are reported separately
+    assert seen.read_text().split() == ["OK"]
+    assert calls == [["FBRX", "QRVO"]]
+    assert not pruned.exists(), "delisted names are not an SMA50 breakdown list"
+    backup = next(tmp_path.glob("eod_seen_US.txt.bak.*"))
+    assert backup.read_text().split() == ["FBRX", "OK", "QRVO"]
+
+
+def test_short_halt_is_kept(tmp_path, monkeypatch):
+    seen = _write_master(tmp_path, ["HALT", "OK"])
+    calls = _confirm(monkeypatch, lambda t: list(t))
+    sma50_prune.prune_us_master(
+        seen, {"enabled": True, "delisted_after_sessions": 10},
+        closes=_stale_closes({"HALT": 9}),
+    )
+    assert seen.read_text().split() == ["HALT", "OK"]
+    assert calls == []
+
+
+def test_name_with_new_bars_on_recheck_is_kept(tmp_path, monkeypatch):
+    seen = _write_master(tmp_path, ["FBRX", "QRVO", "OK"])
+    _confirm(monkeypatch, ["FBRX"])  # QRVO's single-ticker recheck has a fresh bar
+    sma50_prune.prune_us_master(
+        seen, {"enabled": True, "delisted_after_sessions": 10},
+        closes=_stale_closes({"FBRX": 36, "QRVO": 11}),
+    )
+    assert seen.read_text().split() == ["QRVO", "OK"]
+
+
+def test_delisting_off_when_unset(tmp_path, monkeypatch):
+    seen = _write_master(tmp_path, ["FBRX", "OK"])
+    calls = _confirm(monkeypatch, lambda t: list(t))
+    sma50_prune.prune_us_master(
+        seen, {"enabled": True}, closes=_stale_closes({"FBRX": 36}),
+    )
+    assert seen.read_text().split() == ["FBRX", "OK"]
+    assert calls == []
+
+
+def test_plain_dict_closes_carry_no_delistings(tmp_path, monkeypatch):
+    # Test fakes / older callers hand a plain dict: no .stale, nothing removed.
+    seen = _write_master(tmp_path, ["FBRX", "OK"])
+    calls = _confirm(monkeypatch, lambda t: list(t))
+    sma50_prune.prune_us_master(
+        seen, {"enabled": True, "delisted_after_sessions": 10},
+        closes={"OK": _series([100.0] * 60)},
+    )
+    assert seen.read_text().split() == ["FBRX", "OK"]
+    assert calls == []
+
+
+def test_fetch_daily_closes_reports_stale_lag(monkeypatch):
+    import main
+
+    idx = pd.bdate_range(end="2026-10-16", periods=60)
+    frame = pd.DataFrame(
+        {("QRVO", "Close"): [100.0] * 50 + [float("nan")] * 10,
+         ("QRVO", "Volume"): [1e6] * 60,
+         ("ZZ", "Close"): [100.0] * 60, ("ZZ", "Volume"): [1e6] * 60},
+        index=idx,
+    )
+    monkeypatch.setattr(main, "_yf_download_with_retry", lambda *a, **k: frame)
+    got = sma50_prune._fetch_daily_closes(["QRVO", "ZZ"])
+    assert sorted(got) == ["ZZ"]
+    last, lag = got.stale["QRVO"]
+    assert lag == 10 and last == idx[49]
+
+
+# --- _confirm_no_new_bars (single re-download before removal) ---
+
+
+def test_confirm_keeps_only_names_without_newer_bars(monkeypatch):
+    import main
+
+    idx = pd.bdate_range(end="2026-10-16", periods=20)
+    frame = pd.DataFrame(
+        {("QRVO", "Close"): [100.0] * 5 + [float("nan")] * 15,
+         ("BACK", "Close"): [100.0] * 20},
+        index=idx,
+    )
+    monkeypatch.setattr(main, "_yf_download_with_retry", lambda *a, **k: frame)
+    last_seen = {"QRVO": idx[4], "BACK": idx[4]}
+    assert sma50_prune._confirm_no_new_bars(["QRVO", "BACK"], last_seen) == ["QRVO"]
+
+
+def test_confirm_single_ticker_flat_frame(monkeypatch):
+    import main
+
+    idx = pd.bdate_range(end="2026-10-16", periods=20)
+    frame = pd.DataFrame({"Close": [100.0] * 5 + [float("nan")] * 15}, index=idx)
+    monkeypatch.setattr(main, "_yf_download_with_retry", lambda *a, **k: frame)
+    assert sma50_prune._confirm_no_new_bars(["QRVO"], {"QRVO": idx[4]}) == ["QRVO"]
+
+
+def test_confirm_fetch_failure_removes_nothing(monkeypatch):
+    import main
+
+    monkeypatch.setattr(main, "_yf_download_with_retry", lambda *a, **k: None)
+    assert sma50_prune._confirm_no_new_bars(["QRVO"], {"QRVO": pd.Timestamp("2026-10-02")}) == []

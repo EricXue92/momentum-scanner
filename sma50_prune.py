@@ -8,7 +8,10 @@ so it can re-qualify on a future EOD run once it recovers. The master is
 backed up first (``eod_seen_US.txt.bak.<stamp>``, same scheme as rs-line-audit).
 
 Soft-fail by design: a total yfinance failure skips the prune with a warning;
-tickers with missing data or fewer than ``sma_period`` bars are KEPT.
+tickers with missing data or fewer than ``sma_period`` bars are KEPT. The one
+exception is a delisting: a name with no daily bar for
+``delisted_after_sessions`` sessions (confirmed by a separate re-download) is
+removed too — it can never re-qualify, and was judged on weeks-old closes.
 US only — the HK master is untouched.
 """
 
@@ -26,11 +29,25 @@ logger = logging.getLogger("momentum_scanner")
 _LABEL = "sma50-prune"
 
 
-def _fetch_daily_closes(tickers: list[str]) -> dict[str, pd.Series] | None:
+class MasterCloses(dict):
+    """``{ticker: close series}`` as ``_fetch_daily_closes`` returns it, plus
+    ``.stale`` = ``{ticker: (last close date, sessions behind)}`` for the names
+    ``drop_stale_series`` left out. A plain dict (test fakes) means "no stale
+    info" — nothing is treated as delisted."""
+
+    stale: dict[str, tuple[pd.Timestamp, int]]
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.stale = {}
+
+
+def _fetch_daily_closes(tickers: list[str]) -> "MasterCloses | None":
     """Batch-download daily closes for the master's tickers.
 
-    Returns {ticker: close series} (absent/empty tickers omitted), or None when
-    the batch download failed entirely. Monkeypatched in tests.
+    Returns {ticker: close series} (absent/empty tickers omitted) as a
+    ``MasterCloses`` carrying the stale names, or None when the batch download
+    failed entirely. Monkeypatched in tests.
     """
     from main import _yf_download_with_retry  # local import: main imports us
 
@@ -48,9 +65,12 @@ def _fetch_daily_closes(tickers: list[str]) -> dict[str, pd.Series] | None:
             continue
         if series.notna().any():
             raw[t] = series
-    raw = drop_stale_series(raw)
+    stale: dict[str, tuple[pd.Timestamp, int]] = {}
+    raw = drop_stale_series(raw, stale_out=stale)
     filled = fill_missing_last_close(raw)
-    return {t: s.dropna() for t, s in filled.items() if s.notna().any()}
+    out = MasterCloses({t: s.dropna() for t, s in filled.items() if s.notna().any()})
+    out.stale = stale
+    return out
 
 
 # A trailing NaN Close for ONE session is Yahoo's daily-row lag (filled from
@@ -59,7 +79,10 @@ def _fetch_daily_closes(tickers: list[str]) -> dict[str, pd.Series] | None:
 _MAX_LAG_SESSIONS = 1
 
 
-def drop_stale_series(closes: dict[str, pd.Series]) -> dict[str, pd.Series]:
+def drop_stale_series(
+    closes: dict[str, pd.Series],
+    stale_out: dict[str, tuple[pd.Timestamp, int]] | None = None,
+) -> dict[str, pd.Series]:
     """Leave out tickers whose last valid close is more than
     ``_MAX_LAG_SESSIONS`` sessions behind the batch's latest session.
 
@@ -70,8 +93,9 @@ def drop_stale_series(closes: dict[str, pd.Series]) -> dict[str, pd.Series]:
     The batch frame's index is the union of every ticker's dates, so a name
     that stopped trading carries trailing NaN rows; a plain ``dropna`` then
     evaluates SMA50 / EMA20 on its last real (weeks-old) closes — QRVO and
-    FBRX 2026-10-17. Excluded names are reported and, like any ticker with
-    missing data, KEPT in the master by the callers.
+    FBRX 2026-10-17. Excluded names are reported, and recorded in
+    ``stale_out`` as ``(last close date, sessions behind)`` when given; only
+    ``prune_us_master``'s delisting rule removes any of them from the master.
     """
     if not closes:
         return closes
@@ -81,18 +105,74 @@ def drop_stale_series(closes: dict[str, pd.Series]) -> dict[str, pd.Series]:
     out: dict[str, pd.Series] = {}
     for t, s in closes.items():
         last = s.last_valid_index()
-        if last is not None and int((session_index > last).sum()) > _MAX_LAG_SESSIONS:
+        lag = int((session_index > last).sum()) if last is not None else 0
+        if lag > _MAX_LAG_SESSIONS:
             stale[t] = pd.Timestamp(last)
+            if stale_out is not None:
+                stale_out[t] = (pd.Timestamp(last), lag)
         else:
             out[t] = s
     if stale:
         logger.warning(
             f"[{_LABEL}] no daily bar for >{_MAX_LAG_SESSIONS} session(s) for "
             f"{len(stale)} ticker(s) — delisted/halted? excluded from the SMA50/EMA20 "
-            "checks, KEPT in the master: "
+            "checks: "
             + ", ".join(f"{t} (last {d.date()})" for t, d in sorted(stale.items()))
         )
     return out
+
+
+def _confirm_no_new_bars(
+    tickers: list[str], last_seen: dict[str, pd.Timestamp]
+) -> list[str]:
+    """Re-download ``tickers`` on their own and return those that still have
+    no close after ``last_seen[t]`` — the check before a stale name leaves the
+    master, so one truncated series in the big batch cannot delete a live
+    ticker. A failed download confirms nothing (returns []). A ticker with no
+    data at all in a frame that came back is confirmed (Yahoo: "possibly
+    delisted"). Monkeypatched in tests."""
+    from main import _yf_download_with_retry  # local import: main imports us
+
+    if not tickers:
+        return []
+    data = _yf_download_with_retry(
+        tickers, period="6mo", progress=False, group_by="ticker", threads=False
+    )
+    if data is None or data.empty:
+        return []
+    flat = not isinstance(data.columns, pd.MultiIndex)
+    confirmed = []
+    for t in tickers:
+        try:
+            closes = (data["Close"] if flat else data[t]["Close"]).dropna()
+        except (KeyError, IndexError):
+            closes = pd.Series(dtype=float)
+        if closes.empty or pd.Timestamp(closes.index[-1]) <= last_seen[t]:
+            confirmed.append(t)
+    return confirmed
+
+
+def _find_delisted(
+    closes: dict[str, pd.Series], master: list[str], after_sessions: int
+) -> list[str]:
+    """Master names ``drop_stale_series`` found ≥ ``after_sessions`` sessions
+    behind, confirmed by ``_confirm_no_new_bars``. Off when ``after_sessions``
+    is 0 or the closes carry no stale info (plain dict)."""
+    stale = getattr(closes, "stale", None) or {}
+    if after_sessions <= 0 or not stale:
+        return []
+    in_master = set(master)
+    cands = sorted(t for t, (_, lag) in stale.items() if lag >= after_sessions and t in in_master)
+    if not cands:
+        return []
+    confirmed = _confirm_no_new_bars(cands, {t: stale[t][0] for t in cands})
+    kept = [t for t in cands if t not in confirmed]
+    if kept:
+        logger.warning(
+            f"[{_LABEL}] stale for >= {after_sessions} sessions but the recheck "
+            f"found newer bars (or failed) — kept: {','.join(kept)}"
+        )
+    return sorted(confirmed)
 
 
 def _fetch_intraday_last_close(tickers: list[str], day: date) -> dict[str, float]:
@@ -246,14 +326,25 @@ def prune_us_master(
         return []
 
     drops = find_sma50_drops(closes, consecutive_days=consecutive_days)
-    missing = len(tickers) - len(closes)
+    delisted = _find_delisted(
+        closes, tickers, int(cfg.get("delisted_after_sessions", 0))
+    )
+    if delisted:
+        stale = closes.stale
+        logger.info(
+            f"[{_LABEL}] delisted (no daily bar for >= "
+            f"{int(cfg['delisted_after_sessions'])} sessions, rechecked) — "
+            "removed from the master: "
+            + ", ".join(f"{t} (last {stale[t][0].date()})" for t in delisted)
+        )
+    missing = len(tickers) - len(closes) - len(delisted)
     logger.info(
         f"[{_LABEL}] checked {len(closes)}/{len(tickers)} tickers "
         f"(missing data: {missing}, kept) | close < SMA50 for "
         f"{consecutive_days} consecutive day(s) + still declining: {len(drops)}"
         + (f" -> {','.join(drops)}" if drops else "")
     )
-    _prune_master(seen_path, drops, label=_LABEL)
+    _prune_master(seen_path, sorted(set(drops) | set(delisted)), label=_LABEL)
     if pruned_path is not None:
         _write_pruned_list(pruned_path, drops)
     return drops
