@@ -247,3 +247,45 @@ def notify_on_battery(
         marker.write_text(f"{mode}\n")
     except OSError as e:
         logger.warning(f"[Notify] could not write {marker.name}: {e}")
+
+
+def notify_finviz_broken(
+    mode: str, detail: str, config: dict, output_dir: Path, today: str
+) -> None:
+    """Push a high-priority ntfy alert when the Finviz scraper looks broken.
+
+    `run_screener` reads Finviz's NoResults as a valid empty list, so a
+    broken scraper looks exactly like a quiet market (2026-10-20: the
+    Finviz redesign emptied all US EOD lists; 2026-07-23 the finviz 2.0.0
+    row shift did the same), and the redesigned page silently ignores a
+    filter code it does not know. `detail` says which (see
+    `main._alert_if_finviz_broken`). Fires **once per day** — marker
+    `state/finviz_broken_alerted_<today>.txt`, written only after a
+    successful POST so a failed push is retried by a rerun.
+    """
+    notify_cfg = config.get("notify") or {}
+    if not notify_cfg.get("enabled", False):
+        return
+
+    topic = notify_cfg.get("ntfy_topic")
+    if not topic:
+        logger.warning("[Notify] ntfy_topic missing for Finviz-broken alert")
+        return
+
+    marker = output_dir / "state" / f"finviz_broken_alerted_{today}.txt"
+    try:
+        if marker.exists():
+            return
+    except OSError:
+        pass
+
+    server = notify_cfg.get("ntfy_server", "https://ntfy.sh").rstrip("/")
+    title = "Finviz scraper broken? US EOD lists affected"
+    body = f"{mode}: {detail}"
+    if not _ntfy_post(server, topic, title, body, priority="high"):
+        return
+    try:
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text(f"{mode}\n")
+    except OSError as e:
+        logger.warning(f"[Notify] could not write {marker.name}: {e}")

@@ -314,9 +314,11 @@ filters = ["ind_stocksonly","cap_smallover","sh_avgvol_o500","sh_price_o20","ta_
 name = "Leaders YTD +100%"
 filters = ["ind_stocksonly","cap_smallover","sh_avgvol_o500","sh_price_o20","ta_perf_ytd100o","ta_sma200_pa","ta_sma50_pa"]
 
+# 52W 原为 +150% (ta_perf_52w150o)。2026-10-20 Finviz 改版后它不是预设值、被静默
+# 忽略(返回全市场)，ta_perf 又没有自定义区间 → 改用最接近的预设 +100%。
 [[leaders]]
-name = "Leaders 52W +150%"
-filters = ["ind_stocksonly","cap_smallover","sh_avgvol_o500","sh_price_o20","ta_perf_52w150o","ta_sma200_pa","ta_sma50_pa"]
+name = "Leaders 52W +100%"
+filters = ["ind_stocksonly","cap_smallover","sh_avgvol_o500","sh_price_o20","ta_perf_52w100o","ta_sma200_pa","ta_sma50_pa"]
 
 # Shorts: 基于 Kristjan Kullamägi 的做空筛选，输出 Shorts.txt。
 # 日均量 ≥ 500K (sh_avgvol_o500; 2026-10-10 前 1M)。
