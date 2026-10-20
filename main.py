@@ -21,7 +21,7 @@ import pandas as pd
 import yfinance as yf
 from finviz import get_stock
 from finviz.helper_functions.error_handling import NoResults
-from finviz.screener import Screener
+from finviz_screener import FinvizFilterError, Screener  # finviz 2.0.0's Screener can't parse the 2026-10 redesign
 import finviz_timeout  # noqa: F401  — patches finviz sync HTTP (timeout + bounded retries)
 import openpyxl
 
@@ -38,7 +38,12 @@ from tv_sync import sync_to_tv
 from cleanup import cleanup_old_outputs
 from hk_eod import fetch_hkex_equities, filter_hk_shorts, run_hk_eod
 from net_ready import wait_for_network
-from notify import notify_morning_gap, notify_on_battery, notify_opend_down
+from notify import (
+    notify_finviz_broken,
+    notify_morning_gap,
+    notify_on_battery,
+    notify_opend_down,
+)
 from power import power_status
 from rs_rating import fetch_rs_table, filter_by_rs
 
@@ -159,8 +164,9 @@ def _is_network_error(exc: BaseException) -> bool:
         # finviz_timeout calls raise_for_status(): a 4xx (bad filter, Elite
         # page cap) is deterministic — retrying only burns the wait. 5xx is
         # an upstream blip and stays retriable.
+        # 429 is Finviz's rate limit, transient like a 5xx.
         status = getattr(getattr(exc, "response", None), "status_code", None)
-        return status is None or status >= 500
+        return status is None or status >= 500 or status == 429
     if isinstance(exc, OSError):
         return True
     from finviz.helper_functions.error_handling import ConnectionTimeout
@@ -823,7 +829,79 @@ def _finviz_row_shift(rows: list[dict]) -> bool:
     )
 
 
+class _ScreenTally:
+    """Screens / rows / errors / unknown filter codes of every `run_screener`
+    call since `reset()`."""
+
+    def __init__(self) -> None:
+        self.reset()
+
+    def reset(self) -> None:
+        self.screens = 0
+        self.rows = 0
+        self.errors = 0
+        self.unknown_filters: set[str] = set()
+
+
+_finviz_tally = _ScreenTally()
+
+# us-eod runs ~13 Finviz screens; a broken scraper empties all of them while
+# reading as a quiet market (2026-10-20 redesign, 2026-07-23 row shift).
+_FINVIZ_EMPTY_MIN_SCREENS = 5
+
+
+def _alert_if_finviz_broken(
+    mode: str, config: dict, output_dir: Path, today: str
+) -> None:
+    """ERROR + ntfy (once per day) when, since the last
+    `_finviz_tally.reset()`, every Finviz screen came back empty or a
+    config filter code was rejected as unknown. Never raises, never
+    changes the run."""
+    try:
+        t = _finviz_tally
+        problems = []
+        if t.screens >= _FINVIZ_EMPTY_MIN_SCREENS and t.rows == 0:
+            problems.append(
+                f"all {t.screens} Finviz screens returned 0 rows ({t.errors} "
+                "raised) — scraper likely broken (page redesign?), not a quiet "
+                "market; rerun us-eod once fixed"
+            )
+        if t.unknown_filters:
+            problems.append(
+                "Finviz no longer knows filter code(s) "
+                f"{', '.join(sorted(t.unknown_filters))} — those groups were "
+                "skipped; update config.toml"
+            )
+        if not problems:
+            return
+        detail = " | ".join(problems)
+        logger.error(f"[Finviz] {detail}")
+        notify_finviz_broken(mode, detail, config, output_dir, today)
+    except Exception as e:
+        logger.warning(f"[Notify] Finviz-broken check failed: {e}")
+
+
 def run_screener(
+    filters: list[str],
+    signal: str | None = None,
+    capture_caps: dict[str, float] | None = None,
+) -> list[str]:
+    """`_run_screener`, counted in `_finviz_tally`."""
+    _finviz_tally.screens += 1
+    try:
+        tickers = _run_screener(filters, signal, capture_caps)
+    except FinvizFilterError as e:
+        _finviz_tally.errors += 1
+        _finviz_tally.unknown_filters.update(e.codes)
+        raise
+    except Exception:
+        _finviz_tally.errors += 1
+        raise
+    _finviz_tally.rows += len(tickers)
+    return tickers
+
+
+def _run_screener(
     filters: list[str],
     signal: str | None = None,
     capture_caps: dict[str, float] | None = None,
@@ -831,10 +909,11 @@ def run_screener(
     """Run a Finviz screener and return list of tickers. Empty result is
     a valid outcome (returns []) — Finviz raises NoResults in that case.
 
-    If ``capture_caps`` is provided, the screener uses ``table="Ownership"``
-    so each row carries a "Market Cap" column; the parsed cap (USD) is
-    stored in ``capture_caps[ticker]``. Used to feed the US IPO ladder
-    after the long-side pipeline.
+    If ``capture_caps`` is provided, the parsed "Market Cap" (USD) of each
+    row is stored in ``capture_caps[ticker]`` (``table="Ownership"`` is
+    still passed; `finviz_screener.Screener` ignores it — its rows always
+    carry the cap). Used to feed the US IPO ladder after the long-side
+    pipeline.
     """
     kwargs: dict = {"filters": filters}
     if signal:
@@ -2453,6 +2532,7 @@ def main() -> int:
     if args.mode in ("eod", "us-eod"):
         _alert_if_opend_down(args.mode, config, output_dir, today)
         _alert_if_on_battery(args.mode, config, output_dir, today)
+        _finviz_tally.reset()
         # --- Cross-day master 'seen' files (per market) ---
         # Each EOD group's daily output is filtered against this master so a
         # ticker only ever appears once across all days/groups. Master grows
@@ -2713,6 +2793,9 @@ def main() -> int:
                     logger.info("[RS] Condition not met (SPY/QQQ not both down >=1.0%), skipping")
             except Exception as e:
                 logger.warning(f"[RS] Failed: {e}")
+
+        # Every Finviz screen of the run (Longs, Leaders, Shorts, RS) is done.
+        _alert_if_finviz_broken(args.mode, config, output_dir, today)
 
         # --- Cross-group dedup: priority Longs > Leaders ---
         # A ticker firing in both Longs and Leaders is kept only in Longs.

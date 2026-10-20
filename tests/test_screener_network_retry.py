@@ -84,3 +84,20 @@ def test_check_market_down_retries_connection_error(monkeypatch):
     monkeypatch.setattr(main, "get_stock", fake_get_stock)
     assert main.check_market_down() is True
     assert calls["n"] == 3  # SPY failed once, then SPY + QQQ
+
+
+def test_run_screener_retries_http_429(monkeypatch):
+    """429 is Finviz's rate limit on the redesigned screener — transient."""
+    calls = {"n": 0}
+
+    def fake_screener(**kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            resp = requests.Response()
+            resp.status_code = 429
+            raise requests.exceptions.HTTPError("429 Too Many Requests", response=resp)
+        return _FakeScreener(_rows("NVDA"))
+
+    monkeypatch.setattr(main, "Screener", fake_screener)
+    assert main.run_screener(["f1"]) == ["NVDA"]
+    assert calls["n"] == 2

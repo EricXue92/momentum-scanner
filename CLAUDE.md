@@ -440,5 +440,20 @@ prev_close_price) / prev_close_price`. `pre_/after_change_rate` do exist.
   it WARNs "still truncated"). Keep every Screener call inside `run_screener`
   — it (and `check_market_down`) also retries transient network errors via
   `_retry_on_network_error` (DNS/reset/5xx/finviz timeout/"Too many
-  requests"; a Finviz 4xx is deterministic and NOT retried). Nothing else
-  needs its own wrapper.
+  requests"; a Finviz 4xx is deterministic and NOT retried, except 429).
+  Nothing else needs its own wrapper.
+- **Finviz redesign (2026-10-20):** the screener moved to `/screener/stocks`
+  with rows as SSR JSON; finviz 2.0.0 parsed nothing → NoResults → every US
+  EOD list empty, silently. `main.Screener` is now
+  `finviz_screener.Screener` (same `.data` / `._total_rows` / NoResults
+  surface; 20 rows/page, `r=` paging to the 1000 cap; Market Cap from the
+  overview row, `table` ignored). A page with no rows block raises
+  `FinvizLayoutError`; a filter code the page does not define raises
+  `FinvizFilterError` — the new site **silently ignores** unknown codes
+  (`ta_perf_52w150o` returned the whole market; Leaders 52W is now `+100%`,
+  `ta_perf` has no custom range). `ind_stocksonly` is implied by the path
+  and whitelisted. `finviz.get_stock` (market check) still uses the library.
+  **Guard:** `run_screener` counts into `_finviz_tally` (reset at us-eod
+  start); after the RS section `_alert_if_finviz_broken` logs ERROR + ntfys
+  (once/day, `state/finviz_broken_alerted_<date>.txt`, 2-day cleanup) when
+  ≥ 5 screens all returned 0 rows or any code was rejected. Alert only.
