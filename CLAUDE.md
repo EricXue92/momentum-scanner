@@ -125,7 +125,9 @@ Output: `output/TV/{US,HK}/` (TradingView, comma-sep) mirrored to
   restores the old basis. Separately, the **ADR% floor relaxes for big
   gappers**: gap ≥ `adr_bypass_gap_percent` → floor drops from
   `min_adr_percent` to `adr_bypass_min_percent` (US: 10% → 3.0; HK wired but
-  off — its base is already 3.0). **EOD carries the same bypass for US Longs
+  off — its base is already 3.0). Since 2026-10-21 US morning-gap overrides
+  `[morning_gap].min_adr_percent = 3.0` (was inherited 4.0 — SPCX +8% pre at
+  ADR% 3.97), so the US bypass is currently a no-op too; EOD stays at 4.0. **EOD carries the same bypass for US Longs
   `the_setup` + `earnings_gap` only** (per-group `[[longs]]` keys
   `adr_bypass_gap_percent` / `adr_bypass_min_percent`, 10% → 3.0; gap =
   latest completed daily bar's Open vs prior Close, `_daily_gaps`) — CRM
