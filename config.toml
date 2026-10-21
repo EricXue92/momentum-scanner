@@ -366,10 +366,14 @@ sma_use_live_price = true
 # gap ≥ 此值时豁免 SMA50 (SMA200 永不豁免); 0 = 关闭豁免。
 sma_bypass_gap_percent = 10.0
 # ADR% 默认继承 [settings] (min_adr_percent / adr_days); 可在此覆盖。
+# 2026-10-21 起覆盖为 3.0 (原继承 4.0): SPCX 盘前 +8% 但 ADR% 3.97 被拦。
+# EOD 各组仍是 [settings] 的 4.0。
+min_adr_percent = 3.0
 # 大 gap ADR% 旁路: gap ≥ adr_bypass_gap_percent 时, ADR% 门槛放宽到
 # adr_bypass_min_percent (低波动大盘股财报 gap — 如 SNOW 2026-09-03 盘前 +5%
 # 但 ADR% 3.68 < 4.0 — 否则永远报不出来)。gap_percent 设 0 关闭旁路;
 # min_percent 设 0 = gap 够大即完全豁免 ADR%。
+# 基础门槛已是 3.0, 旁路目前等于不生效; 保留以便基础门槛调回时继续兜底。
 adr_bypass_gap_percent = 10.0
 adr_bypass_min_percent = 3.0
 
