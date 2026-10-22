@@ -86,8 +86,10 @@ Output: `output/TV/{US,HK}/` (TradingView, comma-sep) mirrored to
   daily row with OHLV but NaN Close for hours (all tickers, 2026-09-22 — CF
   was kept one day stale). The prune fills such a row from one batch of that
   day's 1h bars (last bar's close), warns, and only falls back to the stale
-  day when intraday has nothing either. The rest of us-eod still `dropna`s
-  and runs a day stale on such days.
+  day when intraday has nothing either. The ETF RS ranking gets the same fill
+  (`us_rs_3m.fetch_us_klines_yf(fill_last_close=True)`, default off — the
+  cloud RS jobs are unchanged; 2026-10-22 it ranked on 10-20, all markers
+  `=`). The rest of us-eod still `dropna`s and runs a day stale on such days.
 - **EMA20 first-break list (US, read-only):** `ema20_break.py`
   (`[ema20_break]`) runs right before the SMA50 prune over the same master
   (`main._run_us_master_lists` fetches the master's 6mo closes ONCE and

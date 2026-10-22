@@ -234,12 +234,28 @@ def _retry_sparse_in_batch(data, tickers: list[str], period: str, min_rows: int)
     return _impl(data, tickers, period=period, min_rows=min_rows)
 
 
+def _fill_missing_last_close(closes: dict[str, pd.Series]) -> dict[str, pd.Series]:
+    """Indirection layer so tests can monkeypatch this attribute.
+
+    Lazily delegates to ``sma50_prune.fill_missing_last_close`` (it imports
+    main, which imports us). Soft: a failed intraday fetch returns the input
+    unchanged, so the trailing NaN row is dropped as before (one day stale).
+    """
+    from sma50_prune import fill_missing_last_close
+    try:
+        return fill_missing_last_close(closes, label="US RS 3M")
+    except Exception as e:
+        logger.warning(f"[US RS 3M] intraday Close fill failed, latest day left stale: {e}")
+        return closes
+
+
 def fetch_us_klines_yf(
     tickers: list[str],
     period: str = "6mo",
     batch_size: int = 100,
     include_ohlcv: bool = False,
     recover: bool = True,
+    fill_last_close: bool = False,
 ) -> dict[str, pd.DataFrame]:
     """Batch-download daily closes (or full OHLCV) for US tickers via yfinance.
 
@@ -269,13 +285,20 @@ def fetch_us_klines_yf(
       one-batch call (SPY benchmark, IPO candidates, the rs-line audit) had
       no second chance — 2026-10-17 the audit scored 13/91 and called the
       other 78 "insufficient history".
+
+    ``fill_last_close`` (default off): a latest daily row that Yahoo published
+    with a NaN Close is filled from that day's 1h bars
+    (``sma50_prune.fill_missing_last_close``) instead of being dropped. The
+    ETF RS ranking turns it on — 2026-10-22 its 10:00 run (and a rerun at
+    11:42) ranked on 10-20 closes because every 10-21 Close was NaN, so all
+    48 rank markers read ``=``.
     """
     if not tickers:
         return {}
 
     result: dict[str, pd.DataFrame] = {}
     t0 = time.monotonic()
-    lost = _fetch_us_batches(tickers, period, batch_size, include_ohlcv, result)
+    lost = _fetch_us_batches(tickers, period, batch_size, include_ohlcv, result, fill_last_close)
     elapsed = time.monotonic() - t0
     if recover and lost and elapsed > _RECOVERY_MAX_ELAPSED_SEC:
         logger.warning(
@@ -288,7 +311,7 @@ def fetch_us_klines_yf(
             f"batches — throttle cooldown {_RECOVERY_COOLDOWN_SEC:.0f}s, one recovery pass"
         )
         time.sleep(_RECOVERY_COOLDOWN_SEC)
-        still = _fetch_us_batches(lost, period, batch_size, include_ohlcv, result)
+        still = _fetch_us_batches(lost, period, batch_size, include_ohlcv, result, fill_last_close)
         logger.info(
             f"[US RS 3M] recovery pass: {len(lost) - len(still)}/{len(lost)} recovered"
             + (f"; still missing: {','.join(still[:20])}" if still else "")
@@ -310,6 +333,7 @@ def _fetch_us_batches(
     batch_size: int,
     include_ohlcv: bool,
     result: dict[str, pd.DataFrame],
+    fill_last_close: bool = False,
 ) -> list[str]:
     """One pass of ``fetch_us_klines_yf``: fill ``result`` in place and return
     the tickers that a failed or throttled batch left without any data (the
@@ -343,12 +367,22 @@ def _fetch_us_batches(
         # N*batch_size+1 universe) comes back with flat field columns —
         # _yf_download_with_retry flattens it — so there is no batch_data[t].
         flat = not isinstance(batch_data.columns, pd.MultiIndex)
+        frames: dict[str, pd.DataFrame] = {}
+        raw: dict[str, pd.Series] = {}
         for t in batch:
             try:
                 frame = batch_data if flat and len(batch) == 1 else batch_data[t]
-                closes = frame["Close"].dropna()
+                series = frame["Close"]
+                if not series.notna().any():
+                    continue
             except (KeyError, TypeError, ValueError, AttributeError):
                 continue
+            frames[t], raw[t] = frame, series
+        if fill_last_close and raw:
+            raw = _fill_missing_last_close(raw)
+        for t, series in raw.items():
+            frame = frames[t]
+            closes = series.dropna()
             if closes.empty:
                 continue
             if include_ohlcv:

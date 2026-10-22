@@ -286,6 +286,67 @@ def test_fetch_us_klines_yf_trailing_batch_of_one_is_kept(monkeypatch):
     assert sorted(klines) == ["AAA", "BBB", "CCC"]
 
 
+def _fake_download_nan_last_close(tickers, **kwargs):
+    """2026-10-22: Yahoo's latest daily row had OHLV but a NaN Close for
+    every ticker."""
+    frame = _fake_download_runtime_shape(tickers, **kwargs)
+    if isinstance(frame.columns, pd.MultiIndex):
+        for t in tickers:
+            frame.loc[frame.index[-1], (t, "Close")] = float("nan")
+    else:
+        frame.loc[frame.index[-1], "Close"] = float("nan")
+    return frame
+
+
+def test_fetch_us_klines_yf_fill_last_close(monkeypatch):
+    import sma50_prune
+    import us_rs_3m
+
+    monkeypatch.setattr("us_rs_3m._yf_download_with_retry", _fake_download_nan_last_close, raising=False)
+    monkeypatch.setattr("us_rs_3m._retry_sparse_in_batch", lambda *a, **kw: None, raising=False)
+    calls = []
+
+    def fake_intraday(tickers, day):
+        calls.append((sorted(tickers), day))
+        return {"XLE": 70.0}  # SPY has no intraday bar either -> stays one day stale
+
+    monkeypatch.setattr(sma50_prune, "_fetch_intraday_last_close", fake_intraday)
+    klines = us_rs_3m.fetch_us_klines_yf(
+        ["XLE", "SPY"], period="1y", include_ohlcv=True, fill_last_close=True,
+    )
+    assert calls == [(["SPY", "XLE"], pd.Timestamp("2026-05-21").date())]
+    assert len(klines["XLE"]) == 80 and klines["XLE"]["close"].iloc[-1] == 70.0
+    assert klines["XLE"]["volume"].iloc[-1] == 100.0  # OHLV of the filled row kept
+    assert len(klines["SPY"]) == 79
+
+
+def test_fetch_us_klines_yf_nan_last_close_dropped_by_default(monkeypatch):
+    import sma50_prune
+    import us_rs_3m
+
+    monkeypatch.setattr("us_rs_3m._yf_download_with_retry", _fake_download_nan_last_close, raising=False)
+    monkeypatch.setattr("us_rs_3m._retry_sparse_in_batch", lambda *a, **kw: None, raising=False)
+    monkeypatch.setattr(sma50_prune, "_fetch_intraday_last_close",
+                        lambda *a: (_ for _ in ()).throw(AssertionError("must not fetch intraday")))
+    klines = us_rs_3m.fetch_us_klines_yf(["SPY"], period="6mo")
+    assert len(klines["SPY"]) == 79
+
+
+def test_fetch_us_klines_yf_fill_failure_is_soft(monkeypatch):
+    import sma50_prune
+    import us_rs_3m
+
+    monkeypatch.setattr("us_rs_3m._yf_download_with_retry", _fake_download_nan_last_close, raising=False)
+    monkeypatch.setattr("us_rs_3m._retry_sparse_in_batch", lambda *a, **kw: None, raising=False)
+
+    def boom(tickers, day):
+        raise RuntimeError("yahoo down")
+
+    monkeypatch.setattr(sma50_prune, "_fetch_intraday_last_close", boom)
+    klines = us_rs_3m.fetch_us_klines_yf(["SPY"], period="6mo", fill_last_close=True)
+    assert len(klines["SPY"]) == 79
+
+
 # --- bar-based weights (1M weekly ladder) ---
 
 
