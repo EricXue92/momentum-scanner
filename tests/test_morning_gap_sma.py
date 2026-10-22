@@ -131,12 +131,39 @@ def test_ticker_missing_from_gaps_takes_strict_path():
     assert kept == []
 
 
-def test_insufficient_history_still_dropped():
-    """Under 200 completed bars → dropped, regardless of live price or gap."""
-    data = _frame("NEW", [100.0] * 60 + [500.0])
+def test_insufficient_history_for_sma50_still_dropped():
+    """Under 50 completed bars → dropped, regardless of live price or gap."""
+    data = _frame("NEW", [100.0] * 40 + [500.0])
     kept = _filter_sma_trend(
         ["NEW"], data, TODAY, single=False,
         live_prices={"NEW": 500.0}, gaps={"NEW": 50.0}, bypass_gap_pct=10.0,
+    )
+    assert kept == []
+
+
+def test_short_history_gates_on_sma50_only():
+    """SPCX 2026-10-21: 90 bars, no SMA200 — SMA50 alone decides."""
+    data = _frame("SPCX", [100.0] * 90 + [110.0])
+    kept = _filter_sma_trend(
+        ["SPCX"], data, TODAY, single=False, live_prices={"SPCX": 110.0},
+    )
+    assert kept == ["SPCX"]
+
+
+def test_short_history_below_sma50_dropped():
+    data = _frame("SPCX", [100.0] * 90 + [95.0])
+    kept = _filter_sma_trend(
+        ["SPCX"], data, TODAY, single=False, live_prices={"SPCX": 95.0},
+    )
+    assert kept == []
+
+
+def test_short_history_gap_bypass_does_not_waive_sma50():
+    """Without SMA200, SMA50 is the only floor — a big gap must not waive it."""
+    data = _frame("SPCX", [100.0] * 90 + [95.0])
+    kept = _filter_sma_trend(
+        ["SPCX"], data, TODAY, single=False,
+        live_prices={"SPCX": 95.0}, gaps={"SPCX": 15.0}, bypass_gap_pct=10.0,
     )
     assert kept == []
 

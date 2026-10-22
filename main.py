@@ -1927,9 +1927,9 @@ def _filter_sma_trend(
     bypass_gap_pct: float | None = None,
 ) -> list[str]:
     """Keep tickers trading above both SMA50 and SMA200. Replaces Finviz
-    `ta_sma50_pa`/`ta_sma200_pa` for the Futu-discovery path. Strict: tickers
-    with insufficient history (< sma_long bars after trimming today's partial
-    bar) are dropped.
+    `ta_sma50_pa`/`ta_sma200_pa` for the Futu-discovery path. A ticker with
+    fewer than `sma_long` completed bars (a recent IPO) is gated on SMA50
+    alone, with no gap bypass; under `sma_short` bars it is dropped.
 
     The moving averages are always computed from completed bars — a half-formed
     daily bar must never enter a 50/200-day mean. Only the *comparison basis*
@@ -1960,15 +1960,18 @@ def _filter_sma_trend(
             else:
                 closes = daily_data[ticker]["Close"].dropna()
             closes = _trim_today(closes, market_open, today_date)
-            if len(closes) < sma_long:
+            if len(closes) < sma_short:
                 logger.warning(
-                    f"  {ticker}: insufficient daily bars for SMA{sma_long} "
-                    f"({len(closes)}<{sma_long}), dropping"
+                    f"  {ticker}: insufficient daily bars for SMA{sma_short} "
+                    f"({len(closes)}<{sma_short}), dropping"
                 )
                 continue
+            # Too young for SMA200 (SPCX 2026-10-21, 90 bars): SMA50 becomes
+            # the only floor, so the gap bypass must not waive it.
+            has_long = len(closes) >= sma_long
             last_close = float(closes.iloc[-1])
             sma_s = float(closes.iloc[-sma_short:].mean())
-            sma_l = float(closes.iloc[-sma_long:].mean())
+            sma_l = float(closes.iloc[-sma_long:].mean()) if has_long else None
 
             ref, basis = last_close, "close"
             live = (live_prices or {}).get(ticker)
@@ -1982,13 +1985,19 @@ def _filter_sma_trend(
 
             gap = (gaps or {}).get(ticker)
             bypass = (
-                bypass_gap_pct is not None
+                has_long
+                and bypass_gap_pct is not None
                 and bypass_gap_pct > 0
                 and gap is not None
                 and gap >= bypass_gap_pct
             )
 
-            if ref < sma_l:
+            if not has_long:
+                logger.info(
+                    f"  {ticker}: only {len(closes)} daily bars (<{sma_long}), "
+                    f"no SMA{sma_long} — gating on SMA{sma_short} alone"
+                )
+            elif ref < sma_l:
                 logger.info(
                     f"  {ticker}: {basis} {ref:.2f} below SMA{sma_long}={sma_l:.2f}"
                     f"{' (gap bypass does not waive SMA200)' if bypass else ''}"

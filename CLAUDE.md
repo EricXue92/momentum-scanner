@@ -123,7 +123,10 @@ Output: `output/TV/{US,HK}/` (TradingView, comma-sep) mirrored to
   averages themselves still come from `_trim_today`-trimmed completed bars;
   only the comparison basis moved. `sma_bypass_gap_percent` (in `[morning_gap]`
   US / `[hk_morning_gap]` HK) waives **SMA50 only** for big gappers — SMA200 is
-  never waived. Both knobs are per-market config; `sma_use_live_price = false`
+  never waived. **Recent IPOs** (< 200 completed bars, ≥ 50) skip SMA200 and
+  gate on SMA50 alone, which then can NOT be waived by the gap bypass (it is
+  the only floor); < 50 bars → dropped. Since 2026-10-21 (SPCX, 90 bars, was
+  dropped as "insufficient daily bars for SMA200"). Both knobs are per-market config; `sma_use_live_price = false`
   restores the old basis. Separately, the **ADR% floor relaxes for big
   gappers**: gap ≥ `adr_bypass_gap_percent` → floor drops from
   `min_adr_percent` to `adr_bypass_min_percent` (US: 10% → 3.0; HK wired but
