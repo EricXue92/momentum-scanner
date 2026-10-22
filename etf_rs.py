@@ -61,8 +61,10 @@ _LEGACY_STEMS: dict[str, tuple[str, ...]] = {_STEM: ("ETF_rs",)}
 def _fetch_klines(tickers: list[str]) -> dict[str, pd.DataFrame]:
     """1y daily closes via the shared retrying yfinance fetcher. The ranking
     itself only needs the last 64 bars; the rest is the trend chart's
-    history (``etf_rs_chart``, ~190 scorable days). Monkeypatched in tests."""
-    return us_rs_3m.fetch_us_klines_yf(tickers, period="1y")
+    history (``etf_rs_chart``, ~190 scorable days). A latest row with a NaN
+    Close (Yahoo lag) is filled from intraday bars rather than dropped, so
+    the ranking is not silently a day stale. Monkeypatched in tests."""
+    return us_rs_3m.fetch_us_klines_yf(tickers, period="1y", fill_last_close=True)
 
 
 def _holdings(cfg_holdings) -> dict[str, str]:

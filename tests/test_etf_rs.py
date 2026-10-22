@@ -357,3 +357,17 @@ def test_read_previous_ranks_3m_falls_back_to_legacy_stem(tmp_path):
     assert etf_rs.read_previous_ranks(tmp_path, date(2026, 9, 15)) == {"BBB": 1, "AAA": 2}
     (d / "2026_09_14_ETF_rs_3m.txt").write_text("1. AAA - 甲\n")
     assert etf_rs.read_previous_ranks(tmp_path, date(2026, 9, 15)) == {"AAA": 1}
+
+
+def test_fetch_klines_fills_nan_last_close(monkeypatch):
+    # 2026-10-22: every 10-21 Close was NaN at 10:00 HKT and the ranking ran
+    # on 10-20 closes; the ETF fetch must ask for the intraday fill.
+    seen = {}
+
+    def fake_fetch(tickers, **kw):
+        seen.update(kw)
+        return {}
+
+    monkeypatch.setattr(etf_rs.us_rs_3m, "fetch_us_klines_yf", fake_fetch)
+    etf_rs._fetch_klines(["AAA", "SPY"])
+    assert seen.get("fill_last_close") is True and seen.get("period") == "1y"

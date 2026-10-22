@@ -202,6 +202,7 @@ def _fetch_intraday_last_close(tickers: list[str], day: date) -> dict[str, float
 def fill_missing_last_close(
     closes: dict[str, pd.Series],
     fetch_intraday=None,
+    label: str = _LABEL,
 ) -> dict[str, pd.Series]:
     """Patch a trailing NaN daily Close from that day's intraday bars.
 
@@ -212,7 +213,8 @@ def fill_missing_last_close(
     NaN are grouped by date and filled from one 1h-bar batch per date; a
     ticker the intraday fetch cannot cover loses that row (evaluated one day
     stale, as before). Everything is logged as a warning so a stale-data day
-    is visible in the EOD log.
+    is visible in the EOD log. ``label`` prefixes that warning — the ETF RS
+    ranking reuses this via ``us_rs_3m.fetch_us_klines_yf(fill_last_close=)``.
     """
     fetch = fetch_intraday or _fetch_intraday_last_close
     by_day: dict[date, list[str]] = {}
@@ -233,7 +235,7 @@ def fill_missing_last_close(
                 out[t] = out[t].iloc[:-1]  # no intraday bar: evaluate one day stale
         unfilled = [t for t in tickers if t not in got]
         logger.warning(
-            f"[{_LABEL}] daily Close missing for {len(tickers)} ticker(s) on {day} "
+            f"[{label}] daily Close missing for {len(tickers)} ticker(s) on {day} "
             f"(Yahoo lag); filled {len(got)} from intraday last bar"
             + (f", {len(unfilled)} still missing (evaluated one day stale): "
                f"{','.join(unfilled[:10])}{'...' if len(unfilled) > 10 else ''}"
