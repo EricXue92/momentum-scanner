@@ -84,4 +84,25 @@ set +e
 "$UV" run --directory "$PROJECT" main.py --mode rs-line-audit --market us --dry-run
 set -e
 
+# Refresh the GitHub Pages ETF RS trend page now that us-eod has finished
+# (the local copy under output/Reports/ETF/ is already current). The page
+# workflow otherwise rides workflow_run after the 08:45 US 3M RS dispatch,
+# which fails whenever that slot wakes without a network (2026-10-23: on
+# battery, 10/10 dispatch attempts failed, the page stayed on 10-22 while the
+# local .txt was 10-23); GH's backup cron is unreliable. We are awake with a
+# working network here, so a direct dispatch is the reliable daily tick.
+# Soft: a failure must not change the EOD exit status. Idempotent: the page
+# workflow just redeploys (concurrency group `pages`).
+GH=${GH:-/opt/homebrew/bin/gh}
+export PATH="/opt/homebrew/bin:$PATH"   # launchd PATH lacks homebrew; gh shells out to git
+if [[ -x "$GH" ]]; then
+    if PAGES_OUT=$("$GH" --repo EricXue92/momentum-scanner workflow run etf_rs_page.yml 2>&1); then
+        echo "$(date '+%Y-%m-%d %H:%M:%S') [INFO] [ETF RS] dispatched etf_rs_page.yml (Pages refresh)"
+    else
+        echo "$(date '+%Y-%m-%d %H:%M:%S') [WARNING] [ETF RS] gh workflow run etf_rs_page.yml failed: $PAGES_OUT"
+    fi
+else
+    echo "$(date '+%Y-%m-%d %H:%M:%S') [WARNING] [ETF RS] gh not found at $GH; Pages page not refreshed"
+fi
+
 exit $EOD_STATUS

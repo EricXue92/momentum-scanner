@@ -307,8 +307,13 @@ local (throttle-prone) k-line fetch.
   `.github/workflows/etf_rs_page.yml` rebuilds it in the cloud
   (`scripts/build_etf_rs_page.py` → `_site/index.html`, deployed as a Pages
   artifact — **no HTML is committed**). Triggers: `workflow_run` after the
-  launchd-dispatched US 3M RS workflow (the reliable daily tick), a backup
-  cron, manual dispatch. The build exits 1 when no page was produced so an
+  launchd-dispatched US 3M RS workflow, a backup cron, manual dispatch —
+  and, **the reliable daily tick since 2026-10-23**, a direct
+  `gh workflow run etf_rs_page.yml` at the end of `run_eod.sh` (soft; never
+  changes the EOD exit status): the 08:45 dispatch fails when that slot
+  wakes on battery without a network (2026-10-23: 10/10 attempts, page
+  stayed on 10-22 while the local `.txt` was 10-23) and GH cron is
+  unreliable, whereas a finished us-eod proves the network is up. The build exits 1 when no page was produced so an
   outage keeps yesterday's page live instead of deploying nothing. The local
   copy under `output/Reports/ETF/` is independent of it.
 
