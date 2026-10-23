@@ -144,7 +144,12 @@ Output: `output/TV/{US,HK}/` (TradingView, comma-sep) mirrored to
   ratio × 20d avg volume — a 5% `pre_change_rate` printed on a few hundred
   shares is a thin-tape artifact (NVT/WIX 2026-09-11 opened +1.7%/-0.1%).
   Runs after the 20d avg-volume gate on the same yfinance frame; a quote
-  without `pre_volume` is kept.
+  without `pre_volume` is kept. **Big-gap bypass since 2026-10-23**
+  (`pre_volume_bypass_gap_percent` = 10 / `pre_volume_bypass_ratio` = 0.02,
+  same shape as the ADR% knob; gap_percent 0 = off, ratio 0 = waived):
+  RNG gapped +12% on earnings with 33k pre-market shares = 2.2% of its
+  1.49M avg and was dropped at all three pre-market scans; ELAN's 204
+  shares still fail at 2%.
   Consequence, and it is intended: the gate drifts intraday, but each scan
   writes its own per-offset `.txt` (not cumulative, and morning-gap never
   touches `eod_seen_*`), so drift only affects the one-time ntfy/catalyst

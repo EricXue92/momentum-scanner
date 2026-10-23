@@ -357,6 +357,12 @@ avg_volume_days = 20
 # 盘前专用: Futu pre_volume ≥ 此比例 × 20日均量, 否则视为薄盘假 gap 丢弃
 # (NVT/WIX 2026-09-11 盘前 +6%/+5% 只是几笔零星成交, 开盘 +1.7%/-0.1%)。0 = 关闭。
 min_pre_volume_ratio = 0.05
+# 大 gap 旁路 (同 ADR% 旁路的形状): gap ≥ pre_volume_bypass_gap_percent 时比例
+# 放宽到 pre_volume_bypass_ratio (RNG 2026-10-23 财报盘前 +12%, 盘前量 33k =
+# 20日均量的 2.2%, 三次盘前扫描全被 5% 砍掉; 真薄盘如 ELAN 204 股连 2% 也过不了)。
+# gap_percent 设 0 关闭旁路; ratio 设 0 = gap 够大即完全豁免。
+pre_volume_bypass_gap_percent = 10.0
+pre_volume_bypass_ratio = 0.02
 min_dollar_volume = 100_000_000
 scan_offsets = [-20, -10, -5, 5, 10, 15, 20, 25, 30]
 offset_tolerance_minutes = 2
