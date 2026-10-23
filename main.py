@@ -1294,15 +1294,23 @@ def run_morning_gap(
     # fraction of the 20d average — a 5% gap printed on a few hundred shares
     # (NVT / WIX 2026-09-11: pre_price above the whole day's range, opened
     # +1.7% / -0.1%) is noise, not a gap. `min_pre_volume_ratio = 0` disables.
+    # `pre_volume_bypass_gap_percent` relaxes the ratio to
+    # `pre_volume_bypass_ratio` for big gappers (RNG 2026-10-23: +12% on
+    # earnings, 2.2% of avg traded pre-market, dropped three times).
     if offset < 0:
         pre_vol_ratio = config.get("min_pre_volume_ratio", 0.05)
+        pre_vol_bypass_pct = config.get("pre_volume_bypass_gap_percent", 0)
+        pre_vol_bypass_ratio = config.get("pre_volume_bypass_ratio", 0)
         tickers = _filter_pre_market_volume(
             tickers, daily_data, quotes, pre_vol_ratio, avg_days, today_et,
             single=single,
+            bypass_gap_pct=pre_vol_bypass_pct,
+            bypass_ratio=pre_vol_bypass_ratio,
         )
         logger.info(
             f"  {len(tickers)} after pre-market volume filter "
-            f"(pre_volume >= {pre_vol_ratio:.0%} x {avg_days}d avg)"
+            f"(pre_volume >= {pre_vol_ratio:.0%} x {avg_days}d avg, "
+            f"{pre_vol_bypass_ratio:.0%} at gap>={pre_vol_bypass_pct}%)"
         )
         return offset, tickers
 
@@ -2075,6 +2083,8 @@ def _filter_pre_market_volume(
     days: int,
     today_date,
     single: bool | None = None,
+    bypass_gap_pct: float = 0,
+    bypass_ratio: float = 0,
 ) -> list[str]:
     """Keep tickers whose Futu pre-market volume is >= min_ratio x N-day
     average daily volume. Pre-market only (negative offsets).
@@ -2084,6 +2094,13 @@ def _filter_pre_market_volume(
     (``{ticker: GapQuote}``); a quote without ``pre_volume`` is KEPT (nothing
     to judge). ``min_ratio <= 0`` disables the gate. Missing / short daily
     history drops, matching ``_filter_avg_volume`` strictness.
+
+    Big-gap bypass (same shape as the ADR% knob): a quote whose ``gap`` is
+    >= ``bypass_gap_pct`` (> 0) is judged against ``bypass_ratio`` instead
+    of ``min_ratio``; ``bypass_ratio <= 0`` waives the gate for it entirely.
+    RNG 2026-10-23 gapped +12% on earnings with 2.2% of its 20d average
+    traded pre-market and was dropped at all three pre-market scans by the
+    5% ratio, while a true thin tape (ELAN, 204 shares) sits far below 2%.
     """
     if not tickers:
         return []
@@ -2094,10 +2111,23 @@ def _filter_pre_market_volume(
 
     result = []
     for ticker in tickers:
-        pre_vol = getattr(quotes.get(ticker), "pre_volume", None)
+        quote = quotes.get(ticker)
+        pre_vol = getattr(quote, "pre_volume", None)
         if pre_vol is None:
             result.append(ticker)
             continue
+        ratio = min_ratio
+        gap = getattr(quote, "gap", None)
+        if bypass_gap_pct and bypass_gap_pct > 0 and gap is not None \
+                and float(gap) >= bypass_gap_pct:
+            if not bypass_ratio or bypass_ratio <= 0:
+                logger.info(
+                    f"  {ticker}: gap {float(gap):.1f}% >= {bypass_gap_pct}%, "
+                    f"pre-market volume gate waived"
+                )
+                result.append(ticker)
+                continue
+            ratio = bypass_ratio
         try:
             if single:
                 volumes = daily_data["Volume"].dropna()
@@ -2111,13 +2141,13 @@ def _filter_pre_market_volume(
                 )
                 continue
             avg = float(volumes.iloc[-days:].mean())
-            need = min_ratio * avg
+            need = ratio * avg
             if float(pre_vol) >= need:
                 result.append(ticker)
             else:
                 logger.info(
                     f"  {ticker}: pre-market vol {float(pre_vol):,.0f} < "
-                    f"{min_ratio:.0%} x {days}d avg {avg:,.0f} "
+                    f"{ratio:.0%} x {days}d avg {avg:,.0f} "
                     f"(need {need:,.0f}), dropping"
                 )
         except (KeyError, TypeError, ValueError) as e:
