@@ -30,11 +30,6 @@ uv run main.py --mode rs-line-audit --market {us,hk,both} --dry-run  # audit the
 uv run pytest tests/ -v             # `uv run python -m pytest` works too
 ```
 
-## Layout
-
-Output: `output/TV/{US,HK}/` (TradingView, comma-sep) mirrored to
-`output/Webull/{US,HK}/` (newline-sep), then Futu sync.
-
 ## Invariants (don't break these)
 
 - **Dated files only**, no "latest" copy. `write_watchlist` skips empty lists
@@ -302,12 +297,7 @@ local (throttle-prone) k-line fetch.
   both histories (`score_history(weights_bars=WEIGHTS_1M_BARS)` for 1M) on
   the 3M calendar and embeds them as `s`/`p` (3M) and `s1`/`p1` (1M) per
   series; `run_etf_rs` passes the 3M-unscored names too (`missing`, 21-63
-  bars) so they get a 1M line with null 3M. UI: `窗口 3M/1M` switches
-  chart + list + markers; Y-axis mode `1M−3M 名次差` plots 3M rank − 1M rank
-  (positive = the 1M ladder ranks it higher = gaining); the list has a
-  `1M−3M 差` sort (largest first, grouped 领先/持平/落后/单窗口) and every
-  row shows `3M 第N名 · 1M 第N名 · ▲Δ`; the tooltip shows both windows.
-  Thick lines = today's top `chart_top_n` of the **active** window.
+  bars) so they get a 1M line with null 3M.
   **Also published to GitHub Pages** (https://ericxue92.github.io/momentum-scanner/):
   `.github/workflows/etf_rs_page.yml` rebuilds it in the cloud
   (`scripts/build_etf_rs_page.py` → `_site/index.html`, deployed as a Pages
