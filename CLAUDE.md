@@ -202,6 +202,16 @@ local (throttle-prone) k-line fetch.
 - **Do NOT make fetch failure hard-fail:** walk back ≤ 3 days of stale cache, then
   pass through (no gate) with a warning. Tickers **missing** from the table are
   KEPT, not dropped.
+- **12M table freshness** (`rs_rating._wait_for_fresh_table`): rs-log publishes
+  ~01:30–04:00Z and us-eod fetches ~02:00Z — 2026-10 got the previous
+  session's table on 14/19 days (CART 10-27 gated at 90 on 10-23 data; the
+  10-26 table said 94). The CSV has no date: its `Price` column is matched
+  against raw yfinance closes of 5 mega caps (`table_data_session`). Behind
+  the latest completed session (a partial bar during US hours doesn't
+  count) → re-fetch every 5 min for ≤ 60 min, then gate on the stale table
+  with a WARNING and do **not** cache it as `rs_rating_<today>.csv` (a rerun
+  re-fetches). Any failure of the check itself (no Price column, yfinance
+  down) → skipped, old behavior (use + cache).
 - **RS-line trend (annotate in EOD; manual prune via audit mode):** cloud scripts
   publish `rs_below_ma` / `rs_days_below_ma` / `rs_frac_below_ma` (TraderLion-style
   RS line = price/index vs its own EMA21) as extra columns in

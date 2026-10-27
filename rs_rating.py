@@ -17,10 +17,12 @@ import http.client
 import io
 import logging
 import time
-from datetime import datetime
+from collections import Counter
+from datetime import date, datetime
 from pathlib import Path
 from urllib.error import URLError
 from urllib.request import Request, urlopen
+from zoneinfo import ZoneInfo
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +39,26 @@ _FETCH_RETRY_DELAYS = (10.0, 30.0)
 # 3 gives one day of safety margin. Beyond that the percentile drift makes
 # "no gate" more honest than "wrong gate".
 _FALLBACK_MAX_AGE_DAYS = 3
+
+# Staleness check. rs-log publishes between ~01:30Z and ~04:00Z and us-eod
+# fetches at ~02:00Z, so in 2026-10 it got the previous session's table on
+# 14/19 days. The CSV has no date column; its `Price` is the session close,
+# matched against these mega caps' raw yfinance closes. A table behind the
+# latest completed session is re-fetched every _STALE_POLL_SEC (also rides
+# out raw.githubusercontent's ~5 min CDN cache) for up to _STALE_MAX_WAIT_SEC,
+# then used anyway with a WARNING but never cached as today's.
+_REFERENCE_TICKERS = ("AAPL", "MSFT", "NVDA", "AMZN", "GOOGL")
+_PRICE_MATCH_REL_TOL = 0.001
+_STALE_POLL_SEC = 300.0
+_STALE_MAX_WAIT_SEC = 3600.0
+_ET = ZoneInfo("America/New_York")
+_US_CLOSE_HOUR = 16
+
+# IncompleteRead (truncated body) is an HTTPException, not an OSError; a
+# garbage body raises UnicodeDecodeError. Both used to escape and abort
+# us-eod before any .txt was written.
+_FETCH_ERRORS = (URLError, TimeoutError, OSError,
+                 http.client.HTTPException, UnicodeDecodeError)
 
 
 def _find_fallback_cache(
@@ -75,13 +97,148 @@ def _find_fallback_cache(
     return best
 
 
+def _fetch_reference_closes():
+    """Raw daily closes (auto_adjust=False — the table's Price is unadjusted)
+    of _REFERENCE_TICKERS over the last ~10 days, or None. Indirection so
+    tests can monkeypatch it."""
+    from main import _yf_download_with_retry  # lazy: main imports rs_rating
+
+    data = _yf_download_with_retry(
+        list(_REFERENCE_TICKERS), period="10d", interval="1d",
+        auto_adjust=False, progress=False, threads=True,
+    )
+    if data is None or data.empty or "Close" not in data.columns.get_level_values(0):
+        return None
+    return data["Close"]
+
+
+def latest_completed_session(closes, now_et: datetime | None = None) -> date | None:
+    """Latest date with any reference close, excluding the bar of a US
+    session still in progress (a manual run during US hours)."""
+    now_et = now_et or datetime.now(_ET)
+    dates = [ts.date() for ts in closes.dropna(how="all").index]
+    if now_et.hour < _US_CLOSE_HOUR:
+        dates = [d for d in dates if d != now_et.date()]
+    return max(dates) if dates else None
+
+
+def _reference_prices(csv_text: str) -> dict[str, float]:
+    """{ticker: Price} of the _REFERENCE_TICKERS rows; empty when the table
+    has no usable Price column."""
+    prices: dict[str, float] = {}
+    try:
+        for row in csv.DictReader(io.StringIO(csv_text)):
+            t = (row.get("Ticker") or "").strip().upper()
+            if t in _REFERENCE_TICKERS:
+                try:
+                    prices[t] = float(row.get("Price") or "")
+                except ValueError:
+                    continue
+    except csv.Error:
+        return {}
+    return prices
+
+
+def table_data_session(csv_text: str, closes) -> date | None:
+    """Session whose reference closes match the table's `Price` column
+    (majority vote over _REFERENCE_TICKERS), or None when undeterminable."""
+    prices = _reference_prices(csv_text)
+    votes: Counter[date] = Counter()
+    for t, price in prices.items():
+        if t not in closes.columns:
+            continue
+        for ts, close in closes[t].dropna().items():
+            if abs(close - price) <= _PRICE_MATCH_REL_TOL * close:
+                votes[ts.date()] += 1
+    if not votes:
+        return None
+    session, n = votes.most_common(1)[0]
+    return session if n * 2 > len(prices) else None
+
+
+def _download_csv(timeout: float, retry_delays: tuple[float, ...]) -> str:
+    """GET RS_CSV_URL with retries; raises the last error on failure."""
+    req = Request(RS_CSV_URL, headers={"User-Agent": "momentum-scanner/1.0"})
+    attempts = len(retry_delays) + 1
+    for i in range(attempts):
+        try:
+            with urlopen(req, timeout=timeout) as resp:
+                return resp.read().decode("utf-8")
+        except _FETCH_ERRORS as e:
+            if i == attempts - 1:
+                raise
+            delay = retry_delays[i]
+            logger.warning(
+                f"[RS Rating] Fetch attempt {i + 1}/{attempts} failed "
+                f"({e}); retrying in {delay:.0f}s"
+            )
+            time.sleep(delay)
+    raise AssertionError("unreachable")
+
+
+def _wait_for_fresh_table(csv_text: str, timeout: float) -> tuple[str, bool]:
+    """Return (csv_text, cacheable). Polls while the table is behind the
+    latest completed session; cacheable is False only when it never caught
+    up. Any failure of the check itself → (csv_text, True), as before."""
+    if not _reference_prices(csv_text):
+        logger.warning("[RS Rating] Freshness check skipped (no reference prices in table)")
+        return csv_text, True
+    try:
+        closes = _fetch_reference_closes()
+    except Exception as e:  # yfinance raises a zoo of types
+        logger.warning(f"[RS Rating] Freshness check skipped ({e})")
+        return csv_text, True
+    if closes is None:
+        logger.warning("[RS Rating] Freshness check skipped (no reference closes)")
+        return csv_text, True
+    latest = latest_completed_session(closes)
+    session = table_data_session(csv_text, closes)
+    if latest is None or session is None:
+        logger.warning(
+            f"[RS Rating] Freshness check skipped (table session={session}, "
+            f"latest session={latest})"
+        )
+        return csv_text, True
+    if session >= latest:
+        logger.info(f"[RS Rating] Table is current (session {session})")
+        return csv_text, True
+
+    logger.warning(
+        f"[RS Rating] Table is stale (session {session} < {latest}); polling "
+        f"every {_STALE_POLL_SEC / 60:.0f} min for up to "
+        f"{_STALE_MAX_WAIT_SEC / 60:.0f} min"
+    )
+    start = time.monotonic()
+    while time.monotonic() - start + _STALE_POLL_SEC <= _STALE_MAX_WAIT_SEC:
+        time.sleep(_STALE_POLL_SEC)
+        try:
+            text = _download_csv(timeout, ())
+        except _FETCH_ERRORS as e:
+            logger.warning(f"[RS Rating] Re-fetch failed ({e}); still waiting")
+            continue
+        new_session = table_data_session(text, closes)
+        if new_session is not None and new_session >= latest:
+            waited = (time.monotonic() - start) / 60
+            logger.info(
+                f"[RS Rating] Fresh table after {waited:.0f} min (session {new_session})"
+            )
+            return text, True
+    logger.warning(
+        f"[RS Rating] Still stale after {_STALE_MAX_WAIT_SEC / 60:.0f} min — "
+        f"gating on session {session} (not cached; a rerun re-fetches)"
+    )
+    return csv_text, False
+
+
 def fetch_rs_table(
     output_dir: Path, today: str, timeout: float = 30.0
 ) -> dict[str, int] | None:
     """Download rs_stocks.csv and return {ticker: percentile (0-99)}.
 
-    Same-day re-runs are offline (cached at
-    output/state/rs_rating_<today>.csv). Returns None on any failure
+    A table behind the latest completed US session is polled for up to
+    _STALE_MAX_WAIT_SEC (`_wait_for_fresh_table`). Same-day re-runs are
+    offline (cached at output/state/rs_rating_<today>.csv; a table that
+    stayed stale is not cached). Returns None on any failure
     (network, parse, missing columns) so callers can degrade gracefully.
     """
     cache_path = output_dir / "state" / f"rs_rating_{today}.csv"
@@ -95,28 +252,12 @@ def fetch_rs_table(
             logger.warning(f"[RS Rating] Cache read failed ({e}); refetching")
 
     if csv_text is None:
-        req = Request(RS_CSV_URL, headers={"User-Agent": "momentum-scanner/1.0"})
         attempts = len(_FETCH_RETRY_DELAYS) + 1
         last_err: Exception | None = None
-        for i in range(attempts):
-            try:
-                with urlopen(req, timeout=timeout) as resp:
-                    csv_text = resp.read().decode("utf-8")
-                last_err = None
-                break
-            # IncompleteRead (truncated body) is an HTTPException, not an
-            # OSError; a garbage body raises UnicodeDecodeError. Both used
-            # to escape and abort us-eod before any .txt was written.
-            except (URLError, TimeoutError, OSError,
-                    http.client.HTTPException, UnicodeDecodeError) as e:
-                last_err = e
-                if i < len(_FETCH_RETRY_DELAYS):
-                    delay = _FETCH_RETRY_DELAYS[i]
-                    logger.warning(
-                        f"[RS Rating] Fetch attempt {i + 1}/{attempts} failed "
-                        f"({e}); retrying in {delay:.0f}s"
-                    )
-                    time.sleep(delay)
+        try:
+            csv_text = _download_csv(timeout, _FETCH_RETRY_DELAYS)
+        except _FETCH_ERRORS as e:
+            last_err = e
         if csv_text is None:
             logger.warning(
                 f"[RS Rating] Fetch failed after {attempts} attempts ({last_err}); "
@@ -145,11 +286,13 @@ def fetch_rs_table(
                 f"({age_days} day(s) old)"
             )
         else:
-            try:
-                cache_path.parent.mkdir(parents=True, exist_ok=True)
-                cache_path.write_text(csv_text, encoding="utf-8")
-            except OSError as e:
-                logger.warning(f"[RS Rating] Cache write failed: {e}")
+            csv_text, cacheable = _wait_for_fresh_table(csv_text, timeout)
+            if cacheable:
+                try:
+                    cache_path.parent.mkdir(parents=True, exist_ok=True)
+                    cache_path.write_text(csv_text, encoding="utf-8")
+                except OSError as e:
+                    logger.warning(f"[RS Rating] Cache write failed: {e}")
 
     try:
         reader = csv.DictReader(io.StringIO(csv_text))
