@@ -45,22 +45,29 @@ fi
 UV=/Users/xue/.local/bin/uv
 PROJECT=/Users/xue/momentum-scanner
 
-# Hard wall-clock cap for the EOD step. A real run is ~3-5 min; anything past
-# 30 min means a hung socket. The finviz lib's SSL hang (2026-05-12: 50+ min;
-# 2026-06-16: 12 min, pushed Leaders past the watchdog with no .txt written)
-# is now bounded in-process by `finviz_timeout.py` (socket timeout + capped
-# retries) — this wrapper timer remains as defense-in-depth for anything else
-# that might hang. macOS ships no `timeout`, so `set -m` puts the backgrounded
-# job in its own process group, then a watchdog sends SIGTERM (escalates to
-# SIGKILL) to the whole group so uv's python grandchild dies with its parent
-# instead of leaking.
-EOD_TIMEOUT=${EOD_TIMEOUT:-1800}
+# Hard wall-clock cap for the EOD step. A real run is ~3-5 min, but us-eod
+# may legitimately WAIT up to 60 min for a fresh 12M RS table
+# (rs_rating._STALE_MAX_WAIT_SEC, polling every 5 min) before it does any
+# work, so the cap MUST exceed that wait plus a full run: 90 min. The old
+# 30 min cap killed the 2026-10-28 run at 10:30:06 while it was still polling
+# (rs-log published at 10:42); SIGTERM leaves no trace in the python log, so
+# the day looked like "ran, wrote nothing". The finviz lib's SSL hang
+# (2026-05-12: 50+ min; 2026-06-16: 12 min, pushed Leaders past the watchdog
+# with no .txt written) is bounded in-process by `finviz_timeout.py` (socket
+# timeout + capped retries) — this wrapper timer remains as defense-in-depth
+# for anything else that might hang. macOS ships no `timeout`, so `set -m`
+# puts the backgrounded job in its own process group, then a watchdog logs
+# one line and sends SIGTERM (escalates to SIGKILL) to the whole group so
+# uv's python grandchild dies with its parent instead of leaking.
+EOD_TIMEOUT=${EOD_TIMEOUT:-5400}
 set +e
 set -m
 "$UV" run --directory "$PROJECT" main.py --mode us-eod &
 EOD_PID=$!
 set +m
-( sleep "$EOD_TIMEOUT" && kill -TERM "-$EOD_PID" 2>/dev/null \
+( sleep "$EOD_TIMEOUT" \
+    && echo "$(date '+%Y-%m-%d %H:%M:%S') [ERROR] [watchdog] us-eod exceeded EOD_TIMEOUT=${EOD_TIMEOUT}s — sending SIGTERM to process group $EOD_PID" \
+    && kill -TERM "-$EOD_PID" 2>/dev/null \
     && sleep 15 && kill -KILL "-$EOD_PID" 2>/dev/null ) &
 WATCHDOG_PID=$!
 wait "$EOD_PID"

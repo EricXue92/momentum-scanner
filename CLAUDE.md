@@ -211,7 +211,12 @@ local (throttle-prone) k-line fetch.
   count) → re-fetch every 5 min for ≤ 60 min, then gate on the stale table
   with a WARNING and do **not** cache it as `rs_rating_<today>.csv` (a rerun
   re-fetches). Any failure of the check itself (no Price column, yfinance
-  down) → skipped, old behavior (use + cache).
+  down) → skipped, old behavior (use + cache). **The `run_eod.sh` watchdog
+  (`EOD_TIMEOUT`, 5400s) must stay above this 60-min wait plus a full run:**
+  at the old 1800s it SIGTERMed the 2026-10-28 run mid-poll (rs-log
+  published 10:42 HKT) with nothing in the python log — the wrapper now
+  logs an `[ERROR] [watchdog]` line when it fires. Change
+  `_STALE_MAX_WAIT_SEC` and `EOD_TIMEOUT` together.
 - **RS-line trend (annotate in EOD; manual prune via audit mode):** cloud scripts
   publish `rs_below_ma` / `rs_days_below_ma` / `rs_frac_below_ma` (TraderLion-style
   RS line = price/index vs its own EMA21) as extra columns in
