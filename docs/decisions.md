@@ -236,5 +236,8 @@ runs the full chain (stockanalysis reachable from GH IPs, ~3 min, timeout 25
 min). `etf_rs_leaders.py`: cumulative TradingView master of the 1M top-10
 ETFs' strongest constituents, pruned on an SMA50 **first-break-low** rule
 (latest close below the low of the first session under the line after ≥ 2
-sessions below) — deliberately not `sma50_prune`'s prior-close rule. — ETF
-section.
+sessions below) — deliberately not `sma50_prune`'s prior-close rule. Same
+day: **price ≥ $20 and 20-day average dollar volume ≥ $100M** as entry and
+retention floors for the master (user request; a sub-$20 or thin name is not
+tradable on this list even when it tops an ETF's 1M line). One bar download
+per run serves the entry gate and the prune. — ETF section.

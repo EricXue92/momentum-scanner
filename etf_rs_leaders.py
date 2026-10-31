@@ -28,6 +28,13 @@ into TradingView as they are:
   today (comma-separated; absent when none; a same-day rerun merges, since
   the rerun no longer sees the names the first run removed). Same 5-day rule.
 
+**Floors** (``min_price`` 20 / ``min_dollar_volume`` 100M, 0 = off): latest
+close and the 20-session average of close × volume. Applied at **entry** (a
+candidate under a floor is not added today — it comes in the day it
+qualifies; no bars for it → added, like every other gate's pass-through) and
+to the **existing master** in the same prune pass below. One 6mo batch for
+master ∪ today's candidates serves both (``run_leaders``).
+
 **Prune rule** (``find_break_drops``, after today's names were added, over
 the whole master): the trailing streak of completed sessions whose close is
 below SMA50 must be ≥ 2 days AND the latest close must be below the LOW of
@@ -50,6 +57,7 @@ import logging
 import re
 from datetime import date
 from pathlib import Path
+from typing import NamedTuple
 
 import pandas as pd
 
@@ -61,6 +69,17 @@ NEW_STEM = "ETF_rs_new"
 PRUNED_STEM = "ETF_rs_pruned"
 DEFAULT_TOP_ETFS = 10
 DEFAULT_SMA_PERIOD = 50
+DEFAULT_MIN_PRICE = 20.0
+DEFAULT_MIN_DOLLAR_VOLUME = 100_000_000.0
+DOLLAR_VOLUME_WINDOW = 20
+_UNSET = object()
+
+
+class Bars(NamedTuple):
+    """Per-ticker daily series from one yfinance batch (see ``_fetch_daily_bars``)."""
+    closes: dict[str, pd.Series]
+    lows: dict[str, pd.Series]
+    volumes: dict[str, pd.Series]
 
 _EXTRA_PREFIX = "1M强:"
 _EXTRA_SUFFIX_RE = re.compile(r"\s*\([^()]*\)\s*$")       # " (前十大)"
@@ -125,29 +144,55 @@ def _write_csv(path: Path, symbols: list[str]) -> None:
     path.write_text(",".join(symbols) + "\n", encoding="utf-8")
 
 
-def update_leaders(cfg: dict, output_dir: Path, today: date, ranking_path: Path | None) -> list[str]:
-    """Grow the master from today's 1M ranking file; returns the names added
-    today (``[]`` when disabled, no file, or nothing new). Writes
-    ``<date>_ETF_rs_new.txt`` only when there is something new AND the day
-    has no such file yet."""
+def _todays_new(cfg: dict, output_dir: Path, ranking_path: Path | None) -> tuple[list[str], list[str]]:
+    """``(master, new)``: the master as stored and today's candidates it lacks,
+    in rank order. ``([], [])`` when disabled or the ranking file is missing."""
     if not cfg.get("enabled", True):
         logger.info(f"[{_LABEL}] disabled in config; skipping")
-        return []
+        return [], []
     if ranking_path is None or not Path(ranking_path).is_file():
         logger.warning(f"[{_LABEL}] no 1M ranking file to read; skipping")
-        return []
+        return [], []
     top_etfs = int(cfg.get("top_etfs", DEFAULT_TOP_ETFS))
     entries = parse_ranking(Path(ranking_path).read_text(encoding="utf-8"))
     cands = candidates(entries, top_etfs)
-    tv_dir = output_dir / "TV" / "US"
-    master_path = tv_dir / MASTER_NAME
-    master = load_master(master_path)
+    master = load_master(output_dir / "TV" / "US" / MASTER_NAME)
     known = set(master)
     new = [s for s in cands if s not in known]
     logger.info(f"[{_LABEL}] top {min(top_etfs, len(entries))} ETFs -> {len(cands)} candidates, "
                 f"master {len(master)}, new {len(new)}: {new}")
+    return master, new
+
+
+def _floors(cfg: dict) -> tuple[float, float]:
+    return (float(cfg.get("min_price", DEFAULT_MIN_PRICE)),
+            float(cfg.get("min_dollar_volume", DEFAULT_MIN_DOLLAR_VOLUME)))
+
+
+def update_leaders(cfg: dict, output_dir: Path, today: date, ranking_path: Path | None,
+                   bars: Bars | None = None,
+                   plan: tuple[list[str], list[str]] | None = None) -> list[str]:
+    """Grow the master from today's 1M ranking file; returns the names added
+    today (``[]`` when disabled, no file, or nothing new). With ``bars``,
+    candidates under the price / dollar-volume floors are not added (a
+    candidate with no bars passes through). ``plan`` is ``_todays_new``'s
+    result when the caller already computed it. Writes
+    ``<date>_ETF_rs_new.txt`` only when there is something new AND the day
+    has no such file yet."""
+    master, new = plan if plan is not None else _todays_new(cfg, output_dir, ranking_path)
     if not new:
         return []
+    if bars is not None:
+        min_price, min_dv = _floors(cfg)
+        rejected = set(find_floor_drops(bars.closes, bars.volumes, min_price, min_dv))
+        if rejected:
+            logger.info(f"[{_LABEL}] entry gate (price ≥ {min_price:g}, $vol ≥ {min_dv:,.0f}) "
+                        f"rejected: {sorted(r for r in rejected if r in new)}")
+            new = [s for s in new if s not in rejected]
+            if not new:
+                return []
+    tv_dir = output_dir / "TV" / "US"
+    master_path = tv_dir / MASTER_NAME
     tv_dir.mkdir(parents=True, exist_ok=True)
     _write_csv(master_path, master + new)
     new_path = tv_dir / f"{today:%Y_%m_%d}_{NEW_STEM}.txt"
@@ -165,9 +210,9 @@ def update_leaders(cfg: dict, output_dir: Path, today: date, ranking_path: Path 
 # ---------------------------------------------------------------------------
 
 
-def _fetch_daily_bars(tickers: list[str]) -> tuple[dict[str, pd.Series], dict[str, pd.Series]] | None:
-    """One 6mo yfinance batch → (``{ticker: close}``, ``{ticker: low}``), the
-    closes with ``sma50_prune``'s stale-series exclusion and trailing-NaN
+def _fetch_daily_bars(tickers: list[str]) -> Bars | None:
+    """One 6mo yfinance batch → ``Bars`` (close / low / volume per ticker),
+    the closes with ``sma50_prune``'s stale-series exclusion and trailing-NaN
     Close fill applied (the shared EOD conventions); None when the batch
     failed entirely. Monkeypatched in tests."""
     from main import _yf_download_with_retry  # local import: main imports etf_rs
@@ -181,19 +226,48 @@ def _fetch_daily_bars(tickers: list[str]) -> tuple[dict[str, pd.Series], dict[st
     single = len(tickers) == 1
     closes: dict[str, pd.Series] = {}
     lows: dict[str, pd.Series] = {}
+    volumes: dict[str, pd.Series] = {}
     for t in tickers:
         try:
             frame = data if single else data[t]
-            close, low = frame["Close"], frame["Low"]
+            close, low, vol = frame["Close"], frame["Low"], frame["Volume"]
         except (KeyError, IndexError):
             continue
         if close.notna().any():
             closes[t] = close
             lows[t] = low
+            volumes[t] = vol
     closes = drop_stale_series(closes)
     closes = fill_missing_last_close(closes, label=_LABEL)
     closes = {t: c.dropna() for t, c in closes.items() if c.notna().any()}
-    return closes, {t: lows[t] for t in closes if t in lows}
+    return Bars(closes, {t: lows[t] for t in closes if t in lows},
+                {t: volumes[t] for t in closes if t in volumes})
+
+
+def find_floor_drops(
+    closes: dict[str, pd.Series],
+    volumes: dict[str, pd.Series],
+    min_price: float,
+    min_dollar_volume: float,
+    window: int = DOLLAR_VOLUME_WINDOW,
+) -> list[str]:
+    """Names whose latest close is below ``min_price`` or whose average of
+    close × volume over the last ``window`` sessions is below
+    ``min_dollar_volume`` (0 disables either floor). No volume series → the
+    dollar-volume floor is skipped for that name (sorted result)."""
+    drops: list[str] = []
+    for t, close in closes.items():
+        if close.empty:
+            continue
+        if min_price > 0 and float(close.iloc[-1]) < min_price:
+            drops.append(t)
+            continue
+        vol = volumes.get(t)
+        if min_dollar_volume > 0 and vol is not None:
+            dv = (close * vol.reindex(close.index)).tail(window).fillna(0.0)
+            if dv.empty or float(dv.mean()) < min_dollar_volume:
+                drops.append(t)
+    return sorted(drops)
 
 
 def find_break_drops(
@@ -233,11 +307,14 @@ def _write_pruned_list(path: Path, drops: list[str]) -> None:
     _write_csv(path, sorted(set(earlier) | set(drops)))
 
 
-def prune_master(cfg: dict, output_dir: Path, today: date) -> list[str]:
-    """Apply ``find_break_drops`` to the master; returns the names removed.
-    ``[]`` when ``prune`` is off, the master is empty, the batch failed, or
-    nothing qualifies — the master is rewritten only when something was
-    removed."""
+def prune_master(cfg: dict, output_dir: Path, today: date, bars: Bars | None | object = _UNSET) -> list[str]:
+    """Remove from the master every name that fails the floors
+    (``find_floor_drops``) or the SMA50 first-break rule (``find_break_drops``);
+    returns the names removed. ``bars`` may be passed by ``run_leaders`` (one
+    download for both steps; None = that download failed → skip); when not
+    given, this function downloads the master itself. ``[]`` when ``prune``
+    is off, the master is empty, the batch failed, or nothing qualifies — the
+    master is rewritten only when something was removed."""
     if not cfg.get("prune", True):
         logger.info(f"[{_LABEL}] prune disabled in config; skipping")
         return []
@@ -245,17 +322,24 @@ def prune_master(cfg: dict, output_dir: Path, today: date) -> list[str]:
     master = load_master(master_path)
     if not master:
         return []
-    bars = _fetch_daily_bars(master)
+    if bars is _UNSET:
+        bars = _fetch_daily_bars(master)
     if bars is None:
         logger.warning(f"[{_LABEL}] bar download failed; prune skipped this run")
         return []
-    closes, lows = bars
-    missing = [t for t in master if t not in closes]
+    assert isinstance(bars, Bars)
+    missing = [t for t in master if t not in bars.closes]
     if missing:
         logger.warning(f"[{_LABEL}] no usable bars for {len(missing)} name(s), kept: {missing}")
-    drops = find_break_drops(closes, lows, int(cfg.get("sma_period", DEFAULT_SMA_PERIOD)))
+    in_master = set(master)
+    closes = {t: c for t, c in bars.closes.items() if t in in_master}
+    min_price, min_dv = _floors(cfg)
+    floor_drops = find_floor_drops(closes, bars.volumes, min_price, min_dv)
+    break_drops = find_break_drops(closes, bars.lows, int(cfg.get("sma_period", DEFAULT_SMA_PERIOD)))
+    drops = sorted(set(floor_drops) | set(break_drops))
     if not drops:
-        logger.info(f"[{_LABEL}] prune: {len(master)} checked, nothing below SMA50 first-break low")
+        logger.info(f"[{_LABEL}] prune: {len(master)} checked, nothing under the floors or the "
+                    f"SMA50 first-break low")
         return []
     kept = [t for t in master if t not in set(drops)]
     _write_csv(master_path, kept)
@@ -264,5 +348,26 @@ def prune_master(cfg: dict, output_dir: Path, today: date) -> list[str]:
         _write_pruned_list(pruned_path, drops)
     except OSError as e:
         logger.warning(f"[{_LABEL}] could not write {pruned_path}: {e}")
-    logger.info(f"[{_LABEL}] pruned {len(drops)} (SMA50 first-break): {drops} -> master {len(kept)}")
+    logger.info(f"[{_LABEL}] pruned {len(drops)} -> master {len(kept)}; floors "
+                f"(price ≥ {min_price:g}, $vol ≥ {min_dv:,.0f}): {floor_drops}; "
+                f"SMA50 first-break: {break_drops}")
     return drops
+
+
+def run_leaders(cfg: dict, output_dir: Path, today: date, ranking_path: Path | None) -> None:
+    """The daily step: one bar download for master ∪ today's candidates, then
+    the gated add (``update_leaders``) and the prune (``prune_master``). No
+    download when there is nothing to gate or prune, or when both the floors
+    and the prune are off."""
+    master, new = _todays_new(cfg, output_dir, ranking_path)
+    if not master and not new:
+        return
+    min_price, min_dv = _floors(cfg)
+    want_bars = (min_price > 0 or min_dv > 0) or (cfg.get("prune", True) and bool(master))
+    bars: Bars | None = None
+    if want_bars:
+        bars = _fetch_daily_bars(master + new)
+        if bars is None:
+            logger.warning(f"[{_LABEL}] bar download failed; entry gate waived, prune skipped")
+    update_leaders(cfg, output_dir, today, ranking_path, bars=bars, plan=(master, new))
+    prune_master(cfg, output_dir, today, bars=bars)

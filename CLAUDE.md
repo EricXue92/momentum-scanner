@@ -344,20 +344,27 @@ k-line fetch.
   `<date>_ETF_rs_new.txt` (comma-sep; absent when nothing new; a same-day
   rerun grows the master but keeps the first run's file; `TV/US` 5-day
   rule; stem rationale → decisions, standing). Soft step; no ntfy / Webull
-  / Futu / eod_seen. **Master prune** (`prune_master`, same step, right
-  AFTER today's names were added, `prune = true` / `sma_period = 50`): one
-  6mo yfinance batch of the master (Close + Low; `sma50_prune.drop_stale_series`
-  + `fill_missing_last_close` reused) → `find_break_drops`: trailing streak
-  of closes below SMA50 ≥ 2 sessions AND latest close < the **low of the
-  streak's first day** → removed, written to `<date>_ETF_rs_pruned.txt`
-  (comma-sep, same-day rerun merges, 5-day rule). This is NOT
-  `sma50_prune`'s rule (prior close) — do not unify them. Streak of 1 /
-  close back above the line (streak restarts) / close ≥ first-day low / <
-  50 bars / no data / stale series / NaN first-day low → kept. Failed batch
-  → prune skipped. No `.bak`; the pruned file is the record. A pruned name
-  re-enters the next day it is in a top ETF's top 5. Test files that run
-  `run_etf_rs` stub `etf_rs_leaders._fetch_daily_bars` (autouse) or the
-  prune goes online.
+  / Futu / eod_seen. **One bar download per run** (`run_leaders`: 6mo
+  Close + Low + Volume for master ∪ today's candidates,
+  `sma50_prune.drop_stale_series` + `fill_missing_last_close` reused)
+  serves two gates. **Floors** (`min_price` 20 / `min_dollar_volume` 100M
+  = 20-session mean of close × volume, `find_floor_drops`, 0 = off): a
+  candidate under a floor is **not added** today (enters the day it
+  qualifies; no bars → added, pass-through), and an existing name under a
+  floor is removed by the prune. **Master prune** (`prune_master`, right
+  AFTER today's names were added, `prune = true` / `sma_period = 50`):
+  floors ∪ `find_break_drops` (trailing streak of closes below SMA50 ≥ 2
+  sessions AND latest close < the **low of the streak's first day**) →
+  removed, written to `<date>_ETF_rs_pruned.txt` (comma-sep, same-day
+  rerun merges, 5-day rule). This is NOT `sma50_prune`'s rule (prior
+  close) — do not unify them. Streak of 1 / close back above the line
+  (streak restarts) / close ≥ first-day low / < 50 bars / no data / stale
+  series / NaN first-day low → kept by the SMA rule; no volume series →
+  kept by the dollar-volume floor. Failed batch → entry gate waived, prune
+  skipped. No `.bak`; the pruned file is the record. A pruned name
+  re-enters the next day it is in a top ETF's top 5 and clears the floors.
+  Test files that run `run_etf_rs` stub `etf_rs_leaders._fetch_daily_bars`
+  (autouse) or the step goes online.
 - **Trend page** (`etf_rs_chart.py`): the same run writes
   `output/Reports/ETF/etf_rs_trend.html` — **undated, overwritten** (it
   carries its own history; no `_RETENTION_RULES` entry matches it, by

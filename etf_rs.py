@@ -428,8 +428,7 @@ def run_etf_rs(cfg: dict, output_dir: Path, today: date,
     if out_1m is not None:
         try:
             import etf_rs_leaders
-            etf_rs_leaders.update_leaders(cfg.get("leaders", {}), output_dir, today, out_1m)
-            etf_rs_leaders.prune_master(cfg.get("leaders", {}), output_dir, today)
+            etf_rs_leaders.run_leaders(cfg.get("leaders", {}), output_dir, today, out_1m)
         except Exception as e:
             logger.warning(f"[{_LABEL}] leaders watchlist failed, rankings unaffected: {e}")
     # Trend page (Reports/ETF/etf_rs_trend.html): same klines, same order as
