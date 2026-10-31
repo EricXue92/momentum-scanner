@@ -162,6 +162,12 @@ POWR = "美国电力基建 (iShares, 2026-10-06 加入)"
 FOTO = "光子学 (光通信与激光, 2026-10-12 加入)"
 NCLD = "新云算力 (Neocloud, 2026-10-13 加入)"
 SHLD = "国防科技"
+# --- 2026-10-31 加入 ---
+DRNZ = "无人机"
+XME  = "金属采矿"
+IHI  = "医疗器械"
+OIH  = "油服"
+KOID = "人形机器人"
 # --- 宽基 / 原材料 (2026-09-26 加入; QQQ/IWM/RSP 2026-10-14 移除) ---
 XLB  = "原材料"
 # 2026-10-14 移除: QQQ IWM RSP USO GLD SLV EWJ EWY BTCUSD ETHUSD (不参与计算也不展示)
@@ -227,6 +233,12 @@ POWR = "ETN、PWR、GEV、NEE、EQT、SO、NVT、DUK、CEG、HUBB"
 FOTO = "LITE、IPGP、COHR、FN、CIEN、VIAV、LASR、MKSI、NOVT、AAOI"
 NCLD = "NBIS、CRWV、IREN、HUT、GLXY (Yahoo + Roundhill 官网, 整理日 2026-10-13)"
 SHLD = "PLTR、RTX、GD、LMT、NOC、BAE系统(英)、012450(韩华航空航天)、RHM(莱茵金属)、LHX、SAAB(萨博)"
+# --- 2026-10-31 加入 (yfinance funds_data.top_holdings, 整理日 2026-10-31) ---
+DRNZ = "AVAV、NXSN(以色列)、ONDS、UMAC、278A(Terra Drone)、DRO(澳)、RCAT、PLTR、ELS(澳)、AVEX"
+XME  = "RS、MTRN、STLD、FCX、CLF、NUE、CMC、RGLD、NEM、MP (近似等权, 各约 5%)"
+IHI  = "ABT、ISRG、MDT、IDXX、DXCM、EW、SYK、BDX、RMD、BSX"
+OIH  = "SLB、BKR、FTI、HAL、TS、SEI、RIG、WFRD、NOV、NE"
+KOID = "ALNT、HEXA.B(海克斯康)、000150(斗山)、TER、NVDA、APH、TEL、277810(Rainbow Robotics)、6861(基恩士)、MG(麦格纳)"
 # --- 宽基 / 原材料 ---
 XLB  = "LIN、NEM、FCX、ECL、SHW、VMC、MLM、APD、CRH、STLD"
 
