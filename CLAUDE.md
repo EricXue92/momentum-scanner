@@ -1,17 +1,16 @@
 # CLAUDE.md
 
 Thresholds and group configs live in `config.toml`. This file covers only the
-non-obvious invariants that are easy to break.
+non-obvious invariants that are easy to break. The incidents and decisions
+behind them are in `docs/decisions.md`; a `→ decisions <date>` reference
+points there — read it before changing the rule it is attached to.
 
 Current floors (long-side, IPO and morning-gap; Shorts share the US ones):
 **US** price ≥ $20 (Finviz `sh_price_o20`) and 20-day avg volume ≥ 500K
 (`sh_avgvol_o500`, `[settings]` / `[morning_gap]` `min_avg_volume`);
 **HK** price ≥ HK$50 and avg volume ≥ 1M (`[hk_settings]` /
 `[hk_morning_gap]`). The code-side fallbacks for unset `min_price` /
-`min_avg_volume` match these values. History: both markets went to
-$20 / HK$50 and 1M on 2026-10-03 (from $10 / HK$20 and 500K); the US
-volume floor came back to 500K on 2026-10-10. Output older than those
-dates was produced under the other floors.
+`min_avg_volume` match these values (history → decisions 2026-10-02).
 
 ## Commands
 
@@ -66,7 +65,8 @@ uv run pytest tests/ -v             # `uv run python -m pytest` works too
   run's output. The log is the record of a 0-result scan. Morning-gap files
   are per-scan (`_gap_scan_stem`: `MorningGapPre20`/`MorningGap5`/
   `HKMorningGap10`), one snapshot per offset, absent when that scan found
-  nothing.
+  nothing. The two undated exceptions are the ETF trend page and the ETF
+  leaders master (see the ETF section).
 - **Webull mirror is newline-separated** (its file upload truncates comma lists);
   TV `.txt` stays comma-separated.
 - **Dedup, layered:** (1) within Longs, earlier `config.toml` entry wins; (2) Longs
@@ -81,38 +81,36 @@ uv run pytest tests/ -v             # `uv run python -m pytest` works too
   so HK ties stay alphabetical, and HK entries are mapped `HKEX:522` →
   `HK.00522` for the lookup. IPO/HKIPO masters stay alphabetical.
   Order is cosmetic — `_load_seen` reads a set; `_persist_seen` still writes
-  alphabetically mid-run and the pruners preserve order. Two pruners may shrink the US master
-  (both back up as `.bak.<stamp>` first): manual `rs-line-audit`, and the
-  automatic **SMA50 prune** (`sma50_prune.py`, `[sma50_prune]` config) that runs
-  at the top of every us-eod before the master is loaded — close below SMA50 for
-  `consecutive_days` (2) completed days AND latest close below the prior day's
-  close (still declining; a rebound under the line is kept) → removed, can
-  re-qualify later.
-  Soft-fail: total yfinance failure skips the prune; missing/short-history
-  tickers are KEPT. **Stale series are KEPT too** (`drop_stale_series`, in
-  `_fetch_daily_closes`, so EMA20 shares it): last valid close > 1 session
-  behind the batch (session = a date ≥ half the tickers have a close) →
-  delisted/halted, excluded from both checks with a WARNING — the union
-  index used to let a plain `dropna` judge QRVO/FBRX on weeks-old closes
-  (2026-10-17). A 1-session lag is still Yahoo lag → intraday fill.
-  **Delistings are the one removal for missing data:** stale ≥
+  alphabetically mid-run and the pruners preserve order.
+- **SMA50 prune of the US master** (`sma50_prune.py`, `[sma50_prune]`), at
+  the top of every us-eod before the master is loaded, backs the master up
+  as `.bak.<stamp>` first (so does the manual `rs-line-audit` prune): close
+  below SMA50 for `consecutive_days` (2) completed days AND latest close
+  below the prior day's close (a rebound under the line is kept) → removed,
+  can re-qualify later. Soft-fail: total yfinance failure skips the prune;
+  missing/short-history tickers are KEPT. **Stale series are KEPT**
+  (`drop_stale_series` in `_fetch_daily_closes`, so EMA20 shares it): last
+  valid close > 1 session behind the batch (session = a date ≥ half the
+  tickers have a close) → delisted/halted, excluded from both checks with a
+  WARNING; a 1-session lag is Yahoo lag → intraday fill (→ decisions
+  2026-10-17). **Delistings are the one removal for missing data:** stale ≥
   `delisted_after_sessions` (10; unset/0 = off) AND a separate 6mo
-  re-download (`_confirm_no_new_bars`) shows no newer bar → removed from the
-  master in the same backup/prune, logged, NOT written to `SMA50Pruned.txt`.
-  A failed recheck removes nothing. Stale info rides on the shared closes as
-  `MasterCloses.stale`; a plain dict (test fakes) means no delistings. US only. The day's removed names are written to
-  `output/TV/US/<date>_SMA50Pruned.txt` (comma-sep; absent when nothing was
-  pruned; a same-day rerun **merges** into it, since the rerun no longer sees
-  names the first run removed; no Webull mirror / Futu / TV sync; aged out by
-  the `TV/US` 5-day rule; write failure is soft). **Trailing-NaN Close fill**
-  (`fill_missing_last_close`): Yahoo sometimes publishes the latest session's
-  daily row with OHLV but NaN Close for hours (all tickers, 2026-09-22 — CF
-  was kept one day stale). The prune fills such a row from one batch of that
-  day's 1h bars (last bar's close), warns, and only falls back to the stale
-  day when intraday has nothing either. The ETF RS ranking gets the same fill
-  (`us_rs_3m.fetch_us_klines_yf(fill_last_close=True)`, default off — the
-  cloud RS jobs are unchanged; 2026-10-22 it ranked on 10-20, all markers
-  `=`). The rest of us-eod still `dropna`s and runs a day stale on such days.
+  re-download (`_confirm_no_new_bars`) shows no newer bar → removed in the
+  same backup/prune, logged, NOT written to `SMA50Pruned.txt`; a failed
+  recheck removes nothing. Stale info rides on the shared closes as
+  `MasterCloses.stale`; a plain dict (test fakes) means no delistings. US
+  only. The day's removed names go to `output/TV/US/<date>_SMA50Pruned.txt`
+  (comma-sep; absent when nothing was pruned; a same-day rerun **merges**
+  into it, since the rerun no longer sees names the first run removed; no
+  Webull mirror / Futu / TV sync; `TV/US` 5-day rule; write failure is
+  soft). **Trailing-NaN Close fill** (`fill_missing_last_close`): Yahoo
+  sometimes publishes the latest session's daily row with OHLV but NaN
+  Close for hours; the prune fills such a row from one batch of that day's
+  1h bars (last bar's close), warns, and falls back to the stale day only
+  when intraday has nothing either (→ decisions 2026-09-22). The ETF RS
+  ranking gets the same fill (`us_rs_3m.fetch_us_klines_yf(fill_last_close=True)`,
+  default off — the cloud RS jobs are unchanged; → decisions 2026-10-22).
+  The rest of us-eod still `dropna`s and runs a day stale on such days.
 - **EMA20 first-break list (US, read-only):** `ema20_break.py`
   (`[ema20_break]`) runs right before the SMA50 prune over the same master
   (`main._run_us_master_lists` fetches the master's 6mo closes ONCE and
@@ -132,8 +130,9 @@ uv run pytest tests/ -v             # `uv run python -m pytest` works too
   hand-created), so sync is a no-op until you enable them.
 - **Cleanup** (`cleanup_old_outputs`) is driven by an explicit regex rule table
   (`_RETENTION_RULES`, not globs) and soft-fails; **never touches** the
-  `eod_seen_*.txt` masters, `ntfy_last_seen.txt`, `edgar_cache/`, logs. The
-  pruners' `eod_seen_<MKT>.txt.bak.<stamp>` backups age out after 2 days.
+  `eod_seen_*.txt` masters, `ntfy_last_seen.txt`, `edgar_cache/`, logs, or
+  any undated file. The pruners' `eod_seen_<MKT>.txt.bak.<stamp>` backups
+  age out after 2 days.
 - **HK data-day rule:** only the 20:00 HKT slot uses today's close; earlier runs
   trim today's incomplete bar (and skip the conditional HSI-trigger RS group).
   Weekends map to the previous Friday (`hk_effective_data_day`): Friday's close
@@ -144,42 +143,37 @@ uv run pytest tests/ -v             # `uv run python -m pytest` works too
   the pre-market print (US negative offsets) or `last_price` (US positive
   offsets, all HK) against SMA50/SMA200 — **not** the previous close. The
   averages themselves still come from `_trim_today`-trimmed completed bars;
-  only the comparison basis moved. `sma_bypass_gap_percent` (in `[morning_gap]`
-  US / `[hk_morning_gap]` HK) waives **SMA50 only** for big gappers — SMA200 is
+  only the comparison basis moved (`sma_use_live_price = false` restores the
+  old basis). `sma_bypass_gap_percent` (`[morning_gap]` US /
+  `[hk_morning_gap]` HK) waives **SMA50 only** for big gappers — SMA200 is
   never waived. **Recent IPOs** (< 200 completed bars, ≥ 50) skip SMA200 and
   gate on SMA50 alone, which then can NOT be waived by the gap bypass (it is
-  the only floor); < 50 bars → dropped. Since 2026-10-21 (SPCX, 90 bars, was
-  dropped as "insufficient daily bars for SMA200"). Both knobs are per-market config; `sma_use_live_price = false`
-  restores the old basis. Separately, the **ADR% floor relaxes for big
-  gappers**: gap ≥ `adr_bypass_gap_percent` → floor drops from
-  `min_adr_percent` to `adr_bypass_min_percent` (US: 10% → 3.0; HK wired but
-  off — its base is already 3.0). Since 2026-10-21 US morning-gap overrides
-  `[morning_gap].min_adr_percent = 3.0` (was inherited 4.0 — SPCX +8% pre at
-  ADR% 3.97), so the US bypass is currently a no-op too; EOD stays at 4.0. **EOD carries the same bypass for US Longs
-  `the_setup` + `earnings_gap` only** (per-group `[[longs]]` keys
-  `adr_bypass_gap_percent` / `adr_bypass_min_percent`, 10% → 3.0; gap =
-  latest completed daily bar's Open vs prior Close, `_daily_gaps`) — CRM
-  2026-08-27 gapped +11.9% on earnings at ADR% 3.74 and no EOD group could
-  emit it. Every other EOD ADR% call (other Longs groups, Leaders, RS,
-  Shorts) is untouched. **Pre-market volume gate** (US negative offsets only,
-  `_filter_pre_market_volume`, `[morning_gap].min_pre_volume_ratio` = 0.05,
-  0 = off): Futu `pre_volume` (carried on `GapQuote.pre_volume`) must be ≥
-  ratio × 20d avg volume — a 5% `pre_change_rate` printed on a few hundred
-  shares is a thin-tape artifact (NVT/WIX 2026-09-11 opened +1.7%/-0.1%).
-  Runs after the 20d avg-volume gate on the same yfinance frame; a quote
-  without `pre_volume` is kept. **Big-gap bypass since 2026-10-23**
-  (`pre_volume_bypass_gap_percent` = 10 / `pre_volume_bypass_ratio` = 0.02,
-  same shape as the ADR% knob; gap_percent 0 = off, ratio 0 = waived):
-  RNG gapped +12% on earnings with 33k pre-market shares = 2.2% of its
-  1.49M avg and was dropped at all three pre-market scans; ELAN's 204
-  shares still fail at 2%.
-  Consequence, and it is intended: the gate drifts intraday, but each scan
-  writes its own per-offset `.txt` (not cumulative, and morning-gap never
-  touches `eod_seen_*`), so drift only affects the one-time ntfy/catalyst
-  gate (`morning_gap_seen_{pre,post}_<date>.txt`), not what's written. Spec:
+  the only floor); < 50 bars → dropped (→ decisions 2026-10-21).
+  **ADR% floor relaxes for big gappers**: gap ≥ `adr_bypass_gap_percent` →
+  floor drops from `min_adr_percent` to `adr_bypass_min_percent` (US: 10% →
+  3.0; HK wired but off — its base is already 3.0). US morning-gap overrides
+  `[morning_gap].min_adr_percent = 3.0`, so the US bypass is currently a
+  no-op; EOD stays at 4.0 (→ decisions 2026-10-21). **EOD carries the same
+  bypass for US Longs `the_setup` + `earnings_gap` only** (per-group
+  `[[longs]]` keys `adr_bypass_gap_percent` / `adr_bypass_min_percent`, 10%
+  → 3.0; gap = latest completed daily bar's Open vs prior Close,
+  `_daily_gaps`; → decisions 2026-08-27). Every other EOD ADR% call (other
+  Longs groups, Leaders, RS, Shorts) is untouched. **Pre-market volume
+  gate** (US negative offsets only, `_filter_pre_market_volume`,
+  `[morning_gap].min_pre_volume_ratio` = 0.05, 0 = off): Futu `pre_volume`
+  (carried on `GapQuote.pre_volume`) must be ≥ ratio × 20d avg volume (→
+  decisions 2026-09-11). Runs after the 20d avg-volume gate on the same
+  yfinance frame; a quote without `pre_volume` is kept. Big-gap bypass
+  `pre_volume_bypass_gap_percent` = 10 / `pre_volume_bypass_ratio` = 0.02
+  (same shape as the ADR% knob; gap_percent 0 = off, ratio 0 = waived; →
+  decisions 2026-10-23). Consequence, and it is intended: the gate drifts
+  intraday, but each scan writes its own per-offset `.txt` (not cumulative,
+  and morning-gap never touches `eod_seen_*`), so drift only affects the
+  one-time ntfy/catalyst gate (`morning_gap_seen_{pre,post}_<date>.txt`),
+  not what's written. Spec:
   `docs/superpowers/specs/2026-08-13-morning-gap-live-price-trend-gate-design.md`.
-- **Report** — daily LLM generation is OFF since 2026-09-17; wiring and
-  evidence-prefetch details live in `report/CLAUDE.md`.
+- **Report** — daily LLM generation is OFF (→ decisions 2026-09-17); wiring
+  and evidence-prefetch details live in `report/CLAUDE.md`.
 - **Catalyst report (pre-market)** is a **detached subprocess** spawned
   from the morning-gap path; it MUST NOT block the morning-gap process.
   Always uses DeepSeek + Tavily regardless of `[report] backend`. Reads
@@ -194,15 +188,16 @@ uv run pytest tests/ -v             # `uv run python -m pytest` works too
 
 Percentile tables are computed daily on **GitHub Actions** and published as CSVs;
 the local pipeline only fetches them. US: `Fred6725/rs-log` (12M, vs SPY) +
-`data/us_rs_3m/` (3M). HK: `data/hk_rs/` (12M+3M, vs HSI). Thresholds: 12M tiers
-90, 3M tiers 90 in both markets since 2026-10-10 (was 95 from 2026-10-02;
-Leaders / conditional RS / Shorts / IPO ≥ 64 rows; US `[settings].min_rs_percentile_3m`, HK
+`data/us_rs_3m/` (3M). HK: `data/hk_rs/` (12M+3M, vs HSI). Thresholds: 12M
+tiers 90, 3M tiers 90 in both markets (Leaders / conditional RS / Shorts /
+IPO ≥ 64 rows; US `[settings].min_rs_percentile_3m`, HK
 `[hk_settings].min_rs_percentile_longs_3m` + `[hk_shorts].min_rs_percentile_3m`;
-the code-side fallback when a key is unset is still 90); set 0 to
-disable a tier. The HK metrics frame is now also cloud-published (`data/hk_metrics/`,
-same workflow) and fetched locally via `hk_metrics.build_hk_metrics_cloud`, so
-discovery runs on the full universe on the happy path; a cloud miss falls back to the
-local (throttle-prone) k-line fetch.
+the code-side fallback when a key is unset is 90; → decisions 2026-10-02);
+set 0 to disable a tier. The HK metrics frame is also cloud-published
+(`data/hk_metrics/`, same workflow) and fetched locally via
+`hk_metrics.build_hk_metrics_cloud`, so discovery runs on the full universe
+on the happy path; a cloud miss falls back to the local (throttle-prone)
+k-line fetch.
 
 - Event groups gate on 12M only: US Longs 6 组 (per-group `min_rs_percentile`
   override, `_longs_rs_threshold`; `the_setup` = 0 → no RS gate); HK EarningsGap/HighVolume/GapUp
@@ -221,30 +216,25 @@ local (throttle-prone) k-line fetch.
   **An IPO below 64 rows has no RS at all**, so both ladders carry a
   direction gate instead: `perf_4w > ipo_min_perf_4w` (strict;
   `drops['perf_4w']`; key in `[hk_settings]` for HK, `[settings]` for US;
-  both 20.0 since 2026-10-02, was 0.0) —
-  HKEX:625 2026-09-29 was emitted 21 days after listing at 4w -35%. NaN
-  `perf_4w` (exactly 20 rows) is **dropped, not kept**: the name isn't in the
-  master yet, and keeping it would let every IPO through ungated on its first
-  eligible day. HK re-evaluates it at 21 rows; a US name only comes back if it
-  passes a Finviz long-side screener again. Key unset = gate off.
+  both 20.0; → decisions 2026-09-29). NaN `perf_4w` (exactly 20 rows) is
+  **dropped, not kept**: the name isn't in the master yet, and keeping it
+  would let every IPO through ungated on its first eligible day. HK
+  re-evaluates it at 21 rows; a US name only comes back if it passes a
+  Finviz long-side screener again. Key unset = gate off.
 - **Do NOT make fetch failure hard-fail:** walk back ≤ 3 days of stale cache, then
   pass through (no gate) with a warning. Tickers **missing** from the table are
   KEPT, not dropped.
-- **12M table freshness** (`rs_rating._wait_for_fresh_table`): rs-log publishes
-  ~01:30–04:00Z and us-eod fetches ~02:00Z — 2026-10 got the previous
-  session's table on 14/19 days (CART 10-27 gated at 90 on 10-23 data; the
-  10-26 table said 94). The CSV has no date: its `Price` column is matched
-  against raw yfinance closes of 5 mega caps (`table_data_session`). Behind
-  the latest completed session (a partial bar during US hours doesn't
-  count) → re-fetch every 5 min for ≤ 60 min, then gate on the stale table
-  with a WARNING and do **not** cache it as `rs_rating_<today>.csv` (a rerun
-  re-fetches). Any failure of the check itself (no Price column, yfinance
-  down) → skipped, old behavior (use + cache). **The `run_eod.sh` watchdog
-  (`EOD_TIMEOUT`, 5400s) must stay above this 60-min wait plus a full run:**
-  at the old 1800s it SIGTERMed the 2026-10-28 run mid-poll (rs-log
-  published 10:42 HKT) with nothing in the python log — the wrapper now
-  logs an `[ERROR] [watchdog]` line when it fires. Change
-  `_STALE_MAX_WAIT_SEC` and `EOD_TIMEOUT` together.
+- **12M table freshness** (`rs_rating._wait_for_fresh_table`): the CSV has
+  no date, so its `Price` column is matched against raw yfinance closes of 5
+  mega caps (`table_data_session`). Behind the latest completed session (a
+  partial bar during US hours doesn't count) → re-fetch every 5 min for ≤
+  60 min, then gate on the stale table with a WARNING and do **not** cache
+  it as `rs_rating_<today>.csv` (a rerun re-fetches). Any failure of the
+  check itself (no Price column, yfinance down) → skipped, old behavior (use
+  + cache). **The `run_eod.sh` watchdog (`EOD_TIMEOUT`, 5400s) must stay
+  above this 60-min wait plus a full run** and logs an `[ERROR] [watchdog]`
+  line when it fires; change `_STALE_MAX_WAIT_SEC` and `EOD_TIMEOUT`
+  together (→ decisions 2026-10-27).
 - **RS-line trend (annotate in EOD; manual prune via audit mode):** cloud scripts
   publish `rs_below_ma` / `rs_days_below_ma` / `rs_frac_below_ma` (TraderLion-style
   RS line = price/index vs its own EMA21) as extra columns in
@@ -271,203 +261,170 @@ local (throttle-prone) k-line fetch.
   when empty, overwritten on same-day rerun (ranking snapshot, no dedup
   semantics; not Webull-mirrored, no eod_seen effect). **Not written when
   k-line coverage of the master < 50%** (`MIN_SNAPSHOT_COVERAGE`; an earlier
-  same-day snapshot stays) — 2026-10-17 10:53 a throttled batch left 78/91
-  without data and the top-10 was cut from 13 names. The report lists such
+  same-day snapshot stays; → decisions 2026-10-17). The report lists such
   names as `no data fetched` (KEPT), separate from `insufficient history`.
   Cleanup: snapshots 4-day window; audit report + sidecars (`rs-audit/`)
   5-day window.
 
 ## ETF RS ranking (3M / 1M files, holdings line, leaders watchlist, trend page + Pages)
 
-- **ETF 3M RS ranking** (`etf_rs.py`, `[etf_rs]` config): the fixed
-  `[etf_rs.tickers]` table (ticker = 中文名, 53 entries) is scored
-  **locally** with the same 3M algorithm (`compute_us_rs_3m_table`, vs
-  `benchmark` SPY; one yfinance batch, no cloud step) and written to
-  `output/TV/US/<date>_ETF_rs_3m.txt` (stem `ETF_rs` before 2026-10-15) as **one `N. TICKER 🟢↑N - 中文名 | 前十大持仓`
-  per line, strongest at the top** — human-readable, NOT a TradingView
-  import (the only non-comma `.txt` in `TV/US/`). The **rank-change marker**
-  after the ticker (`🟢↑N` / `🔴↓N` / `=` / `新`, `rank_delta_marker`; the
-  colored dot is the only way to tint an arrow in plain text) compares
-  against the latest `*_ETF_rs_3m.txt` (or legacy `*_ETF_rs.txt`, `_LEGACY_STEMS`) in the same folder dated strictly
-  **before** today (`read_previous_ranks`; ticker = first whitespace token after the `N.` prefix
-  of each line, so annotated files re-parse) — a same-day rerun keeps
-  comparing to the prior day, and with no earlier snapshot (first run,
-  retention gap) the marker is omitted altogether. No extra state file; the
-  5-day `TV/US` retention IS the lookback window. Holdings come from the
-  **static** `[etf_rs.holdings]` table (hand-transcribed from issuer
-  disclosures, dated in its comment; no API refresh — update by hand;
-  missing entry → segment omitted). Tickers with an **identical 中文名**
-  collapse to the strongest one (`collapse_same_name`; the name is the
-  same-instrument key — the former GDXU/NUGT pair was the motivating case;
-  NUGT and 12 global-market ETFs were dropped 2026-09-23, so no duplicate
-  names remain today, rule kept) — the log still lists what was hidden.
-  **Non-ETF rows** (mechanism kept, table empty since 2026-10-14 — BTCUSD /
-  ETHUSD were removed together with QQQ IWM RSP USO GLD SLV EWJ EWY):
-  `[etf_rs.yf_symbols]` maps display ticker → Yahoo symbol (`BTC-USD`); their
-  7-day klines are cut to SPY's trading days (`align_to_benchmark_days`)
-  because the 3M score counts rows. A crypto name must differ from IBIT's
-  "比特币" (would collapse).
-  Percentile is **within the ETF set**, not the stock universe. Ranking
-  snapshot only: same-day rerun overwrites, no `eod_seen` dedup, no Webull
-  mirror, no Futu/TV sync; the report ignores it (unknown group stem). Runs
-  as a soft side-step at the end of us-eod / eod (also `--mode etf-rs`);
-  aged out by the generic `TV/US` 5-day rule. **1M companion file**
-  (since 2026-10-15): the same run also writes `<date>_ETF_rs_1m.txt`
-  from the same klines on the **1M weekly ladder** `WEIGHTS_1M_BARS`
-  (cumulative 1/2/3/4-week returns = 5/10/15/20 bars back, 0.4/0.2/0.2/0.2,
-  21 bars minimum; same benchmark-relative score + in-set percentile).
-  Same line format, same-name collapse and marker rules, but markers
-  compare only against the previous `_1m` file (`read_previous_ranks(stem=)`;
-  the stems are matched exactly so the two never cross).
-  It is a soft step after the 3M file (`_write_1m_ranking`) — a failure
-  never costs the 3M `.txt`; the trend page stays 3M-only. Scoring
-  lookbacks are bars, not months: `us_rs_3m._score_from_kline_bars`
-  takes `(bars, weight)` pairs and `compute_us_rs_3m_table(weights_bars=)`
+- **3M ranking file** (`etf_rs.py`, `[etf_rs]`): the fixed `[etf_rs.tickers]`
+  table (ticker = 中文名, 53 entries) is scored **locally** with the same 3M
+  algorithm (`compute_us_rs_3m_table`, vs `benchmark` SPY; one yfinance
+  batch, no cloud step) and written to `output/TV/US/<date>_ETF_rs_3m.txt`
+  as **one `N. TICKER 🟢↑N - 中文名 | 前十大持仓` per line, strongest at the
+  top** — human-readable, NOT a TradingView import (the two ranking files
+  are the only non-comma `.txt` in `TV/US/`). Percentile is **within the
+  ETF set**, not the stock universe. The **rank-change marker** after the
+  ticker (`🟢↑N` / `🔴↓N` / `=` / `新`, `rank_delta_marker`) compares
+  against the latest `*_ETF_rs_3m.txt` (or legacy `*_ETF_rs.txt`,
+  `_LEGACY_STEMS`) in the same folder dated strictly **before** today
+  (`read_previous_ranks`; ticker = first whitespace token after the `N.`
+  prefix of each line, indented lines skipped) — a same-day rerun keeps
+  comparing to the prior day, and with no earlier snapshot the marker is
+  omitted altogether. No extra state file; the 5-day `TV/US` retention IS
+  the lookback window. Holdings come from the **static** `[etf_rs.holdings]`
+  table (hand-transcribed, dated in its comment; no API refresh; missing
+  entry → segment omitted). Tickers with an **identical 中文名** collapse to
+  the strongest one (`collapse_same_name`; no duplicates today, rule kept;
+  the log lists what was hidden). **Non-ETF rows** (`[etf_rs.yf_symbols]`,
+  display ticker → Yahoo symbol, 7-day klines cut to SPY's trading days by
+  `align_to_benchmark_days` because the 3M score counts rows): mechanism
+  kept, table empty (→ decisions 2026-10-14); a crypto name must differ from
+  IBIT's "比特币" (would collapse). Ranking snapshot only: same-day rerun
+  overwrites, no `eod_seen` dedup, no Webull mirror, no Futu/TV sync; the
+  report ignores it (unknown group stem). Soft side-step at the end of
+  us-eod / eod (also `--mode etf-rs`); `TV/US` 5-day rule.
+- **1M companion file** `<date>_ETF_rs_1m.txt` (`_write_1m_ranking`, soft
+  after the 3M file — a failure never costs the 3M `.txt`): the same klines
+  on the **1M weekly ladder** `WEIGHTS_1M_BARS` (cumulative 1/2/3/4-week
+  returns = 5/10/15/20 bars back, 0.4/0.2/0.2/0.2, 21 bars minimum; same
+  benchmark-relative score + in-set percentile). Same line format, collapse
+  and marker rules, but markers compare only against the previous `_1m`
+  file (`read_previous_ranks(stem=)`; stems matched exactly). Scoring
+  lookbacks are bars, not months: `us_rs_3m._score_from_kline_bars` takes
+  `(bars, weight)` pairs and `compute_us_rs_3m_table(weights_bars=)`
   selects the ladder; the month-based `_score_from_kline` / `WEIGHTS_3M`
-  API is a thin front (`BARS_PER_MONTH` = 21) and unchanged for IPO/cloud. **Trend page**
-  (`etf_rs_chart.py`): the same run then writes
-  `output/Reports/ETF/etf_rs_trend.html` — **undated, overwritten** (it
-  carries its own history; no `_RETENTION_RULES` entry matches it, by
-  design). History is **recomputed from the run's klines**, not read from
-  old `.txt` (they hold no scores and age out in 5 days) — which is why
-  `_fetch_klines` pulls `1y` although the ranking needs 64 bars. Each day's
-  score = `rank_etfs` on klines truncated to that day (tests pin this), with
-  today's ticker list + adjusted closes, so a past day may sit a place off
-  that day's `.txt`. Y = 0-99 percentile (within the ETF set → RS ≥ 90 is
-  always ~5 of 53) / rank / raw excess return; top `chart_top_n` (20) thick.
-  Soft inside `run_etf_rs`: a render failure never costs the `.txt`.
-  **3M + 1M on one page** (since 2026-10-15): `write_trend_chart` computes
-  both histories (`score_history(weights_bars=WEIGHTS_1M_BARS)` for 1M) on
-  the 3M calendar and embeds them as `s`/`p` (3M) and `s1`/`p1` (1M) per
-  series; `run_etf_rs` passes the 3M-unscored names too (`missing`, 21-63
-  bars) so they get a 1M line with null 3M.
-  **Per-ETF strongest-holdings line** (since 2026-10-31, `etf_holdings_rs.py`,
+  API is a thin front (`BARS_PER_MONTH` = 21), unchanged for IPO/cloud
+  (→ decisions 2026-10-15).
+- **Per-ETF strongest-holdings line** (`etf_holdings_rs.py`,
   `[etf_rs.holdings_rs]`): under every ETF row in BOTH `.txt` files one
   3-space-indented continuation line `   1M强: A > B > C > D > E` — the
   ETF's **US-listed** constituents ranked by the same 1M ladder vs SPY
   (within the ETF only, no percentile), top `top_n` (5), fewer when fewer
   score, no line when none. Constituent source chain per ETF, first hit
   wins: today's cache → stockanalysis `/etf/<slug>/holdings/` (SSR table;
-  **free tier = top 25 by weight**, "Showing 25 of 78 holdings") → earlier
-  cache ≤ `cache_max_age_days` (7) → yfinance `funds_data.top_holdings`
-  (line gets ` (前十大)`) → nothing. Cache
-  `output/state/etf_holdings_<YYYY_MM_DD>.json` holds stockanalysis
+  **free tier = top 25 by weight**) → earlier cache ≤ `cache_max_age_days`
+  (7) → yfinance `funds_data.top_holdings` (line gets ` (前十大)`) → nothing.
+  Cache `output/state/etf_holdings_<YYYY_MM_DD>.json` holds stockanalysis
   results only (foreign codes included; filtered at ranking) plus the
   page's own US marker (`us`: rows whose Symbol cell links to
-  `/stocks/<sym>/` — foreign rows link `/quote/…`, cash / futures / swap
-  rows such as `KRW`, `IXPZ6` have no link and `HKD` / `USD` ARE real
-  tickers, so a regex cannot tell), 8-day cleanup rule; a same-day rerun
-  reads it and never goes online. Ranking pool = `us` when known, else
-  (yfinance fallback, pre-`us` cache) the `is_us_symbol` regex, which also
-  drops 5-letter symbols ending in X (mutual / money-market funds —
-  `AGPXX` in BWET's collateral, 2026-10-31). `BRK.B` is requested as
-  `BRK-B`, displayed as `BRK.B`. Live fetch: HTTP 404 = no page (DXYZ,
-  IBIT), 3 consecutive transient failures = no more live requests that
-  run (`_MAX_CONSECUTIVE_FAILURES`); one ETF's exception never costs the
-  others or the cache write. Computed once in
-  `run_etf_rs` **before** either file is written (soft: failure → files
-  without the line); `read_previous_ranks` skips indented lines so the
-  rank markers ignore it. **The trend page shows the same line** (since
-  2026-11-01): `write_trend_chart(extras=)` embeds it verbatim as `strong`
-  per series and the ranking list renders it under the holdings row
-  (tooltip untouched); the cloud Pages build therefore runs the full chain
-  too (`run_etf_rs` default, `holdings_rs=True`; `holdings_rs=False` is
-  the opt-out) — cold constituent cache every run (scratch dir), ~3 min
-  extra, workflow timeout 25 min; a stockanalysis block from GH IPs
-  degrades to the yfinance top-10 line, never an empty page. Full
-  holdings later = add an issuer source function in front of the
-  stockanalysis step. Spec:
+  `/stocks/<sym>/`; a regex cannot tell cash / futures pseudo-symbols from
+  real tickers — → decisions 2026-10-31), 8-day cleanup rule; a same-day
+  rerun reads it and never goes online. Ranking pool = `us` when known,
+  else (yfinance fallback, pre-`us` cache) the `is_us_symbol` regex, which
+  also drops 5-letter symbols ending in X (mutual / money-market funds).
+  `BRK.B` is requested as `BRK-B`, displayed as `BRK.B`. Live fetch: HTTP
+  404 = no page (DXYZ, IBIT), 3 consecutive transient failures = no more
+  live requests that run (`_MAX_CONSECUTIVE_FAILURES`); one ETF's exception
+  never costs the others or the cache write. Computed once in `run_etf_rs`
+  **before** either file is written (soft: failure → files without the
+  line). Full holdings later = add an issuer source function in front of
+  the stockanalysis step. Spec:
   `docs/superpowers/specs/2026-10-31-etf-holdings-1m-rs-design.md`.
-  **Leaders watchlist** (since 2026-11-01, `etf_rs_leaders.py`,
-  `[etf_rs.leaders]`): right after the 1M file is written, its first
-  `top_etfs` (10) rows are read back and the symbols of their `1M强:`
-  lines merged in rank order (an ETF without a line contributes nothing,
-  no back-fill from rank 11) into `output/TV/US/ETF_rs_leaders.txt` — the
-  **master**: undated, comma-separated (TradingView import), append-only
-  in order of first appearance, never aged out (no retention regex
-  matches an undated name), delete to reset; hand edits with newlines /
+- **Leaders watchlist** (`etf_rs_leaders.py`, `[etf_rs.leaders]`): right
+  after the 1M file is written, its first `top_etfs` (10) rows are read
+  back (the **file**, not the in-memory tables, by design) and the symbols
+  of their `1M强:` lines merged in rank order (an ETF without a line
+  contributes nothing, no back-fill from rank 11) into
+  `output/TV/US/ETF_rs_leaders.txt` — the **master**: undated,
+  comma-separated (TradingView import), append-only in order of first
+  appearance, never aged out, delete to reset; hand edits with newlines /
   duplicates are read fine. Names the master lacked go to
   `<date>_ETF_rs_new.txt` (comma-sep; absent when nothing new; a same-day
-  rerun grows the master but keeps the first run's file; generic `TV/US`
-  5-day rule). Stem `ETF_rs_new` was chosen because the user's
-  `<date>_etf_rs.txt` differs from the legacy `_ETF_rs` stem only by
-  case on a case-insensitive FS. Reads the **file**, not the in-memory
-  tables, by design. Soft step; no ntfy / Webull / Futu / eod_seen.
-  **Master prune** (`prune_master`, same step, right AFTER today's names
-  were added, `prune = true` / `sma_period = 50`): one 6mo yfinance batch
-  of the master (Close + Low; `sma50_prune.drop_stale_series` +
-  `fill_missing_last_close` reused) → `find_break_drops`: trailing streak
+  rerun grows the master but keeps the first run's file; `TV/US` 5-day
+  rule; stem rationale → decisions, standing). Soft step; no ntfy / Webull
+  / Futu / eod_seen. **Master prune** (`prune_master`, same step, right
+  AFTER today's names were added, `prune = true` / `sma_period = 50`): one
+  6mo yfinance batch of the master (Close + Low; `sma50_prune.drop_stale_series`
+  + `fill_missing_last_close` reused) → `find_break_drops`: trailing streak
   of closes below SMA50 ≥ 2 sessions AND latest close < the **low of the
-  streak's first day** (first close under the line) → removed, written to
-  `<date>_ETF_rs_pruned.txt` (comma-sep, same-day rerun merges, 5-day
-  rule). This is NOT `sma50_prune`'s rule (that one compares with the
-  prior close) — do not unify them. Streak of 1 / close back above the
-  line (streak restarts) / close ≥ first-day low / < 50 bars / no data /
-  stale series / NaN first-day low → kept. Failed batch → prune skipped.
-  No `.bak`; the pruned file is the record. A pruned name re-enters the
-  next day it is in a top ETF's top 5. Test files that run `run_etf_rs`
-  stub `etf_rs_leaders._fetch_daily_bars` (autouse) or the prune goes
-  online. The cloud Pages build also runs it on its scratch master (~20s,
-  harmless).
-  **Also published to GitHub Pages** (https://ericxue92.github.io/momentum-scanner/):
-  `.github/workflows/etf_rs_page.yml` rebuilds it in the cloud
+  streak's first day** → removed, written to `<date>_ETF_rs_pruned.txt`
+  (comma-sep, same-day rerun merges, 5-day rule). This is NOT
+  `sma50_prune`'s rule (prior close) — do not unify them. Streak of 1 /
+  close back above the line (streak restarts) / close ≥ first-day low / <
+  50 bars / no data / stale series / NaN first-day low → kept. Failed batch
+  → prune skipped. No `.bak`; the pruned file is the record. A pruned name
+  re-enters the next day it is in a top ETF's top 5. Test files that run
+  `run_etf_rs` stub `etf_rs_leaders._fetch_daily_bars` (autouse) or the
+  prune goes online.
+- **Trend page** (`etf_rs_chart.py`): the same run writes
+  `output/Reports/ETF/etf_rs_trend.html` — **undated, overwritten** (it
+  carries its own history; no `_RETENTION_RULES` entry matches it, by
+  design). History is **recomputed from the run's klines** (`_fetch_klines`
+  pulls `1y`), not read from old `.txt`. Each day's score = `rank_etfs` on
+  klines truncated to that day (tests pin this), with today's ticker list +
+  adjusted closes, so a past day may sit a place off that day's `.txt`.
+  Y = 0-99 percentile (within the ETF set → RS ≥ 90 is always ~5 of 53) /
+  rank / raw excess return; top `chart_top_n` (20) thick. `write_trend_chart`
+  computes both histories (`score_history(weights_bars=WEIGHTS_1M_BARS)`
+  for 1M) on the 3M calendar and embeds them as `s`/`p` (3M) and `s1`/`p1`
+  (1M) per series; `run_etf_rs` passes the 3M-unscored names too
+  (`missing`, 21-63 bars) so they get a 1M line with null 3M. The holdings
+  line is embedded verbatim as `strong` per series (`extras=`) and rendered
+  under the holdings row of the side list (tooltip untouched). Soft inside
+  `run_etf_rs`: a render failure never costs the `.txt`.
+- **GitHub Pages** (https://ericxue92.github.io/momentum-scanner/):
+  `.github/workflows/etf_rs_page.yml` rebuilds the page in the cloud
   (`scripts/build_etf_rs_page.py` → `_site/index.html`, deployed as a Pages
-  artifact — **no HTML is committed**). Triggers: `workflow_run` after the
+  artifact — **no HTML is committed**) running the same `run_etf_rs` chain,
+  holdings line and leaders step included (`holdings_rs=False` is the
+  opt-out; cold constituent cache every run, ~3 min extra, job timeout 25
+  min; a stockanalysis block from GH IPs degrades to the yfinance top-10
+  line, never an empty page). Triggers: `workflow_run` after the
   launchd-dispatched US 3M RS workflow, a backup cron, manual dispatch —
-  and, **the reliable daily tick since 2026-10-23**, a direct
-  `gh workflow run etf_rs_page.yml` at the end of `run_eod.sh` (soft; never
-  changes the EOD exit status): the 08:45 dispatch fails when that slot
-  wakes on battery without a network (2026-10-23: 10/10 attempts, page
-  stayed on 10-22 while the local `.txt` was 10-23) and GH cron is
-  unreliable, whereas a finished us-eod proves the network is up. The build exits 1 when no page was produced so an
-  outage keeps yesterday's page live instead of deploying nothing. The local
-  copy under `output/Reports/ETF/` is independent of it.
+  and, **the reliable daily tick**, a direct `gh workflow run
+  etf_rs_page.yml` at the end of `run_eod.sh` (soft; never changes the EOD
+  exit status; → decisions 2026-10-23). The build exits 1 when no page was
+  produced so an outage keeps yesterday's page live instead of deploying
+  nothing. The local copy under `output/Reports/ETF/` is independent of it.
 
-## yfinance single-ticker frames
+## yfinance frames and batches
 
-- **yfinance single-ticker frames:** `group_by="ticker"` returns a (ticker,
-  field) MultiIndex even for ONE ticker (yfinance 1.x); every `single` branch
+- **Single-ticker frames:** `group_by="ticker"` returns a (ticker, field)
+  MultiIndex even for ONE ticker (yfinance 1.x); every `single` branch
   indexes `data["Close"]` flat, so each download site wraps the result in
-  `_flatten_single_ticker_frame`. Without it a one-hit screener day drops its
-  only candidate ("failed to process ..., dropping" — ACVA 2026-09-11).
-  Corollary: anything going through `_yf_download_with_retry` with ONE
-  ticker gets a flat frame back — `fetch_hsi_kline_yf` indexed `data["^HSI"]`
-  and KeyError'd on every run 2026-09-12 → 09-25 (HK rs-line audit scored
-  0/37, cloud HK RS shipped without `rs_below_ma`); it now accepts both shapes.
-  Same trap, found 2026-09-29: `us_rs_3m.fetch_us_klines_yf` indexed
-  `batch_data[t]` on the one-ticker SPY benchmark fetch (`_fetch_spy_kline`,
-  also any trailing batch of one) → no benchmark since 2026-09-12: US rs-line
-  audit scored 0/118 (no `rs_us_<date>.txt`), cloud US 3M CSVs shipped
-  absolute scores without the `rs_*_ma` columns (percentile order unaffected —
-  the benchmark score is a constant offset). `hk_eod.fetch_hk_klines_yf` had
-  the same latent bug. Both accept flat frames now. **Test fakes must mimic
-  the runtime shape** (flat for one ticker) — the old MultiIndex-only fake is
-  why the single-ticker test stayed green.
-  **Filters decide flat-vs-batch by the frame's shape** (`_is_flat_frame`),
+  `_flatten_single_ticker_frame`. Corollary: anything going through
+  `_yf_download_with_retry` with ONE ticker gets a flat frame back —
+  `fetch_hsi_kline_yf`, `us_rs_3m.fetch_us_klines_yf` (`_fetch_spy_kline`,
+  also any trailing batch of one) and `hk_eod.fetch_hk_klines_yf` accept
+  both shapes. **Test fakes must mimic the runtime shape** (flat for one
+  ticker) — a MultiIndex-only fake keeps a broken single-ticker path green
+  (→ decisions 2026-09-11, 2026-09-12).
+- **Filters decide flat-vs-batch by the frame's shape** (`_is_flat_frame`),
   never by `len(tickers) == 1`: morning-gap downloads `daily_data` once for
   the whole discovery list, so a lone survivor of a later gate is still
-  inside a MultiIndex batch — the old heuristic KeyError'd and dropped it
-  (PENG/DUOL/IONQ, 2162.HK, 2026-10). EOD Longs/Leaders batch downloads go
-  through `_download_daily_batch`: empty-after-retry or still-throttled
-  after one 30s cooldown = *degraded* → the group's drops are NOT recorded
-  in `ipo_drops` (2026-10-17: 43 Leaders names incl. ABBV/CRM went in from
-  one throttled batch). `rs_rating.fetch_rs_table` also catches
-  `http.client.HTTPException` / `UnicodeDecodeError` (neither is an
-  OSError; they aborted us-eod before any `.txt`). `_yf_download_with_retry`
-  waits `_YF_RETRY_DELAYS` (5s, 20s) between its 3 attempts — an empty batch
-  is Yahoo's throttle and its window is ≥ 30s. A Longs group downloads its
-  2mo batch once (`_longs_group_batch`, `batch=` on both filters). HK Shorts
-  goes through `_download_daily_batch(threads=True)` too. **K-line fetchers
-  recover once:** `us_rs_3m.fetch_us_klines_yf` (`recover=True`) and
-  `hk_eod.fetch_hk_klines_yf` re-download, after a 30s cooldown, the tickers
-  a failed or throttled batch left with NO data (a short-but-real history,
-  e.g. a fresh IPO, is not retried) — one pass, no loop, and skipped when
-  the first pass already took > 25 min (US) / 12 min (HK)
-  (`_RECOVERY_MAX_ELAPSED_SEC`: a dead Yahoo must not push the cloud job
-  past its GH timeout before `return 1`). One-batch callers
-  (SPY benchmark, IPO candidates, rs-line audit, ETF RS) had no second
-  chance before. IPO candidates still without k-lines are counted as
-  `drops['no_data']` (warned; re-evaluated next run), not silently lost.
+  inside a MultiIndex batch (→ decisions 2026-10).
+- **Throttled batches:** EOD Longs/Leaders batch downloads go through
+  `_download_daily_batch`: empty-after-retry or still-throttled after one
+  30s cooldown = *degraded* → the group's drops are NOT recorded in
+  `ipo_drops` (→ decisions 2026-10-17). `rs_rating.fetch_rs_table` also
+  catches `http.client.HTTPException` / `UnicodeDecodeError` (neither is an
+  OSError; they used to abort us-eod before any `.txt`).
+  `_yf_download_with_retry` waits `_YF_RETRY_DELAYS` (5s, 20s) between its 3
+  attempts — an empty batch is Yahoo's throttle and its window is ≥ 30s. A
+  Longs group downloads its 2mo batch once (`_longs_group_batch`, `batch=`
+  on both filters). HK Shorts goes through `_download_daily_batch(threads=True)`
+  too.
+- **K-line fetchers recover once:** `us_rs_3m.fetch_us_klines_yf`
+  (`recover=True`) and `hk_eod.fetch_hk_klines_yf` re-download, after a 30s
+  cooldown, the tickers a failed or throttled batch left with NO data (a
+  short-but-real history, e.g. a fresh IPO, is not retried) — one pass, no
+  loop, and skipped when the first pass already took > 25 min (US) / 12 min
+  (HK) (`_RECOVERY_MAX_ELAPSED_SEC`: a dead Yahoo must not push the cloud
+  job past its GH timeout before `return 1`). IPO candidates still without
+  k-lines are counted as `drops['no_data']` (warned; re-evaluated next
+  run), not silently lost.
 
 ## Futu sync
 
@@ -482,10 +439,9 @@ groups must be created by hand in the client (API can't create groups).
 - TCP probe `_opend_reachable` (1.5s) before `OpenQuoteContext` — without it the
   SDK retries forever on `ECONNREFUSED`. **Do not remove.**
 - **OpenD-down ntfy** (`main._alert_if_opend_down` → `notify.notify_opend_down`):
-  every Futu consumer soft-fails, so a dead OpenD used to leave only WARNINGs
-  while scans came back empty (2026-09-28: HK EOD, all 9 US morning-gap scans
-  and the next day's runs; KOD's pre-market gap never scanned). One probe at
-  the top of us-eod / hk-eod and of each **in-window** morning-gap scan
+  every Futu consumer soft-fails, so a dead OpenD would otherwise leave only
+  WARNINGs while scans come back empty (→ decisions 2026-09-28). One probe
+  at the top of us-eod / hk-eod and of each **in-window** morning-gap scan
   (out-of-window fires stay silent); high-priority push **once per HKT day**
   across all modes (`state/opend_down_alerted_<date>.txt`, written only after
   a successful POST so a failed push retries on the next scan; 2-day cleanup).
@@ -512,46 +468,37 @@ prev_close_price) / prev_close_price`. `pre_/after_change_rate` do exist.
   source `scripts/lib/hold_awake.sh` → `caffeinate -i -s -w $$ &`;
   `run_morning_gap.sh` / `run_hk_morning_gap.sh` `exec caffeinate -i -s uv
   run …`; the detached catalyst subprocess prepends its own
-  `/usr/bin/caffeinate -i -s`, `main._CAFFEINATE_BIN`). Do not remove. The
-  US morning-gap plist runs `run_morning_gap.sh` (log rotated daily like the
-  other wrappers; it used to write `launchd_morning_gap.log` via
-  StandardOutPath and grew unbounded). On battery
-  `pmset -g` has `sleep 1`: 2026-10-17 (12%, lid closed) us-eod idle-slept
-  3 min in and only advanced inside 5-15s DarkWake windows with no Wi-Fi/DNS
-  — 55 min, yfinance empty, Futu 网络中断, conditional RS (SPY -1.1%/QQQ
-  -2.5%) lost to NameResolutionError; the 08:45 trigger ran at a 09:01
-  DarkWake and slept 2s after dispatching. `-i` works on battery, `-s` is
-  AC-only; a lid-close by the user still sleeps the Mac. Belt-and-suspenders:
-  EOD/in-window morning-gap runs probe `pmset -g batt` (`power.py`,
+  `/usr/bin/caffeinate -i -s`, `main._CAFFEINATE_BIN`). Do not remove. `-i`
+  works on battery, `-s` is AC-only; a lid-close by the user still sleeps
+  the Mac (→ decisions 2026-10-17). Belt-and-suspenders: EOD/in-window
+  morning-gap runs probe `pmset -g batt` (`power.py`,
   `main._alert_if_on_battery`) and ntfy once per HKT day
   (`state/on_battery_alerted_<date>.txt`, 2-day cleanup); the conditional
   RS group retries network errors (`_retry_on_network_error`: wait for
   finviz reachable ≤ 180s, 3 attempts; non-network errors propagate); and
   the trigger script polls `gh run view` status/conclusion for up to ~20 min
   before alerting — `completed`+non-success → "failed", never confirmed →
-  "unconfirmed" (default priority, exit 2), so a watch killed by sleep /
-  no network no longer pushes a false "failed (conclusion=unknown)".
-  `TRIGGER_*` env overrides exist only for `tests/test_trigger_rs_workflow.py`.
+  "unconfirmed" (default priority, exit 2). `TRIGGER_*` env overrides exist
+  only for `tests/test_trigger_rs_workflow.py`. The US morning-gap plist
+  runs `run_morning_gap.sh` (log rotated daily like the other wrappers).
 - **RS workflow self-trigger:** GH Actions' scheduled cron is unreliable
-  (delayed hours; sometimes skipped — observed 2026-06-16: today's 3M CSV
-  missing because GH cron never fired). Launchd dispatches the workflow via
-  `gh workflow run` 75 min before EOD: `us-rs-3m-trigger` (Tue-Sat 08:45) and
-  `hk-rs-trigger` (Mon-Fri 18:45) → `scripts/trigger_rs_workflow.sh`. The
-  GH-side cron is kept as belt-and-suspenders; workflow's commit step is
-  idempotent (`git diff --staged --quiet → exit 0`) so a double-fire is
-  harmless. Failures ntfy via the morning-gap topic. Each trigger has a
-  pmset wake 1 min before it (08:44 Tue-Sat / 18:44 Mon-Fri, seeded weekly by
+  (delayed hours, sometimes skipped; → decisions 2026-06-16). Launchd
+  dispatches the workflow via `gh workflow run` 75 min before EOD:
+  `us-rs-3m-trigger` (Tue-Sat 08:45) and `hk-rs-trigger` (Mon-Fri 18:45) →
+  `scripts/trigger_rs_workflow.sh`. The GH-side cron is kept as
+  belt-and-suspenders; the workflow's commit step is idempotent (`git diff
+  --staged --quiet → exit 0`) so a double-fire is harmless. Failures ntfy via
+  the morning-gap topic. Each trigger has a pmset wake 1 min before it
+  (08:44 Tue-Sat / 18:44 Mon-Fri, seeded weekly by
   `schedule_morning_gap_wakes.py` with the morning-gap wakes) and the script
-  retries the dispatch ~5 min — without both, launchd ran the missed 08:45
-  slot at the next wake with no network (2026-10-15) and us-eod got a stale
-  3M table.
-  Every other launchd slot gets the same 1-min-lead wake (Mon-Fri): one
-  per US / HK morning-gap slot (`US_GAP_SLOTS` / `HK_GAP_SLOTS` — `pmset
-  sleep 1` re-sleeps an idle Mac within a minute and caffeinate only holds
-  during a scan, so one wake covers one slot; the 20:59 / 21:59 11-min-lead
-  wakes stay) and 19:59 for hk-eod (2026-10-16 it ran only when the lid
-  opened). `tests/test_schedule_wakes.py` reads the plists and fails when a
-  slot has no wake — edit the slot lists together with the plists.
+  retries the dispatch ~5 min (→ decisions 2026-10-15). Every other launchd
+  slot gets the same 1-min-lead wake (Mon-Fri): one per US / HK morning-gap
+  slot (`US_GAP_SLOTS` / `HK_GAP_SLOTS` — `pmset sleep 1` re-sleeps an idle
+  Mac within a minute and caffeinate only holds during a scan, so one wake
+  covers one slot; the 20:59 / 21:59 11-min-lead wakes stay) and 19:59 for
+  hk-eod (→ decisions 2026-10-16). `tests/test_schedule_wakes.py` reads the
+  plists and fails when a slot has no wake — edit the slot lists together
+  with the plists.
 - **Finviz 1000-row cap:** pages past r=1000 403 without Elite and the
   library swallows it. `run_screener` compares against the page's total and
   re-queries `order="-ticker"` for the tail (covers ≤ 2000 rows; beyond that
@@ -560,15 +507,13 @@ prev_close_price) / prev_close_price`. `pre_/after_change_rate` do exist.
   `_retry_on_network_error` (DNS/reset/5xx/finviz timeout/"Too many
   requests"; a Finviz 4xx is deterministic and NOT retried, except 429).
   Nothing else needs its own wrapper.
-- **Finviz redesign (2026-10-20):** the screener moved to `/screener/stocks`
-  with rows as SSR JSON; finviz 2.0.0 parsed nothing → NoResults → every US
-  EOD list empty, silently. `main.Screener` is now
-  `finviz_screener.Screener` (same `.data` / `._total_rows` / NoResults
-  surface; 20 rows/page, `r=` paging to the 1000 cap; Market Cap from the
-  overview row, `table` ignored). A page with no rows block raises
-  `FinvizLayoutError`; a filter code the page does not define raises
-  `FinvizFilterError` — the new site **silently ignores** unknown codes
-  (`ta_perf_52w150o` returned the whole market; Leaders 52W is now `+100%`,
+- **Finviz screener is `finviz_screener.Screener`** (not the library's; →
+  decisions 2026-10-20): the site serves `/screener/stocks` with rows as SSR
+  JSON (same `.data` / `._total_rows` / NoResults surface; 20 rows/page,
+  `r=` paging to the 1000 cap; Market Cap from the overview row, `table`
+  ignored). A page with no rows block raises `FinvizLayoutError`; a filter
+  code the page does not define raises `FinvizFilterError` — the site
+  **silently ignores** unknown codes (Leaders 52W is the preset `+100%`;
   `ta_perf` has no custom range). `ind_stocksonly` is implied by the path
   and whitelisted. `finviz.get_stock` (market check) still uses the library.
   **Guard:** `run_screener` counts into `_finviz_tally` (reset at us-eod
