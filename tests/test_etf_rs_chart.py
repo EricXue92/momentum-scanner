@@ -189,7 +189,10 @@ def test_render_embeds_the_strongest_holdings_line_per_series():
     # the ranking list renders it under the holdings of each row, set off
     # from the holdings by a rule above it
     assert "S[k].strong" in html
-    assert re.search(r"\.row \.st \{[^}]*border-top: 1px solid", html)
+    rule = re.search(r"\.row \.st \{([^}]*)\}", html).group(1)
+    assert "border-top: 1px solid var(--down)" in rule   # red rule
+    assert "font-size: 13.5px" in rule                    # larger than the 12px holdings
+    assert "margin-top: 8px" in rule and "padding-top: 6px" in rule
 
 
 def test_render_writes_unscored_days_as_null():
