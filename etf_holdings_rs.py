@@ -39,9 +39,15 @@ Spec: docs/superpowers/specs/2026-10-31-etf-holdings-1m-rs-design.md
 from __future__ import annotations
 
 import html as _html
+import json
 import logging
 import re
-from typing import NamedTuple
+import time
+import urllib.error
+import urllib.request
+from datetime import date, timedelta
+from pathlib import Path
+from typing import Callable, NamedTuple
 
 logger = logging.getLogger("momentum_scanner")
 
@@ -110,3 +116,138 @@ def to_yf_symbol(sym: str) -> str:
 def from_yf_symbol(sym: str) -> str:
     """yfinance → display symbol (``BRK-B`` → ``BRK.B``)."""
     return sym.replace("-", ".")
+
+
+# --- constituent sources --------------------------------------------------
+
+HOLDINGS_URL = "https://stockanalysis.com/etf/{slug}/holdings/"
+_UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+       "(KHTML, like Gecko) Chrome/130.0 Safari/537.36")
+_SRC_SA = "stockanalysis"
+_SRC_YF = "yf_top10"
+
+
+def cache_path(output_dir: Path, day: date) -> Path:
+    return output_dir / "state" / f"etf_holdings_{day.strftime('%Y_%m_%d')}.json"
+
+
+def load_cache(output_dir: Path, day: date) -> dict[str, Constituents]:
+    """``{etf: Constituents}`` from that day's cache; missing / unreadable /
+    malformed → ``{}`` (the chain just moves on)."""
+    p = cache_path(output_dir, day)
+    try:
+        raw = json.loads(p.read_text())
+        out: dict[str, Constituents] = {}
+        for etf, rec in raw.items():
+            syms = rec.get("symbols")
+            if isinstance(syms, list) and syms:
+                out[str(etf)] = Constituents([str(x) for x in syms], str(rec.get("source", _SRC_SA)))
+        return out
+    except FileNotFoundError:
+        return {}
+    except Exception as e:  # corrupt JSON, wrong shape
+        logger.warning(f"[{_LABEL}] ignoring unreadable cache {p.name}: {e}")
+        return {}
+
+
+def save_cache(output_dir: Path, day: date, data: dict[str, Constituents]) -> None:
+    """Persist only the stockanalysis-sourced entries (a fallback list must
+    never be walked back to as the real one). Soft: write failure = WARNING."""
+    keep = {etf: {"symbols": c.symbols, "source": c.source}
+            for etf, c in data.items() if c.source == _SRC_SA and c.symbols}
+    if not keep:
+        return
+    p = cache_path(output_dir, day)
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(json.dumps(keep, ensure_ascii=False, indent=0))
+    except OSError as e:
+        logger.warning(f"[{_LABEL}] cannot write cache {p}: {e}")
+
+
+def _fetch_page(url: str, timeout: float = 15.0) -> str | None:
+    req = urllib.request.Request(url, headers={"User-Agent": _UA, "Accept": "text/html"})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            if resp.status != 200:
+                logger.warning(f"[{_LABEL}] {url} -> HTTP {resp.status}")
+                return None
+            return resp.read().decode("utf-8", errors="replace")
+    except (urllib.error.URLError, OSError, ValueError) as e:
+        logger.warning(f"[{_LABEL}] {url} failed: {e}")
+        return None
+
+
+def _yf_top_holdings(etf: str) -> list[str] | None:
+    import yfinance as yf
+    df = yf.Ticker(etf).funds_data.top_holdings
+    if df is None or df.empty:
+        return None
+    return [str(s) for s in df.index]
+
+
+def fetch_constituents(
+    etfs: list[str],
+    today: date,
+    output_dir: Path,
+    cfg: dict,
+    *,
+    fetch_page: Callable[[str], str | None] | None = None,
+    yf_top10: Callable[[str], list[str] | None] | None = None,
+    sleep: Callable[[float], None] = time.sleep,
+) -> dict[str, Constituents]:
+    """Source chain per ETF (first hit wins): today's cache → stockanalysis
+    live → earlier cache ≤ ``cache_max_age_days`` → yfinance top-10 → absent.
+    Writes today's cache (stockanalysis entries only) once at the end."""
+    fetch_page = fetch_page or _fetch_page
+    yf_top10 = yf_top10 or _yf_top_holdings
+    max_age = int(cfg.get("cache_max_age_days", 7))
+    delay = float(cfg.get("request_delay_sec", 0.8))
+
+    today_cache = load_cache(output_dir, today)
+    older: dict[int, dict[str, Constituents]] = {}   # lazily loaded, keyed by days back
+    result: dict[str, Constituents] = {}
+    fetched_live = False
+    for etf in etfs:
+        if etf in today_cache:
+            result[etf] = today_cache[etf]
+            logger.info(f"[{_LABEL}] {etf}: {len(result[etf].symbols)} symbols (cache, today)")
+            continue
+        # 2. live
+        if fetched_live and delay > 0:
+            sleep(delay)
+        page = fetch_page(HOLDINGS_URL.format(slug=etf.lower()))
+        fetched_live = True
+        syms = parse_holdings_html(page) if page else None
+        if syms:
+            result[etf] = Constituents(syms, _SRC_SA)
+            logger.info(f"[{_LABEL}] {etf}: {len(syms)} symbols (stockanalysis)")
+            continue
+        logger.warning(f"[{_LABEL}] {etf}: stockanalysis gave no holdings table")
+        # 3. walk back
+        hit = None
+        for k in range(1, max_age + 1):
+            if k not in older:
+                older[k] = load_cache(output_dir, today - timedelta(days=k))
+            c = older[k].get(etf)
+            if c and c.source == _SRC_SA:
+                hit = (today - timedelta(days=k), c)
+                break
+        if hit:
+            day, c = hit
+            result[etf] = Constituents(c.symbols, f"{_SRC_SA}-cache:{day.isoformat()}")
+            logger.info(f"[{_LABEL}] {etf}: {len(c.symbols)} symbols (cache from {day.isoformat()})")
+            continue
+        # 4. yfinance top-10
+        try:
+            top = yf_top10(etf)
+        except Exception as e:
+            logger.warning(f"[{_LABEL}] {etf}: yfinance top holdings failed: {e}")
+            top = None
+        if top:
+            result[etf] = Constituents(list(top), _SRC_YF)
+            logger.info(f"[{_LABEL}] {etf}: {len(top)} symbols (yfinance top-10 fallback)")
+            continue
+        logger.warning(f"[{_LABEL}] {etf}: no constituents from any source; no 1M line today")
+    save_cache(output_dir, today, {**today_cache, **result})
+    return result
