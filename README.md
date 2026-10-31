@@ -174,14 +174,17 @@ A daily sector / theme rotation view: a fixed list of ~50 ETFs (US sectors and t
 
   ```
   1. IEO = - 油气勘探开采 | COP、VLO、MPC、PSX、DVN
+     1M强: RRC > AR > VG > APA > COP
   2. IBIT 🟢↑1 - 比特币 | 不适用: 主要资产为比特币
   3. ARKG 🔴↓1 - 基因组革命 | TXG、TWST、TEM、CRSP、PSNL
   ```
 
 - **Rank change:** the marker after the ticker compares with the most recent earlier day's file: `🟢↑N` up N places, `🔴↓N` down N, `=` unchanged, `新` new to the list. A same-day rerun still compares with the previous day; with no earlier file (first run, or a gap longer than the 5-day retention) the marker is omitted.
-- **Human-readable, not a TradingView import** — the only non-comma `.txt` in `TV/US/`. The full scored table (rank / score / percentile) goes to the EOD log.
+- **Human-readable, not a TradingView import** — the two ranking files are the only non-comma `.txt` in `TV/US/`. The full scored table (rank / score / percentile) goes to the EOD log.
 - **Maintenance:** edit `[etf_rs.tickers]` (`TICKER = "name"`) to change the list. Holdings come from the static, hand-maintained `[etf_rs.holdings]` table (no API refresh; missing entry → segment omitted).
-- **Trend page:** the same step also writes `output/Reports/ETF/etf_rs_trend.html` (one self-contained file, overwritten every run). It recomputes each past trading day's score from the same klines (~190 days, no state file), so it is not limited by the 5-day `.txt` retention. Y axis switches between the 0–99 RS percentile (default, RS 90 line marked), rank, and the raw 3M excess return; the latest top `chart_top_n` (20) are drawn thick, and hovering / the side list shows each ETF's top-10 holdings. History uses today's ticker list and adjusted closes, so a past day can sit a place or two off that day's `.txt`. The page is also published at <https://ericxue92.github.io/momentum-scanner/>: a GitHub Actions workflow (`etf_rs_page.yml`) rebuilds it in the cloud after each US close and deploys it to GitHub Pages, independent of the local machine.
+- **Strongest holdings line:** under every ETF row in both files, an indented `   1M强: A > B > C > D > E` lists the ETF's **US-listed** constituents ranked by the same 1-month ladder vs SPY (within the ETF, top `top_n` = 5; fewer when fewer score, no line when none). Constituents come from stockanalysis.com's holdings page (free tier = top 25 by weight), cached per day under `output/state/`, with yfinance's top-10 as fallback (line marked ` (前十大)`). ETFs without stock holdings (IBIT) have no line. Config `[etf_rs.holdings_rs]`; soft — a failure writes the files without the line.
+- **Leaders watchlist:** the strongest constituents of the 1M top `top_etfs` (10) ETFs are merged, in rank order, into a cumulative TradingView list `output/TV/US/ETF_rs_leaders.txt` — undated, comma-separated, append-only, never aged out (delete it to reset). Names it did not have yet are also written to `<date>_ETF_rs_new.txt` (absent when nothing is new; a same-day rerun grows the master but keeps the first run's file). Config `[etf_rs.leaders]`; no ntfy.
+- **Trend page:** the same step also writes `output/Reports/ETF/etf_rs_trend.html` (one self-contained file, overwritten every run). It recomputes each past trading day's score from the same klines (~190 days, no state file), so it is not limited by the 5-day `.txt` retention. Y axis switches between the 0–99 RS percentile (default, RS 90 line marked), rank, and the raw 3M excess return; the latest top `chart_top_n` (20) are drawn thick, and hovering / the side list shows each ETF's top-10 holdings; the side list also carries the `1M强:` line. History uses today's ticker list and adjusted closes, so a past day can sit a place or two off that day's `.txt`. The page is also published at <https://ericxue92.github.io/momentum-scanner/>: a GitHub Actions workflow (`etf_rs_page.yml`) rebuilds it in the cloud after each US close (same chain as locally, holdings line included) and deploys it to GitHub Pages, independent of the local machine.
 - **Same name = same instrument:** tickers with an identical name collapse to the strongest one (e.g. the former GDXU / NUGT pair; the current table has no duplicate names, the rule stays in place); the log lists what was hidden.
 - Ranking snapshot only: a same-day rerun overwrites; no dedup, no Webull mirror, no Futu/TV sync.
 
@@ -303,7 +306,8 @@ output/
 ├── TV/                        # comma-separated, for TradingView "Import list..."
 │   ├── US/<date>_{TheSetup,EarningsGap,HighVolume,GapUp,NewHigh52W,TopGainers,Leaders,RS,Shorts,IPO,Repeat}.txt
 │   ├── US/<date>_{MorningGapPre{20,10,5},MorningGap{5..30}}.txt
-│   ├── US/<date>_ETF_rs_3m.txt   # ETF strength ranking — human-readable, NOT an import list
+│   ├── US/<date>_ETF_rs_3m.txt   # ETF strength ranking (+ _1m.txt) — human-readable, NOT an import list
+│   ├── US/ETF_rs_leaders.txt     # cumulative leaders watchlist (undated master, comma-sep); <date>_ETF_rs_new.txt = the day's additions
 │   ├── US/<date>_SMA50Pruned.txt   # names the SMA50 auto-prune removed from the master today
 │   ├── US/rs_us_<date>.txt    # daily strongest-RS top 10 (US)
 │   └── HK/<date>_{EarningsGap,HighVolume,GapUp,Leaders,RS,Shorts,IPO,HKMorningGap{10..60}}.txt
@@ -319,7 +323,7 @@ output/
 - **Ticker format** — US: `NASDAQ:AAPL` / `NYSE:WMT` / `AMEX:GLD`. HK: `HKEX:NNN` **without leading zeros** (`HKEX:700`, `HKEX:9988`) — TradingView silently rejects `HKEX:0700`.
 - **Webull** must be newline-separated; its upload silently truncates comma lists.
 - **Importing** — TradingView: Watchlist → "Import list..." → a file from `output/TV/`. Webull: Watchlist → "Upload as File" → the matching file from `output/Webull/`.
-- **Retention** (auto-cleanup, soft-fail): TV / Webull 5 days · rs-audit 5 days · RS top-10 snapshots 4 days · Reports 7 days (the ETF trend page is overwritten in place, never aged out) · state caches 2–4 days. Masters (`eod_seen_*`), `ntfy_last_seen.txt`, `edgar_cache/` and logs are never touched.
+- **Retention** (auto-cleanup, soft-fail): TV / Webull 5 days · rs-audit 5 days · RS top-10 snapshots 4 days · Reports 7 days (the ETF trend page is overwritten in place, never aged out; the undated `ETF_rs_leaders.txt` master is never aged out either) · state caches 2–4 days. Masters (`eod_seen_*`), `ntfy_last_seen.txt`, `edgar_cache/` and logs are never touched.
 
 ## Sync and Notifications
 
