@@ -339,10 +339,16 @@ local (throttle-prone) k-line fetch.
   others or the cache write. Computed once in
   `run_etf_rs` **before** either file is written (soft: failure → files
   without the line); `read_previous_ranks` skips indented lines so the
-  rank markers ignore it. The cloud Pages build passes
-  `run_etf_rs(holdings_rs=False)` — no scrape, no ~1000-ticker download in
-  GH Actions, page unchanged. Full holdings later = add an issuer source
-  function in front of the stockanalysis step. Spec:
+  rank markers ignore it. **The trend page shows the same line** (since
+  2026-11-01): `write_trend_chart(extras=)` embeds it verbatim as `strong`
+  per series and the ranking list renders it under the holdings row
+  (tooltip untouched); the cloud Pages build therefore runs the full chain
+  too (`run_etf_rs` default, `holdings_rs=True`; `holdings_rs=False` is
+  the opt-out) — cold constituent cache every run (scratch dir), ~3 min
+  extra, workflow timeout 25 min; a stockanalysis block from GH IPs
+  degrades to the yfinance top-10 line, never an empty page. Full
+  holdings later = add an issuer source function in front of the
+  stockanalysis step. Spec:
   `docs/superpowers/specs/2026-10-31-etf-holdings-1m-rs-design.md`.
   **Also published to GitHub Pages** (https://ericxue92.github.io/momentum-scanner/):
   `.github/workflows/etf_rs_page.yml` rebuilds it in the cloud

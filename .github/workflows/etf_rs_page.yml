@@ -28,7 +28,7 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
 
     steps:
       - uses: actions/checkout@v4
@@ -42,7 +42,9 @@ jobs:
         run: uv sync --frozen
 
       # Exits 1 when no page was produced, so a Yahoo outage skips the deploy
-      # and Pages keeps serving the previous page.
+      # and Pages keeps serving the previous page. Includes the per-ETF
+      # holdings step (stockanalysis scrape + ~660-ticker download, ~3 min;
+      # the job timeout above leaves room for its 30s kline recovery pass).
       - name: Build page
         run: uv run python scripts/build_etf_rs_page.py _site
 

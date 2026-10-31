@@ -62,11 +62,11 @@ def test_build_fails_when_the_list_is_disabled(tmp_path, monkeypatch):
     assert not site.exists()
 
 
-def test_build_disables_holdings_rs(tmp_path, monkeypatch):
+def test_build_runs_the_holdings_step_and_embeds_its_line(tmp_path, monkeypatch):
     monkeypatch.setattr(etf_rs, "_fetch_klines", lambda *a, **k: {
         "AAA": _walk(1), "BBB": _walk(2), "SPY": _walk(9)})
-
-    def never(*a, **k):
-        raise AssertionError("holdings step must not run in the cloud build")
-    monkeypatch.setattr(etf_holdings_rs, "compute_extras", never)
-    assert build_etf_rs_page.build(tmp_path / "site", _config(tmp_path, _CFG)) == 0
+    monkeypatch.setattr(etf_holdings_rs, "compute_extras",
+                        lambda *a, **k: {"AAA": "1M强: X > Y"})
+    site = tmp_path / "site"
+    assert build_etf_rs_page.build(site, _config(tmp_path, _CFG)) == 0
+    assert '"strong":"1M强: X > Y"' in (site / "index.html").read_text(encoding="utf-8")

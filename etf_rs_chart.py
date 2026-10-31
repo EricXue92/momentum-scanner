@@ -125,13 +125,17 @@ def render_html(
     today: date,
     top_n: int = 20,
     history_1m: pd.DataFrame | None = None,
+    extras: dict[str, str] | None = None,
 ) -> str:
     """The self-contained page. Series keep ``history``'s column order (the
     caller passes today's ranking order, strongest first); per day it embeds
     the 0-99 RS percentile (``p``) and the raw relative score in percent
     (``s``) of the 3M ladder, plus the same for the 1M ladder (``p1`` /
     ``s1``, from ``history_1m`` aligned to ``history``'s calendar and
-    columns), unscored days as null."""
+    columns), unscored days as null. ``extras`` is the per-ETF
+    ``1M强: A > B …`` line of the ``.txt`` (``etf_holdings_rs``), embedded
+    verbatim as ``strong`` ("" when absent) and shown under the holdings
+    in the ranking list."""
     pct = percentile_history(history)
     if history_1m is None or history_1m.empty:
         h1 = pd.DataFrame(index=history.index, columns=history.columns, dtype=float)
@@ -149,6 +153,7 @@ def render_html(
                 "t": t,
                 "name": names.get(t, ""),
                 "holdings": holdings.get(t, ""),
+                "strong": (extras or {}).get(t, ""),
                 "s": [None if pd.isna(v) else round(float(v) * 100, 2) for v in history[t]],
                 "p": [None if pd.isna(v) else int(v) for v in pct[t]],
                 "s1": [None if pd.isna(v) else round(float(v) * 100, 2) for v in h1[t]],
@@ -171,6 +176,7 @@ def write_trend_chart(
     output_dir: Path,
     today: date,
     top_n: int = 20,
+    extras: dict[str, str] | None = None,
 ) -> Path | None:
     """Write ``Reports/ETF/etf_rs_trend.html`` (overwritten every run) for
     ``tickers`` in the given order — 3M history plus the 1M weekly-ladder
@@ -189,7 +195,8 @@ def write_trend_chart(
     target = output_dir / _SUBDIR
     target.mkdir(parents=True, exist_ok=True)
     out = target / _FILENAME
-    out.write_text(render_html(history, names, holdings, benchmark, today, top_n, history_1m),
+    out.write_text(render_html(history, names, holdings, benchmark, today, top_n, history_1m,
+                               extras=extras),
                    encoding="utf-8")
     logger.info(
         f"[{_LABEL}] trend chart: {len(history.columns)} ETFs x {len(history)} days "
@@ -347,6 +354,7 @@ svg.dim .lab:not(.is-hover) { opacity: 0.4; }
 .row .df { grid-column: 4 / -1; color: var(--muted); font-size: 11.5px; font-variant-numeric: tabular-nums; margin-top: 1px; }
 .row .df b { font-weight: 650; }
 .row .hd { grid-column: 4 / -1; color: var(--muted); font-size: 12px; margin-top: 1px; }
+.row .st { grid-column: 4 / -1; color: var(--ink2); font-size: 12px; margin-top: 1px; font-variant-numeric: tabular-nums; }
 .row.rest .tk { font-weight: 500; }
 .split { padding: 6px 14px; font-size: 11.5px; color: var(--muted); background: var(--band); border-bottom: 1px solid var(--grid); }
 </style>
@@ -937,6 +945,8 @@ svg.dim .lab:not(.is-hover) { opacity: 0.4; }
       const gw = GROUP_WORD[diffGroup(k, last)];
       h('b', diffCls(k, last), fmtDiff(dv) + (gw ? ' ' + gw : ''), df);
       if (S[k].holdings) h('span', 'hd', S[k].holdings, row);
+      // per-ETF strongest US constituents on the 1M ladder (etf_holdings_rs), same text as the .txt
+      if (S[k].strong) h('span', 'st', S[k].strong, row);
       row.addEventListener('pointerenter', () => setHover(k, null));
       row.addEventListener('pointerleave', () => setHover(null, null));
       row.addEventListener('focus', () => setHover(k, null));

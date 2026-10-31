@@ -429,7 +429,7 @@ def run_etf_rs(cfg: dict, output_dir: Path, today: date,
         # 3M-unscored names (21-63 bars) still get a 1M line on the page.
         etf_rs_chart.write_trend_chart(
             klines, list(table.index) + missing, benchmark, names, holdings, output_dir, today,
-            top_n=int(cfg.get("chart_top_n", 20)),
+            top_n=int(cfg.get("chart_top_n", 20)), extras=extras,
         )
     except Exception as e:
         logger.warning(f"[{_LABEL}] trend chart failed, ranking unaffected: {e}")

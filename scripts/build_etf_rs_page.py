@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Cloud-side build of the ETF RS trend page for GitHub Pages.
 
-Runs the same ``etf_rs.run_etf_rs`` as us-eod (one ~50-ticker yfinance batch,
-``[etf_rs]`` from config.toml) into a scratch output dir, then copies
+Runs the same ``etf_rs.run_etf_rs`` as us-eod (one ~50-ticker yfinance batch
+plus the per-ETF holdings step, ``[etf_rs]`` from config.toml) into a scratch
+output dir, then copies
 ``Reports/ETF/etf_rs_trend.html`` to ``<site_dir>/index.html`` for
 ``actions/upload-pages-artifact``. The dated ``.txt`` it also writes stays in
 the scratch dir — nothing is committed back to the repo.
@@ -43,9 +44,10 @@ def build(site_dir: Path, config_path: Path = _REPO_ROOT / "config.toml") -> int
     # Same calendar day the local us-eod stamps on the page.
     today = datetime.now(ZoneInfo("Asia/Hong_Kong")).date()
     with tempfile.TemporaryDirectory() as scratch:
-        # No stockanalysis scrape / constituent download in the cloud: the
-        # page does not show the per-ETF holdings line.
-        etf_rs.run_etf_rs(cfg, Path(scratch), today, holdings_rs=False)
+        # Same chain as us-eod, holdings line included: stockanalysis scrape
+        # + one ~660-ticker constituent download (~3 min; no persistent
+        # state dir here, so the constituent cache is cold every run).
+        etf_rs.run_etf_rs(cfg, Path(scratch), today)
         page = Path(scratch) / _PAGE
         if not page.is_file():
             logger.error("[ETF RS] no trend page produced; keeping the deployed one")

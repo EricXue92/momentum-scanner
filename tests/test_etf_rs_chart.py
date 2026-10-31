@@ -173,8 +173,21 @@ def test_render_embeds_series_in_given_order_with_names_holdings_and_percent_sco
         "s": [round(v * 100, 2) for v in hist["AAA"]],
         "p": [int(v) for v in etf_rs_chart.percentile_history(hist)["AAA"]],
         "s1": [None] * len(hist), "p1": [None] * len(hist),  # no 1M history given
+        "strong": "",  # no extras given
     }
     assert data["series"][0]["holdings"] == ""
+
+
+def test_render_embeds_the_strongest_holdings_line_per_series():
+    hist = etf_rs_chart.score_history(_klines(), ["BBB", "AAA"], "SPY")
+    html = etf_rs_chart.render_html(
+        hist, {}, {}, "SPY", date(2026, 9, 12),
+        extras={"AAA": "1M强: X > Y > Z", "ZZZ": "1M强: ignored"},
+    )
+    data = _payload(html)
+    assert [s["strong"] for s in data["series"]] == ["", "1M强: X > Y > Z"]
+    # the ranking list renders it under the holdings of each row
+    assert "S[k].strong" in html
 
 
 def test_render_writes_unscored_days_as_null():
@@ -209,6 +222,15 @@ def test_write_trend_chart_overwrites_one_undated_file(tmp_path):
     assert [s["t"] for s in _payload(out.read_text())["series"]] == ["AAA"]
 
 
+def test_write_trend_chart_passes_extras_through(tmp_path):
+    out = etf_rs_chart.write_trend_chart(
+        _klines(), ["AAA", "BBB"], "SPY", {}, {}, tmp_path, date(2026, 9, 12),
+        extras={"BBB": "1M强: Q (前十大)"},
+    )
+    data = _payload(out.read_text())
+    assert {s["t"]: s["strong"] for s in data["series"]} == {"AAA": "", "BBB": "1M强: Q (前十大)"}
+
+
 def test_write_trend_chart_without_history_writes_nothing(tmp_path):
     out = etf_rs_chart.write_trend_chart({}, ["AAA"], "SPY", {}, {}, tmp_path, date(2026, 9, 12))
     assert out is None and not (tmp_path / "Reports").exists()
@@ -232,6 +254,16 @@ def test_run_writes_chart_in_ranking_order(tmp_path, monkeypatch):
     ranked = [line.split()[1] for line in out.read_text().splitlines()]
     chart = tmp_path / "Reports" / "ETF" / "etf_rs_trend.html"
     assert [s["t"] for s in _payload(chart.read_text())["series"]] == ranked
+
+
+def test_run_passes_the_holdings_line_to_the_chart(tmp_path, monkeypatch):
+    monkeypatch.setattr(etf_rs, "_fetch_klines", lambda *a, **k: _klines())
+    monkeypatch.setattr(etf_holdings_rs, "compute_extras",
+                        lambda *a, **k: {"AAA": "1M强: X > Y"})
+    etf_rs.run_etf_rs(_cfg(), tmp_path, date(2026, 9, 12))
+    chart = tmp_path / "Reports" / "ETF" / "etf_rs_trend.html"
+    strong = {s["t"]: s["strong"] for s in _payload(chart.read_text())["series"]}
+    assert strong["AAA"] == "1M强: X > Y" and strong["BBB"] == ""
 
 
 def test_run_chart_failure_does_not_lose_the_ranking(tmp_path, monkeypatch):
