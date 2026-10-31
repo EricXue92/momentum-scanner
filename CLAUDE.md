@@ -255,7 +255,7 @@ local (throttle-prone) k-line fetch.
   `[etf_rs.tickers]` table (ticker = 中文名, 49 entries) is scored
   **locally** with the same 3M algorithm (`compute_us_rs_3m_table`, vs
   `benchmark` SPY; one yfinance batch, no cloud step) and written to
-  `output/TV/US/<date>_ETF_rs_3m.txt` (stem `ETF_rs` before 2026-10-15) as **one `N. TICKER 🟢↑N - 中文名 | 前五大持仓`
+  `output/TV/US/<date>_ETF_rs_3m.txt` (stem `ETF_rs` before 2026-10-15) as **one `N. TICKER 🟢↑N - 中文名 | 前十大持仓`
   per line, strongest at the top** — human-readable, NOT a TradingView
   import (the only non-comma `.txt` in `TV/US/`). The **rank-change marker**
   after the ticker (`🟢↑N` / `🔴↓N` / `=` / `新`, `rank_delta_marker`; the

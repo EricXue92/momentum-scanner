@@ -9,7 +9,7 @@ and renders one self-contained HTML page:
 ``output/Reports/ETF/etf_rs_trend.html`` — X = trading day, Y = the 0-99 RS
 percentile (default, with a marked RS 90 line), rank, or the raw 3M relative
 score (toggle); the latest top ``chart_top_n`` are drawn thick, every ETF's
-中文名 + 前五大持仓 sit in the side list / tooltip. The percentile is **within
+中文名 + 前十大持仓 sit in the side list / tooltip. The percentile is **within
 the ETF set** (like the daily ranking), so RS >= 90 is by construction the
 top ~10% of the list — about 5 of 52 names.
 

@@ -8,7 +8,7 @@ the ETF set*, not against the ~6000-stock Fred6725 universe. Computed locally:
 pushed the stock-universe compute to GitHub Actions.
 
 Output: ``output/TV/US/<YYYY_MM_DD>_ETF_rs_3m.txt`` — one ETF per line,
-strongest at the top, ``TICKER 🟢↑N - 中文名 | 前五大持仓`` (``🟢↑N`` / ``🔴↓N`` /
+strongest at the top, ``TICKER 🟢↑N - 中文名 | 前十大持仓`` (``🟢↑N`` / ``🔴↓N`` /
 ``=`` / ``新`` = rank change vs the latest earlier snapshot **of the same
 stem** in the same folder, see ``read_previous_ranks``; omitted when none
 exists; name from the
@@ -263,7 +263,7 @@ def write_ranking(
     stem: str = _STEM,
 ) -> Path | None:
     """Write ``TV/US/<YYYY_MM_DD>_<stem>.txt`` (``_STEM`` 3M / ``_STEM_1M`` 1M): one
-    ``N. TICKER 🟢↑N - 中文名 | 前五大持仓`` per line (``N.`` = 1-based rank),
+    ``N. TICKER 🟢↑N - 中文名 | 前十大持仓`` per line (``N.`` = 1-based rank),
     strongest at the top (name /
     holdings segments omitted when unknown). The rank-change marker
     (``rank_delta_marker`` vs ``prev_ranks``) is omitted entirely when there
