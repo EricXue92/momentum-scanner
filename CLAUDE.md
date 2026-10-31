@@ -252,7 +252,7 @@ local (throttle-prone) k-line fetch.
 ## ETF 3M RS ranking
 
 - **ETF 3M RS ranking** (`etf_rs.py`, `[etf_rs]` config): the fixed
-  `[etf_rs.tickers]` table (ticker = 中文名, 54 entries) is scored
+  `[etf_rs.tickers]` table (ticker = 中文名, 53 entries) is scored
   **locally** with the same 3M algorithm (`compute_us_rs_3m_table`, vs
   `benchmark` SPY; one yfinance batch, no cloud step) and written to
   `output/TV/US/<date>_ETF_rs_3m.txt` (stem `ETF_rs` before 2026-10-15) as **one `N. TICKER 🟢↑N - 中文名 | 前十大持仓`

@@ -173,7 +173,7 @@ A daily sector / theme rotation view: a fixed list of ~50 ETFs (US sectors and t
 - **Output:** `output/TV/US/<date>_ETF_rs_3m.txt`, one ETF per line, **strongest first**, as `N. TICKER rank-change - name | top-10 holdings` (`N.` = rank): A second file `<date>_ETF_rs_1m.txt` ranks the same list on a 1-month weekly ladder (`0.4·R5 + 0.2·R10 + 0.2·R15 + 0.2·R20`), same format, with its own rank-change markers.
 
   ```
-  1. BWET = - 油轮运费期货 | 不适用: 油轮运费期货及现金抵押品
+  1. IEO = - 油气勘探开采 | COP、VLO、MPC、PSX、DVN
   2. IBIT 🟢↑1 - 比特币 | 不适用: 主要资产为比特币
   3. ARKG 🔴↓1 - 基因组革命 | TXG、TWST、TEM、CRSP、PSNL
   ```

@@ -160,7 +160,6 @@ BOTZ = "机器人与 AI"
 XHB  = "住宅建筑"
 NASA = "太空经济"
 UFO  = "太空产业 (卫星通信)"
-BWET = "油轮运费期货"
 URA  = "铀矿"
 NLR  = "核能与铀"
 REMX = "稀土与战略金属"
@@ -199,7 +198,7 @@ XLB  = "原材料"
 # 发行商官网刷一遍即可。ETN / 商品 / 期货类无股票持仓, 写简短说明。
 [etf_rs.holdings]
 # 前十大持仓, 整理日 2026-10-31 (yfinance funds_data.top_holdings, 已剔除现金/货基)。
-# DRAM / DXYZ / IBIT / BWET / NCLD 数据源不全 (互换、未上市公司、非股票), 保留原手工条目。
+# DRAM / DXYZ / IBIT / NCLD 数据源不全 (互换、未上市公司、非股票), 保留原手工条目。
 # --- 美股行业 / 主题 ---
 DRAM = "MU、005930(三星电子)、000660(SK海力士)、SNDK、STX (合并股票+互换敞口)"
 XBI  = "TWST、MRNA、NTRA、IOVA、AMGN、BIIB、UTHR、ABBV、HALO、SYRE"
@@ -231,7 +230,6 @@ BOTZ = "ISRG、6954(发那科)、6861(基恩士)、NVDA、ABBN(ABB)、6273(SMC)�
 XHB  = "SN、CVCO、SKY、JCI、W、TT、ALLE、LEN、MOD、WSM"
 NASA = "RKLB、SPCX(SpaceX)、ASTS、VSAT、3491(环宇-KY)、MDA(加)、FTC(英)、FLY、LUNR (仅 9 只股票)"
 UFO  = "SPCX(SpaceX)、RKLB、GRMN、TRMB、ASTS、ECHO(EchoStar)、VSAT、SIRI、PL、IRDM"
-BWET = "不适用: 油轮运费期货及现金抵押品"
 URA  = "CCO(Cameco)、NXE、OKLO、UEC、KAP(伦敦GDR)、PDN(澳)、UUUU、SMR、LEU (已排除实物铀信托)"
 NLR  = "CEG、CCJ、PEG、FORTUM(芬兰)、BWXT、NXE、1816(中广核电力)、OKLO、KAP(伦敦GDR)、XE"
 REMX = "SQM、ALB、MP、PLS(澳)、LYC(澳)、600111(北方稀土)、601958(金钼股份)、600549(厦门钨业)、7610(台湾)、ALM"
