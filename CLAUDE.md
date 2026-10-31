@@ -324,9 +324,19 @@ local (throttle-prone) k-line fetch.
   cache ≤ `cache_max_age_days` (7) → yfinance `funds_data.top_holdings`
   (line gets ` (前十大)`) → nothing. Cache
   `output/state/etf_holdings_<YYYY_MM_DD>.json` holds stockanalysis
-  results only (foreign codes included; filtered at ranking), 8-day
-  cleanup rule; a same-day rerun reads it and never goes online. `BRK.B`
-  is requested as `BRK-B`, displayed as `BRK.B`. Computed once in
+  results only (foreign codes included; filtered at ranking) plus the
+  page's own US marker (`us`: rows whose Symbol cell links to
+  `/stocks/<sym>/` — foreign rows link `/quote/…`, cash / futures / swap
+  rows such as `KRW`, `IXPZ6` have no link and `HKD` / `USD` ARE real
+  tickers, so a regex cannot tell), 8-day cleanup rule; a same-day rerun
+  reads it and never goes online. Ranking pool = `us` when known, else
+  (yfinance fallback, pre-`us` cache) the `is_us_symbol` regex, which also
+  drops 5-letter symbols ending in X (mutual / money-market funds —
+  `AGPXX` in BWET's collateral, 2026-10-31). `BRK.B` is requested as
+  `BRK-B`, displayed as `BRK.B`. Live fetch: HTTP 404 = no page (DXYZ,
+  IBIT), 3 consecutive transient failures = no more live requests that
+  run (`_MAX_CONSECUTIVE_FAILURES`); one ETF's exception never costs the
+  others or the cache write. Computed once in
   `run_etf_rs` **before** either file is written (soft: failure → files
   without the line); `read_previous_ranks` skips indented lines so the
   rank markers ignore it. The cloud Pages build passes

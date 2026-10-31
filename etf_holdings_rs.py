@@ -39,6 +39,7 @@ Spec: docs/superpowers/specs/2026-10-31-etf-holdings-1m-rs-design.md
 from __future__ import annotations
 
 import html as _html
+import http.client
 import json
 import logging
 import re
@@ -65,8 +66,10 @@ _FUND_SYMBOL_RE = re.compile(r"^[A-Z]{4}X$")
 
 
 class Constituents(NamedTuple):
-    symbols: list[str]   # as parsed (page order, foreign codes included)
-    source: str          # "stockanalysis" | "stockanalysis-cache:<YYYY-MM-DD>" | "yf_top10"
+    symbols: list[str]        # as parsed (page order, foreign / cash codes included)
+    source: str               # "stockanalysis" | "stockanalysis-cache:<YYYY-MM-DD>" | "yf_top10"
+    us: list[str] | None = None   # symbols the page linked as US stocks (/stocks/<sym>/);
+                                  # None = unknown (yfinance fallback, legacy cache) → regex
 
 
 # --- parsing --------------------------------------------------------------
@@ -81,32 +84,55 @@ def _cell_text(raw: str) -> str:
     return _html.unescape(_TAG_RE.sub("", raw)).strip()
 
 
+_STOCK_LINK_RE = re.compile(r'href="/stocks/[^"/]+/"')
+
+
+def _symbol_cells(page: str) -> list[str] | None:
+    """Raw ``<td>`` HTML of the Symbol column, one per data row of the first
+    ``<table>`` whose header row contains ``Symbol``. ``None`` when no such
+    table / header exists (page redesign, Pro wall) or no data row follows —
+    callers treat that as a failed fetch, never as an empty ETF."""
+    for m in _TABLE_RE.finditer(page or ""):
+        rows = _ROW_RE.findall(m.group(0))
+        symbol_col: int | None = None
+        cells_out: list[str] = []
+        for row in rows:
+            cells = _CELL_RE.findall(row)
+            if not cells:
+                continue
+            if "<th" in row.lower():
+                texts = [_cell_text(c) for c in cells]
+                if "Symbol" in texts:
+                    symbol_col = texts.index("Symbol")
+                continue
+            if symbol_col is None or len(cells) <= symbol_col:
+                continue
+            if _cell_text(cells[symbol_col]):
+                cells_out.append(cells[symbol_col])
+        if symbol_col is not None:
+            return cells_out or None
+    return None
+
+
 def parse_holdings_html(page: str) -> list[str] | None:
-    """Symbol column of the first ``<table>`` on a stockanalysis holdings
-    page, in page order (weight-descending). ``None`` when there is no table
-    or no data row — callers must treat that as a failed fetch, never as an
-    empty ETF."""
-    m = _TABLE_RE.search(page or "")
-    if not m:
+    """Symbol column of the holdings table, in page order (weight-descending):
+    US (``NVDA``, ``BRK.B``), foreign (``KRX:005930``, ``285A.JP``), cash /
+    futures / swap rows (``KRW``, ``IXPZ6``) alike. ``None`` = no usable
+    table (see ``_symbol_cells``)."""
+    cells = _symbol_cells(page)
+    if cells is None:
         return None
-    rows = _ROW_RE.findall(m.group(0))
-    symbol_col = 1
-    symbols: list[str] = []
-    for row in rows:
-        cells = _CELL_RE.findall(row)
-        if not cells:
-            continue
-        texts = [_cell_text(c) for c in cells]
-        if "<th" in row.lower():
-            if "Symbol" in texts:
-                symbol_col = texts.index("Symbol")
-            continue
-        if len(texts) <= symbol_col:
-            continue
-        sym = texts[symbol_col]
-        if sym:
-            symbols.append(sym)
-    return symbols or None
+    return [_cell_text(c) for c in cells]
+
+
+def parse_us_symbols(page: str) -> list[str]:
+    """The subset of ``parse_holdings_html`` whose Symbol cell links to
+    ``/stocks/<sym>/`` — stockanalysis' own "US-listed stock" marker (foreign
+    lines link to ``/quote/…``, cash / futures / swaps have no link). The
+    regex in ``is_us_symbol`` cannot tell ``KRW`` from a ticker, and ``HKD``
+    / ``USD`` *are* tickers."""
+    cells = _symbol_cells(page) or []
+    return [_cell_text(c) for c in cells if _STOCK_LINK_RE.search(c)]
 
 
 # --- symbols --------------------------------------------------------------
@@ -133,6 +159,10 @@ _UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
        "(KHTML, like Gecko) Chrome/130.0 Safari/537.36")
 _SRC_SA = "stockanalysis"
 _SRC_YF = "yf_top10"
+#: After this many consecutive transient stockanalysis failures (timeout,
+#: 403/429 block, 5xx) the run stops going online: politeness under a block,
+#: and a hung host must not push the 3M/1M files towards the EOD watchdog.
+_MAX_CONSECUTIVE_FAILURES = 3
 
 
 def cache_path(output_dir: Path, day: date) -> Path:
@@ -149,7 +179,10 @@ def load_cache(output_dir: Path, day: date) -> dict[str, Constituents]:
         for etf, rec in raw.items():
             syms = rec.get("symbols")
             if isinstance(syms, list) and syms:
-                out[str(etf)] = Constituents([str(x) for x in syms], str(rec.get("source", _SRC_SA)))
+                us = rec.get("us")
+                out[str(etf)] = Constituents(
+                    [str(x) for x in syms], str(rec.get("source", _SRC_SA)),
+                    [str(x) for x in us] if isinstance(us, list) else None)
         return out
     except FileNotFoundError:
         return {}
@@ -161,7 +194,7 @@ def load_cache(output_dir: Path, day: date) -> dict[str, Constituents]:
 def save_cache(output_dir: Path, day: date, data: dict[str, Constituents]) -> None:
     """Persist only the stockanalysis-sourced entries (a fallback list must
     never be walked back to as the real one). Soft: write failure = WARNING."""
-    keep = {etf: {"symbols": c.symbols, "source": c.source}
+    keep = {etf: {"symbols": c.symbols, "source": c.source, "us": c.us}
             for etf, c in data.items() if c.source == _SRC_SA and c.symbols}
     if not keep:
         return
@@ -174,6 +207,10 @@ def save_cache(output_dir: Path, day: date, data: dict[str, Constituents]) -> No
 
 
 def _fetch_page(url: str, timeout: float = 15.0) -> str | None:
+    """Page HTML; ``""`` on HTTP 404 (definitive: no such ETF page — DXYZ,
+    IBIT); ``None`` on any transient failure (timeout, reset, 5xx, 403/429,
+    ``http.client`` protocol errors — ``IncompleteRead`` is NOT an OSError,
+    same trap as ``rs_rating.fetch_rs_table``)."""
     req = urllib.request.Request(url, headers={"User-Agent": _UA, "Accept": "text/html"})
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
@@ -181,7 +218,10 @@ def _fetch_page(url: str, timeout: float = 15.0) -> str | None:
                 logger.warning(f"[{_LABEL}] {url} -> HTTP {resp.status}")
                 return None
             return resp.read().decode("utf-8", errors="replace")
-    except (urllib.error.URLError, OSError, ValueError) as e:
+    except urllib.error.HTTPError as e:
+        logger.warning(f"[{_LABEL}] {url} -> HTTP {e.code}")
+        return "" if e.code == 404 else None
+    except (urllib.error.URLError, http.client.HTTPException, OSError, ValueError) as e:
         logger.warning(f"[{_LABEL}] {url} failed: {e}")
         return None
 
@@ -216,22 +256,38 @@ def fetch_constituents(
     older: dict[int, dict[str, Constituents]] = {}   # lazily loaded, keyed by days back
     result: dict[str, Constituents] = {}
     fetched_live = False
+    failures = 0           # consecutive transient failures; 404 and parse misses don't count
     for etf in etfs:
         if etf in today_cache:
             result[etf] = today_cache[etf]
             logger.info(f"[{_LABEL}] {etf}: {len(result[etf].symbols)} symbols (cache, today)")
             continue
-        # 2. live
-        if fetched_live and delay > 0:
-            sleep(delay)
-        page = fetch_page(HOLDINGS_URL.format(slug=etf.lower()))
-        fetched_live = True
-        syms = parse_holdings_html(page) if page else None
+        # 2. live — one ETF's surprise must never cost the others or the cache write
+        syms: list[str] | None = None
+        page: str | None = None
+        if failures < _MAX_CONSECUTIVE_FAILURES:
+            if fetched_live and delay > 0:
+                sleep(delay)
+            fetched_live = True
+            try:
+                page = fetch_page(HOLDINGS_URL.format(slug=etf.lower()))
+                syms = parse_holdings_html(page) if page else None
+            except Exception as e:
+                logger.warning(f"[{_LABEL}] {etf}: stockanalysis fetch raised: {e}")
+                page, syms = None, None
+            if page is None:
+                failures += 1
+                if failures == _MAX_CONSECUTIVE_FAILURES:
+                    logger.warning(f"[{_LABEL}] {failures} consecutive stockanalysis failures; "
+                                   f"no more live requests this run (cache / top-10 fallback only)")
+            else:
+                failures = 0
         if syms:
-            result[etf] = Constituents(syms, _SRC_SA)
+            result[etf] = Constituents(syms, _SRC_SA, parse_us_symbols(page or ""))
             logger.info(f"[{_LABEL}] {etf}: {len(syms)} symbols (stockanalysis)")
             continue
-        logger.warning(f"[{_LABEL}] {etf}: stockanalysis gave no holdings table")
+        if page is not None:
+            logger.warning(f"[{_LABEL}] {etf}: stockanalysis gave no holdings table")
         # 3. walk back
         hit = None
         for k in range(1, max_age + 1):
@@ -243,7 +299,7 @@ def fetch_constituents(
                 break
         if hit:
             day, c = hit
-            result[etf] = Constituents(c.symbols, f"{_SRC_SA}-cache:{day.isoformat()}")
+            result[etf] = Constituents(c.symbols, f"{_SRC_SA}-cache:{day.isoformat()}", c.us)
             logger.info(f"[{_LABEL}] {etf}: {len(c.symbols)} symbols (cache from {day.isoformat()})")
             continue
         # 4. yfinance top-10
@@ -297,7 +353,8 @@ def rank_holdings(
             scores[sym] = sc - bench
     out: dict[str, list[str]] = {}
     for etf, c in constituents.items():
-        us = [s for s in dict.fromkeys(c.symbols) if is_us_symbol(s)]
+        pool = c.symbols if c.us is None else c.us
+        us = [s for s in dict.fromkeys(pool) if is_us_symbol(s)]
         scored = [s for s in us if s in scores]
         scored.sort(key=lambda s: scores[s], reverse=True)
         top = scored[:max(int(top_n), 0)]
@@ -333,7 +390,8 @@ def compute_extras(
     if not cons:
         logger.warning(f"[{_LABEL}] no constituents for any ETF; no 1M lines today")
         return {}
-    us_symbols = sorted({s for c in cons.values() for s in c.symbols if is_us_symbol(s)})
+    us_symbols = sorted({s for c in cons.values()
+                         for s in (c.symbols if c.us is None else c.us) if is_us_symbol(s)})
     if not us_symbols:
         logger.warning(f"[{_LABEL}] no US-listed constituents; no 1M lines today")
         return {}

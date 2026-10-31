@@ -234,3 +234,116 @@ def test_compute_extras_disabled_does_nothing(tmp_path, monkeypatch):
         raise AssertionError("fetch_constituents called while disabled")
     monkeypatch.setattr(etf_holdings_rs, "fetch_constituents", never)
     assert etf_holdings_rs.compute_extras(_cfg(enabled=False), ["XLF"], None, TODAY, tmp_path) == {}
+
+
+# --- final-review fixes ---
+
+
+def test_parse_requires_symbol_header():
+    # A redesigned page (header renamed / another table first) must not yield a list
+    # that would then be cached as the real constituents.
+    html = ('<table id="main-table"><tr><th>No.</th><th>Ticker</th></tr>'
+            '<tr><td>1</td><td>AAA</td></tr></table>')
+    assert etf_holdings_rs.parse_holdings_html(html) is None
+
+
+def test_parse_us_symbols_uses_stocks_link():
+    html = ('<table id="main-table"><tr><th>No.</th><th>Symbol</th></tr>'
+            '<tr><td>1</td><td><a href="/stocks/brk.b/">BRK.B</a></td></tr>'
+            '<tr><td>2</td><td><a href="/quote/krx/005930/">KRX:005930</a></td></tr>'
+            '<tr><td>3</td><td>KRW</td></tr>'
+            '<tr><td>4</td><td>IXPZ6</td></tr></table>')
+    assert etf_holdings_rs.parse_holdings_html(html) == ["BRK.B", "KRX:005930", "KRW", "IXPZ6"]
+    assert etf_holdings_rs.parse_us_symbols(html) == ["BRK.B"]
+
+
+def test_parse_us_symbols_on_real_page():
+    assert etf_holdings_rs.parse_us_symbols(FIX.read_text()) == etf_holdings_rs.parse_holdings_html(FIX.read_text())
+
+
+def test_live_fetch_records_us_symbols_in_cache(tmp_path):
+    page = ('<table id="main-table"><tr><th>No.</th><th>Symbol</th></tr>'
+            '<tr><td>1</td><td><a href="/stocks/aaa/">AAA</a></td></tr>'
+            '<tr><td>2</td><td>KRW</td></tr></table>')
+    out = etf_holdings_rs.fetch_constituents(
+        ["XLK"], TODAY, tmp_path, _cfg(), fetch_page=lambda u: page, yf_top10=lambda e: None)
+    assert out["XLK"].symbols == ["AAA", "KRW"] and out["XLK"].us == ["AAA"]
+    assert etf_holdings_rs.load_cache(tmp_path, TODAY)["XLK"].us == ["AAA"]
+
+
+def test_legacy_cache_without_us_list_loads_as_none(tmp_path):
+    p = etf_holdings_rs.cache_path(tmp_path, TODAY)
+    p.parent.mkdir(parents=True)
+    p.write_text('{"XLK": {"symbols": ["AAA", "KRW"], "source": "stockanalysis"}}')
+    c = etf_holdings_rs.load_cache(tmp_path, TODAY)["XLK"]
+    assert c.symbols == ["AAA", "KRW"] and c.us is None
+
+
+def test_rank_holdings_prefers_us_list_over_regex():
+    # KRW / USD look like US symbols to the regex; the page said they are not stocks.
+    cons = {"XLE": C(["XOM", "KRW", "USD"], "stockanalysis", us=["XOM"])}
+    kl = {"XOM": _kline(1), "KRW": _kline(9), "USD": _kline(8)}
+    assert etf_holdings_rs.rank_holdings(cons, kl, _kline(0), 5) == {"XLE": ["XOM"]}
+
+
+def test_rank_holdings_falls_back_to_regex_when_us_unknown():
+    cons = {"XLE": C(["XOM", "TLV:X"], "yf_top10")}   # us=None
+    assert etf_holdings_rs.rank_holdings(cons, {"XOM": _kline(1), "TLV:X": _kline(9)}, _kline(0), 5) == {"XLE": ["XOM"]}
+
+
+def test_fetch_page_swallows_http_client_exceptions(monkeypatch):
+    import http.client
+    import urllib.request
+
+    def boom(*a, **k):
+        raise http.client.IncompleteRead(b"")
+    monkeypatch.setattr(urllib.request, "urlopen", boom)
+    assert etf_holdings_rs._fetch_page("https://stockanalysis.com/etf/xlk/holdings/") is None
+
+
+def test_fetch_page_404_is_definitive_empty_string(monkeypatch):
+    import urllib.error
+    import urllib.request
+
+    def nf(*a, **k):
+        raise urllib.error.HTTPError("u", 404, "Not Found", {}, None)
+    monkeypatch.setattr(urllib.request, "urlopen", nf)
+    assert etf_holdings_rs._fetch_page("https://stockanalysis.com/etf/dxyz/holdings/") == ""
+
+
+def test_one_etf_fetch_exception_does_not_lose_the_others(tmp_path):
+    def fetch(u):
+        if "/bbb/" in u:
+            raise RuntimeError("unexpected")
+        return PAGE
+    out = etf_holdings_rs.fetch_constituents(
+        ["AAA", "BBB", "CCC"], TODAY, tmp_path, _cfg(), fetch_page=fetch, yf_top10=lambda e: ["T1"])
+    assert out["AAA"].source == "stockanalysis" and out["CCC"].source == "stockanalysis"
+    assert out["BBB"].source == "yf_top10"
+    assert set(etf_holdings_rs.load_cache(tmp_path, TODAY)) == {"AAA", "CCC"}
+
+
+def test_consecutive_failures_trip_the_breaker(tmp_path):
+    seen = []
+    etf_holdings_rs.fetch_constituents(
+        ["A", "B", "C", "D", "E"], TODAY, tmp_path, _cfg(),
+        fetch_page=lambda u: seen.append(u) or None, yf_top10=lambda e: None)
+    assert len(seen) == 3          # 3 consecutive transient failures → no more live requests this run
+
+
+def test_404_does_not_count_towards_the_breaker(tmp_path):
+    seen = []
+    etf_holdings_rs.fetch_constituents(
+        ["A", "B", "C", "D", "E"], TODAY, tmp_path, _cfg(),
+        fetch_page=lambda u: seen.append(u) or "", yf_top10=lambda e: None)
+    assert len(seen) == 5
+
+
+def test_compute_extras_downloads_only_page_marked_us_symbols(tmp_path, monkeypatch):
+    monkeypatch.setattr(etf_holdings_rs, "fetch_constituents",
+                        lambda *a, **k: {"DRAM": C(["MU", "KRW", "TWD"], "stockanalysis", us=["MU"])})
+    asked = []
+    monkeypatch.setattr(etf_holdings_rs, "_fetch_klines",
+                        lambda syms: asked.extend(syms) or {"MU": _kline(5)})
+    assert etf_holdings_rs.compute_extras(_cfg(), ["DRAM"], _kline(0), TODAY, tmp_path) == {"DRAM": "1M强: MU"}
+    assert asked == ["MU"]
