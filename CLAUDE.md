@@ -3,18 +3,15 @@
 Thresholds and group configs live in `config.toml`. This file covers only the
 non-obvious invariants that are easy to break.
 
-Baseline floors since 2026-10-03 (US/HK long-side, IPO and morning-gap;
-Shorts unchanged): price ≥ $20 (Finviz `sh_price_o20`; TheSetup was $10)
-/ ≥ HK$50 (`[hk_settings]` + `[hk_morning_gap]` `min_price`; was HK$20),
-and 20-day avg volume ≥ 1M shares in both markets (Finviz
-`sh_avgvol_o1000`, `min_avg_volume = 1_000_000`; was 500K). The code-side
-fallbacks for unset `min_price` / `min_avg_volume` match these values.
-Output older than that date was produced under the looser floors.
-**Avg-volume exception since 2026-10-10:** every US list is back at ≥ 500K
-— Longs, Leaders, conditional RS, Shorts (Finviz `sh_avgvol_o500`), the IPO
-ladder (`[settings].min_avg_volume`) and morning-gap
-(`[morning_gap].min_avg_volume`), with the US code-side fallbacks at 500K
-too. HK stays at 1M.
+Current floors (long-side, IPO and morning-gap; Shorts share the US ones):
+**US** price ≥ $20 (Finviz `sh_price_o20`) and 20-day avg volume ≥ 500K
+(`sh_avgvol_o500`, `[settings]` / `[morning_gap]` `min_avg_volume`);
+**HK** price ≥ HK$50 and avg volume ≥ 1M (`[hk_settings]` /
+`[hk_morning_gap]`). The code-side fallbacks for unset `min_price` /
+`min_avg_volume` match these values. History: both markets went to
+$20 / HK$50 and 1M on 2026-10-03 (from $10 / HK$20 and 500K); the US
+volume floor came back to 500K on 2026-10-10. Output older than those
+dates was produced under the other floors.
 
 ## Commands
 
@@ -25,10 +22,41 @@ uv run main.py --mode hk-eod         # HK EOD (Shorts + Longs/Leaders/RS)   — 
 uv run main.py --mode morning-gap    # US intraday gap scan; clean-exits outside ET window
 uv run main.py --mode hk-morning-gap # HK intraday gap scan (post-open only)
 uv run main.py --mode report --market {us,hk}  # CANSLIM report (HTML) from today's .txt files; only US is scheduled
-uv run main.py --mode etf-rs         # ETF 3M RS ranking + trend page only (also runs at the end of us-eod)
+uv run main.py --mode etf-rs         # ETF 3M + 1M ranking files, holdings line, leaders watchlist + prune, trend page (also at the end of us-eod)
 uv run main.py --mode rs-line-audit --market {us,hk,both} --dry-run  # audit the master; without --dry-run it prompts to prune
 uv run pytest tests/ -v             # `uv run python -m pytest` works too
 ```
+
+## Module map
+
+- `main.py` — US pipeline + CLI (`--mode`), Finviz discovery, Longs/Leaders/
+  RS/Shorts filters, dedup masters, yfinance download helpers
+  (`_yf_download_with_retry`, `_download_daily_batch`), US **and HK**
+  morning-gap scans (`run_morning_gap` / `run_hk_morning_gap`), alerts.
+  `hk_eod.py` — the HK EOD pipeline (universe, Shorts, Longs/Leaders/RS,
+  IPO, HK k-line fetch).
+- Universe RS: `rs_rating.py` (12M table fetch + freshness wait),
+  `us_rs_3m.py` (3M scorer, k-line fetcher, cloud script's core),
+  `hk_rs.py` / `hk_metrics.py` (HK RS + metrics cloud fetch with local
+  fallback), `rs_line.py` + `rs_line_audit.py` (RS-line trend, audit mode,
+  daily top-10 snapshot). Cloud side: `scripts/compute_us_rs_3m_cloud.py`,
+  `scripts/compute_hk_rs_cloud.py`.
+- Master maintenance: `sma50_prune.py` (SMA50 prune + delisting removal,
+  shared close fetch), `ema20_break.py` (first-break list), `us_ipo.py`
+  (US IPO ladder).
+- ETF: `etf_rs.py` (ranking files) → `etf_holdings_rs.py` (per-ETF
+  constituents + 1M top-5 line) → `etf_rs_leaders.py` (cumulative
+  watchlist + its prune) → `etf_rs_chart.py` (trend page);
+  `scripts/build_etf_rs_page.py` is the Pages build.
+- Integrations: `finviz_screener.py` (post-redesign screener),
+  `finviz_timeout.py` (socket timeouts for the `finviz` lib),
+  `futu_sync.py`, `tv_sync.py`, `notify.py` (ntfy), `power.py` (battery
+  probe), `net_ready.py` (wait for network), `cleanup.py` (retention
+  rules). `report/` — CANSLIM + catalyst reports (own `CLAUDE.md`).
+- `scripts/run_*.sh` are the launchd entry points (watchdog, caffeinate,
+  log rotation, soft trailing steps); `scripts/*.plist` the schedules;
+  `scripts/schedule_morning_gap_wakes.py` seeds the pmset wakes;
+  `scripts/trigger_rs_workflow.sh` dispatches the GH RS workflows.
 
 ## Invariants (don't break these)
 
@@ -249,7 +277,7 @@ local (throttle-prone) k-line fetch.
   Cleanup: snapshots 4-day window; audit report + sidecars (`rs-audit/`)
   5-day window.
 
-## ETF 3M RS ranking
+## ETF RS ranking (3M / 1M files, holdings line, leaders watchlist, trend page + Pages)
 
 - **ETF 3M RS ranking** (`etf_rs.py`, `[etf_rs]` config): the fixed
   `[etf_rs.tickers]` table (ticker = 中文名, 53 entries) is scored
@@ -306,7 +334,7 @@ local (throttle-prone) k-line fetch.
   score = `rank_etfs` on klines truncated to that day (tests pin this), with
   today's ticker list + adjusted closes, so a past day may sit a place off
   that day's `.txt`. Y = 0-99 percentile (within the ETF set → RS ≥ 90 is
-  always ~5 of 49) / rank / raw excess return; top `chart_top_n` (20) thick.
+  always ~5 of 53) / rank / raw excess return; top `chart_top_n` (20) thick.
   Soft inside `run_etf_rs`: a render failure never costs the `.txt`.
   **3M + 1M on one page** (since 2026-10-15): `write_trend_chart` computes
   both histories (`score_history(weights_bars=WEIGHTS_1M_BARS)` for 1M) on
