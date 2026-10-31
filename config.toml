@@ -131,9 +131,13 @@ request_delay_sec = 0.8     # 相邻两次 stockanalysis 请求的间隔 (秒)
 # 龙头累积名单 (etf_rs_leaders.py): 每天取 1M 文件前 top_etfs 只 ETF 的 "1M强" 股票,
 # 合并进 TV/US/ETF_rs_leaders.txt (不带日期、只增不减、逗号分隔可直接导入 TradingView;
 # 删除即重置), 当天新进的名字另写 TV/US/<date>_ETF_rs_new.txt (无新增不写, 同日重跑保留首次)。
+# 主表每天也会裁剪 (加完当天新名字之后): 收盘连续 ≥ 2 个交易日低于 SMA50, 且最新收盘
+# 低于首次跌破那天的最低价 → 移除, 写 <date>_ETF_rs_pruned.txt; 日后再进前 5 可重新加入。
 [etf_rs.leaders]
 enabled = true
 top_etfs = 10
+prune = true
+sma_period = 50
 
 [etf_rs.tickers]
 # --- 美股行业 / 主题 ---

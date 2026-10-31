@@ -6,12 +6,19 @@ import sys
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
 import etf_holdings_rs
 import etf_rs
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 import build_etf_rs_page  # noqa: E402
+import etf_rs_leaders  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _no_leaders_prune_network(monkeypatch):
+    monkeypatch.setattr(etf_rs_leaders, "_fetch_daily_bars", lambda tickers: None)
 
 
 def _walk(seed: int, n: int = 120) -> pd.DataFrame:

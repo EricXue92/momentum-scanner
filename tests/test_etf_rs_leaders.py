@@ -13,6 +13,13 @@ from cleanup import cleanup_old_outputs
 
 TODAY = date(2026, 10, 31)
 
+
+@pytest.fixture(autouse=True)
+def _no_prune_network(monkeypatch):
+    """prune_master's default fetch hits yfinance; the wiring tests below
+    only need the add step."""
+    monkeypatch.setattr(etf_rs_leaders, "_fetch_daily_bars", lambda tickers: None)
+
 RANKING = """\
 1. XLV 🟢↑2 - 医疗保健 | LLY、JNJ
    1M强: REGN > LLY > GILD > AMGN > VRTX
@@ -204,3 +211,138 @@ def test_cleanup_ages_new_files_but_never_the_master(tmp_path):
     assert (tv / "ETF_rs_leaders.txt").exists()
     assert (tv / "2026_10_31_ETF_rs_new.txt").exists()
     assert not (tv / "2026_10_20_ETF_rs_new.txt").exists()
+
+
+# --- SMA50 first-break prune ---
+
+
+def _bars(tail_closes: list[float], tail_lows: list[float], base_days: int = 56):
+    """base_days flat closes at 100 (SMA50 = 100), then the given tail."""
+    import pandas as pd
+    closes = [100.0] * base_days + list(tail_closes)
+    lows = [99.0] * base_days + list(tail_lows)
+    idx = pd.bdate_range(end="2026-10-30", periods=len(closes))
+    return pd.Series(closes, index=idx), pd.Series(lows, index=idx)
+
+
+def _split(d):
+    return {t: c for t, (c, _) in d.items()}, {t: l for t, (_, l) in d.items()}
+
+
+def test_drop_when_two_days_below_and_close_breaks_first_day_low():
+    closes, lows = _split({"A": _bars([97, 94], [95, 93])})
+    assert etf_rs_leaders.find_break_drops(closes, lows) == ["A"]
+
+
+def test_keep_when_second_close_holds_above_first_day_low():
+    closes, lows = _split({"A": _bars([97, 96], [95, 94])})     # 96 ≥ 95
+    assert etf_rs_leaders.find_break_drops(closes, lows) == []
+
+
+def test_keep_after_only_one_day_below():
+    closes, lows = _split({"A": _bars([97], [90])})
+    assert etf_rs_leaders.find_break_drops(closes, lows) == []
+
+
+def test_keep_when_close_equals_first_day_low():
+    closes, lows = _split({"A": _bars([97, 95], [95, 90])})
+    assert etf_rs_leaders.find_break_drops(closes, lows) == []
+
+
+def test_longer_streak_compares_with_the_first_break_day_not_yesterday():
+    # 4 days below; last close 94.5 < first-day low 95 (drop) even though it
+    # is above yesterday's low 93.
+    closes, lows = _split({"A": _bars([97, 96, 95.5, 94.5], [95, 94, 93, 92])})
+    assert etf_rs_leaders.find_break_drops(closes, lows) == ["A"]
+    # last close 95.2 < yesterday's low 95.5 but ≥ first-day low 95 → keep
+    closes, lows = _split({"B": _bars([97, 96, 95.5, 95.2], [95, 94, 93, 95.5])})
+    assert etf_rs_leaders.find_break_drops(closes, lows) == []
+
+
+def test_streak_restarts_after_a_close_back_above_the_line():
+    # below, above, below, below: the streak is the last two days only
+    closes, lows = _split({"A": _bars([97, 101, 97, 96.5], [80, 100, 96, 95])})
+    assert etf_rs_leaders.find_break_drops(closes, lows) == []            # 96.5 ≥ 96
+    closes, lows = _split({"A": _bars([97, 101, 97, 95.5], [80, 100, 96, 95])})
+    assert etf_rs_leaders.find_break_drops(closes, lows) == ["A"]         # 95.5 < 96
+
+
+def test_short_history_and_missing_low_are_kept():
+    closes, lows = _split({"A": _bars([97, 94], [95, 93], base_days=40)})   # < 50 bars
+    assert etf_rs_leaders.find_break_drops(closes, lows) == []
+    c, l = _bars([97, 94], [95, 93])
+    assert etf_rs_leaders.find_break_drops({"A": c}, {}) == []               # no low series
+    import numpy as np
+    l.iloc[-2] = np.nan
+    assert etf_rs_leaders.find_break_drops({"A": c}, {"A": l}) == []         # NaN first-day low
+
+
+def _master(tmp_path, names):
+    _tv(tmp_path).mkdir(parents=True, exist_ok=True)
+    (_tv(tmp_path) / "ETF_rs_leaders.txt").write_text(",".join(names) + "\n", encoding="utf-8")
+    return _tv(tmp_path) / "ETF_rs_leaders.txt"
+
+
+def test_prune_master_removes_drops_and_writes_the_pruned_file(tmp_path, monkeypatch):
+    master = _master(tmp_path, ["A", "B", "C"])
+    bars = {"A": _bars([97, 94], [95, 93]), "B": _bars([97, 96], [95, 94])}   # C: no data
+    asked = []
+
+    def fetch(tickers):
+        asked.append(list(tickers))
+        return _split(bars)
+    monkeypatch.setattr(etf_rs_leaders, "_fetch_daily_bars", fetch)
+    assert etf_rs_leaders.prune_master(_cfg(), tmp_path, TODAY) == ["A"]
+    assert asked == [["A", "B", "C"]]
+    assert master.read_text(encoding="utf-8") == "B,C\n"
+    assert (_tv(tmp_path) / "2026_10_31_ETF_rs_pruned.txt").read_text(encoding="utf-8") == "A\n"
+
+
+def test_prune_master_same_day_rerun_merges_the_pruned_file(tmp_path, monkeypatch):
+    _master(tmp_path, ["A", "B"])
+    (_tv(tmp_path) / "2026_10_31_ETF_rs_pruned.txt").write_text("Z\n", encoding="utf-8")
+    monkeypatch.setattr(etf_rs_leaders, "_fetch_daily_bars",
+                        lambda t: _split({"A": _bars([97, 94], [95, 93])}))
+    assert etf_rs_leaders.prune_master(_cfg(), tmp_path, TODAY) == ["A"]
+    assert (_tv(tmp_path) / "2026_10_31_ETF_rs_pruned.txt").read_text(encoding="utf-8") == "A,Z\n"
+
+
+def test_prune_master_fetch_failure_or_nothing_to_drop_changes_nothing(tmp_path, monkeypatch):
+    master = _master(tmp_path, ["A", "B"])
+    stamp = master.stat().st_mtime_ns
+    monkeypatch.setattr(etf_rs_leaders, "_fetch_daily_bars", lambda t: None)
+    assert etf_rs_leaders.prune_master(_cfg(), tmp_path, TODAY) == []
+    monkeypatch.setattr(etf_rs_leaders, "_fetch_daily_bars",
+                        lambda t: _split({"A": _bars([97, 96], [95, 94])}))
+    assert etf_rs_leaders.prune_master(_cfg(), tmp_path, TODAY) == []
+    assert master.stat().st_mtime_ns == stamp
+    assert not (_tv(tmp_path) / "2026_10_31_ETF_rs_pruned.txt").exists()
+
+
+def test_prune_master_skips_fetch_when_master_is_empty_or_prune_disabled(tmp_path, monkeypatch):
+    def never(t):
+        raise AssertionError("must not fetch")
+    monkeypatch.setattr(etf_rs_leaders, "_fetch_daily_bars", never)
+    assert etf_rs_leaders.prune_master(_cfg(), tmp_path, TODAY) == []           # no master
+    _master(tmp_path, ["A"])
+    assert etf_rs_leaders.prune_master(_cfg(prune=False), tmp_path, TODAY) == []
+
+
+def test_run_etf_rs_prunes_right_after_adding_todays_names(tmp_path, monkeypatch):
+    monkeypatch.setattr(etf_rs, "_fetch_klines", lambda *a, **k: {"AAA": _kline(5), "SPY": _kline(0)})
+    monkeypatch.setattr(etf_holdings_rs, "compute_extras", lambda *a, **k: {"AAA": "1M强: X > Y"})
+    _master(tmp_path, ["OLD"])
+    monkeypatch.setattr(etf_rs_leaders, "_fetch_daily_bars", lambda t: _split({
+        "OLD": _bars([97, 94], [95, 93]), "Y": _bars([97, 94], [95, 93]), "X": _bars([101, 102], [99, 100])}))
+    etf_rs.run_etf_rs(_etf_cfg(), tmp_path, TODAY)
+    assert (_tv(tmp_path) / "ETF_rs_leaders.txt").read_text(encoding="utf-8") == "X\n"
+    assert (_tv(tmp_path) / "2026_10_31_ETF_rs_new.txt").read_text(encoding="utf-8") == "X,Y\n"
+    assert (_tv(tmp_path) / "2026_10_31_ETF_rs_pruned.txt").read_text(encoding="utf-8") == "OLD,Y\n"
+
+
+def test_cleanup_ages_the_pruned_file(tmp_path):
+    tv = _tv(tmp_path)
+    tv.mkdir(parents=True)
+    (tv / "2026_10_20_ETF_rs_pruned.txt").write_text("A\n")
+    cleanup_old_outputs(tmp_path, date(2026, 10, 31))
+    assert not (tv / "2026_10_20_ETF_rs_pruned.txt").exists()

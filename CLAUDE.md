@@ -365,6 +365,22 @@ local (throttle-prone) k-line fetch.
   `<date>_etf_rs.txt` differs from the legacy `_ETF_rs` stem only by
   case on a case-insensitive FS. Reads the **file**, not the in-memory
   tables, by design. Soft step; no ntfy / Webull / Futu / eod_seen.
+  **Master prune** (`prune_master`, same step, right AFTER today's names
+  were added, `prune = true` / `sma_period = 50`): one 6mo yfinance batch
+  of the master (Close + Low; `sma50_prune.drop_stale_series` +
+  `fill_missing_last_close` reused) → `find_break_drops`: trailing streak
+  of closes below SMA50 ≥ 2 sessions AND latest close < the **low of the
+  streak's first day** (first close under the line) → removed, written to
+  `<date>_ETF_rs_pruned.txt` (comma-sep, same-day rerun merges, 5-day
+  rule). This is NOT `sma50_prune`'s rule (that one compares with the
+  prior close) — do not unify them. Streak of 1 / close back above the
+  line (streak restarts) / close ≥ first-day low / < 50 bars / no data /
+  stale series / NaN first-day low → kept. Failed batch → prune skipped.
+  No `.bak`; the pruned file is the record. A pruned name re-enters the
+  next day it is in a top ETF's top 5. Test files that run `run_etf_rs`
+  stub `etf_rs_leaders._fetch_daily_bars` (autouse) or the prune goes
+  online. The cloud Pages build also runs it on its scratch master (~20s,
+  harmless).
   **Also published to GitHub Pages** (https://ericxue92.github.io/momentum-scanner/):
   `.github/workflows/etf_rs_page.yml` rebuilds it in the cloud
   (`scripts/build_etf_rs_page.py` → `_site/index.html`, deployed as a Pages
