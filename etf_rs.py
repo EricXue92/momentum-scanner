@@ -417,11 +417,20 @@ def run_etf_rs(cfg: dict, output_dir: Path, today: date,
     logger.info(f"[{_LABEL}] {len(table)} ETFs ranked -> {out}")
     # 1M weekly ladder on the same klines → <date>_ETF_rs_1m.txt. Soft — a
     # failure here must not cost the 3M file above or the trend page below.
+    out_1m = None
     try:
-        _write_1m_ranking(klines, etfs, benchmark, names, holdings, output_dir, today,
-                          extras=extras)
+        out_1m = _write_1m_ranking(klines, etfs, benchmark, names, holdings, output_dir, today,
+                                   extras=extras)
     except Exception as e:
         logger.warning(f"[{_LABEL} 1M] failed, 3M ranking unaffected: {e}")
+    # Cumulative watchlist of the 1M top ETFs' strongest constituents
+    # (etf_rs_leaders): reads the 1M file just written. Soft.
+    if out_1m is not None:
+        try:
+            import etf_rs_leaders
+            etf_rs_leaders.update_leaders(cfg.get("leaders", {}), output_dir, today, out_1m)
+        except Exception as e:
+            logger.warning(f"[{_LABEL}] leaders watchlist failed, rankings unaffected: {e}")
     # Trend page (Reports/ETF/etf_rs_trend.html): same klines, same order as
     # the .txt. Soft — a render failure must not cost the ranking.
     try:

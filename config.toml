@@ -128,6 +128,13 @@ top_n = 5                   # 每只 ETF 下面列几只
 cache_max_age_days = 7      # stockanalysis 抓取失败时最多走回几天缓存
 request_delay_sec = 0.8     # 相邻两次 stockanalysis 请求的间隔 (秒)
 
+# 龙头累积名单 (etf_rs_leaders.py): 每天取 1M 文件前 top_etfs 只 ETF 的 "1M强" 股票,
+# 合并进 TV/US/ETF_rs_leaders.txt (不带日期、只增不减、逗号分隔可直接导入 TradingView;
+# 删除即重置), 当天新进的名字另写 TV/US/<date>_ETF_rs_new.txt (无新增不写, 同日重跑保留首次)。
+[etf_rs.leaders]
+enabled = true
+top_etfs = 10
+
 [etf_rs.tickers]
 # --- 美股行业 / 主题 ---
 DRAM = "内存与存储芯片"

@@ -350,6 +350,21 @@ local (throttle-prone) k-line fetch.
   holdings later = add an issuer source function in front of the
   stockanalysis step. Spec:
   `docs/superpowers/specs/2026-10-31-etf-holdings-1m-rs-design.md`.
+  **Leaders watchlist** (since 2026-11-01, `etf_rs_leaders.py`,
+  `[etf_rs.leaders]`): right after the 1M file is written, its first
+  `top_etfs` (10) rows are read back and the symbols of their `1M强:`
+  lines merged in rank order (an ETF without a line contributes nothing,
+  no back-fill from rank 11) into `output/TV/US/ETF_rs_leaders.txt` — the
+  **master**: undated, comma-separated (TradingView import), append-only
+  in order of first appearance, never aged out (no retention regex
+  matches an undated name), delete to reset; hand edits with newlines /
+  duplicates are read fine. Names the master lacked go to
+  `<date>_ETF_rs_new.txt` (comma-sep; absent when nothing new; a same-day
+  rerun grows the master but keeps the first run's file; generic `TV/US`
+  5-day rule). Stem `ETF_rs_new` was chosen because the user's
+  `<date>_etf_rs.txt` differs from the legacy `_ETF_rs` stem only by
+  case on a case-insensitive FS. Reads the **file**, not the in-memory
+  tables, by design. Soft step; no ntfy / Webull / Futu / eod_seen.
   **Also published to GitHub Pages** (https://ericxue92.github.io/momentum-scanner/):
   `.github/workflows/etf_rs_page.yml` rebuilds it in the cloud
   (`scripts/build_etf_rs_page.py` → `_site/index.html`, deployed as a Pages
