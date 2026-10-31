@@ -354,7 +354,7 @@ svg.dim .lab:not(.is-hover) { opacity: 0.4; }
 .row .df { grid-column: 4 / -1; color: var(--muted); font-size: 11.5px; font-variant-numeric: tabular-nums; margin-top: 1px; }
 .row .df b { font-weight: 650; }
 .row .hd { grid-column: 4 / -1; color: var(--muted); font-size: 12px; margin-top: 1px; }
-.row .st { grid-column: 4 / -1; color: var(--ink2); font-size: 12px; margin-top: 1px; font-variant-numeric: tabular-nums; }
+.row .st { grid-column: 4 / -1; color: var(--ink2); font-size: 12px; margin-top: 4px; padding-top: 3px; border-top: 1px solid var(--grid); font-variant-numeric: tabular-nums; }
 .row.rest .tk { font-weight: 500; }
 .split { padding: 6px 14px; font-size: 11.5px; color: var(--muted); background: var(--band); border-bottom: 1px solid var(--grid); }
 </style>

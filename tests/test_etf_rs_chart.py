@@ -186,8 +186,10 @@ def test_render_embeds_the_strongest_holdings_line_per_series():
     )
     data = _payload(html)
     assert [s["strong"] for s in data["series"]] == ["", "1M强: X > Y > Z"]
-    # the ranking list renders it under the holdings of each row
+    # the ranking list renders it under the holdings of each row, set off
+    # from the holdings by a rule above it
     assert "S[k].strong" in html
+    assert re.search(r"\.row \.st \{[^}]*border-top: 1px solid", html)
 
 
 def test_render_writes_unscored_days_as_null():
