@@ -49,6 +49,10 @@ from datetime import date, timedelta
 from pathlib import Path
 from typing import Callable, NamedTuple
 
+import pandas as pd
+
+import us_rs_3m
+
 logger = logging.getLogger("momentum_scanner")
 
 _LABEL = "ETF 持仓RS"
@@ -251,3 +255,91 @@ def fetch_constituents(
         logger.warning(f"[{_LABEL}] {etf}: no constituents from any source; no 1M line today")
     save_cache(output_dir, today, {**today_cache, **result})
     return result
+
+
+# --- scoring ---------------------------------------------------------------
+
+def _fetch_klines(symbols: list[str]) -> dict[str, pd.DataFrame]:
+    """3mo daily closes for the constituents (the 1M ladder needs 21 bars;
+    3mo leaves slack for holidays / fresh listings). Same retrying batch
+    fetcher and NaN-Close fill as the ETF ranking. Monkeypatched in tests."""
+    return us_rs_3m.fetch_us_klines_yf(symbols, period="3mo", fill_last_close=True)
+
+
+def _score_1m(df: pd.DataFrame | None) -> float | None:
+    score, reason = us_rs_3m._score_from_kline_bars(df, us_rs_3m.WEIGHTS_1M_BARS)
+    return score if reason == "ok" else None
+
+
+def rank_holdings(
+    constituents: dict[str, Constituents],
+    klines: dict[str, pd.DataFrame],
+    benchmark_kline: pd.DataFrame | None,
+    top_n: int,
+) -> dict[str, list[str]]:
+    """``{etf: [top_n display symbols]}`` — each ETF's US-listed constituents
+    ordered by 1M excess score (constituent − benchmark) descending; names
+    without klines / < 21 bars / foreign codes do not take part; an ETF
+    with nothing scorable is omitted. ``klines`` is keyed by *display*
+    symbol."""
+    bench = _score_1m(benchmark_kline) if benchmark_kline is not None else None
+    if bench is None:
+        logger.warning(f"[{_LABEL}] no benchmark 1M score; ranking holdings on absolute scores")
+        bench = 0.0
+    scores: dict[str, float] = {}
+    for sym, df in klines.items():
+        sc = _score_1m(df)
+        if sc is not None:
+            scores[sym] = sc - bench
+    out: dict[str, list[str]] = {}
+    for etf, c in constituents.items():
+        us = [s for s in dict.fromkeys(c.symbols) if is_us_symbol(s)]
+        scored = [s for s in us if s in scores]
+        scored.sort(key=lambda s: scores[s], reverse=True)
+        top = scored[:max(int(top_n), 0)]
+        logger.info(f"[{_LABEL}] {etf}: 成分 {len(c.symbols)} ({c.source}) / 美股 {len(us)} / "
+                    f"打分 {len(scored)} / 前{top_n}: " + (" > ".join(top) if top else "-"))
+        if top:
+            out[etf] = top
+    return out
+
+
+def format_extra(top: list[str], source: str) -> str:
+    line = "1M强: " + " > ".join(top)
+    return line + " (前十大)" if source == _SRC_YF else line
+
+
+def compute_extras(
+    cfg: dict,
+    etfs: list[str],
+    benchmark_kline: pd.DataFrame | None,
+    today: date,
+    output_dir: Path,
+) -> dict[str, str]:
+    """Entry point for ``etf_rs.run_etf_rs``: ``{etf: continuation line}``
+    for the ETFs that have a scorable US constituent. ``{}`` when disabled,
+    when no constituents were found, or when the kline batch came back
+    empty (WARNING) — the caller then writes the rankings without the
+    extra lines. May raise on programming errors; the caller is soft."""
+    if not cfg.get("enabled", True):
+        logger.info(f"[{_LABEL}] disabled in config; skipping")
+        return {}
+    top_n = int(cfg.get("top_n", 5))
+    cons = fetch_constituents(etfs, today, output_dir, cfg)
+    if not cons:
+        logger.warning(f"[{_LABEL}] no constituents for any ETF; no 1M lines today")
+        return {}
+    us_symbols = sorted({s for c in cons.values() for s in c.symbols if is_us_symbol(s)})
+    if not us_symbols:
+        logger.warning(f"[{_LABEL}] no US-listed constituents; no 1M lines today")
+        return {}
+    logger.info(f"[{_LABEL}] fetching 3mo closes for {len(us_symbols)} constituents "
+                f"of {len(cons)} ETFs...")
+    raw = _fetch_klines([to_yf_symbol(s) for s in us_symbols]) or {}
+    klines = {from_yf_symbol(k): v for k, v in raw.items()}
+    if not klines:
+        logger.warning(f"[{_LABEL}] yfinance returned nothing for the constituents; no 1M lines today")
+        return {}
+    logger.info(f"[{_LABEL}] K 线覆盖 {len(klines)}/{len(us_symbols)}")
+    ranked = rank_holdings(cons, klines, benchmark_kline, top_n)
+    return {etf: format_extra(top, cons[etf].source) for etf, top in ranked.items()}

@@ -159,3 +159,77 @@ def test_sleep_between_live_requests_only(tmp_path):
         ["A", "B"], TODAY, tmp_path, _cfg(request_delay_sec=0.8),
         fetch_page=lambda u: PAGE, yf_top10=lambda e: None, sleep=slept.append)
     assert slept == [0.8]   # one pause between two live requests, none before the first
+
+
+# --- Task 3: 1M ranking within each ETF + continuation-line formatting ---
+
+
+def _kline(ret_pct: float, n: int = 40) -> pd.DataFrame:
+    """Flat series that jumps by ``ret_pct`` on the last bar, so the 1M score
+    is exactly (0.4+0.2+0.2+0.2) * return (same trick as tests/test_etf_rs.py)."""
+    closes = [100.0] * (n - 1) + [100.0 * (1 + ret_pct / 100)]
+    return pd.DataFrame({
+        "time_key": pd.bdate_range(end="2026-10-30", periods=n),
+        "close": closes,
+    })
+
+
+def test_rank_holdings_strongest_first_relative_to_benchmark_top_n():
+    cons = {"XLK": C(["A", "B", "C", "D", "E", "F", "TLV:X"], "stockanalysis")}
+    kl = {s: _kline(r) for s, r in zip("ABCDEF", (1, 6, 3, 5, 2, 4))}
+    kl["TLV:X"] = _kline(99)
+    out = etf_holdings_rs.rank_holdings(cons, kl, _kline(0), top_n=5)
+    assert out == {"XLK": ["B", "D", "F", "C", "E"]}   # TLV:X foreign; A is 6th, cut
+
+
+def test_rank_holdings_fewer_than_top_n_lists_what_exists():
+    cons = {"XLK": C(["A", "B"], "stockanalysis")}
+    out = etf_holdings_rs.rank_holdings(cons, {"A": _kline(1), "B": _kline(2)}, _kline(0), 5)
+    assert out == {"XLK": ["B", "A"]}
+
+
+def test_rank_holdings_short_history_and_missing_klines_excluded():
+    cons = {"XLK": C(["A", "B", "Z"], "stockanalysis")}
+    out = etf_holdings_rs.rank_holdings(cons, {"A": _kline(1), "B": _kline(9, n=15)}, _kline(0), 5)
+    assert out == {"XLK": ["A"]}
+
+
+def test_rank_holdings_no_scorable_names_omits_etf():
+    assert etf_holdings_rs.rank_holdings({"XLK": C(["TLV:X"], "stockanalysis")}, {}, _kline(0), 5) == {}
+
+
+def test_rank_holdings_without_benchmark_uses_absolute_scores():
+    cons = {"XLK": C(["A", "B"], "stockanalysis")}
+    out = etf_holdings_rs.rank_holdings(cons, {"A": _kline(1), "B": _kline(2)}, None, 5)
+    assert out == {"XLK": ["B", "A"]}
+
+
+def test_format_extra():
+    assert etf_holdings_rs.format_extra(["A", "B"], "stockanalysis") == "1M强: A > B"
+    assert etf_holdings_rs.format_extra(["A"], "stockanalysis-cache:2026-10-27") == "1M强: A"
+    assert etf_holdings_rs.format_extra(["A", "B"], "yf_top10") == "1M强: A > B (前十大)"
+
+
+def test_compute_extras_end_to_end_maps_dot_symbols(tmp_path, monkeypatch):
+    monkeypatch.setattr(etf_holdings_rs, "fetch_constituents",
+                        lambda *a, **k: {"XLF": C(["BRK.B", "JPM"], "stockanalysis")})
+    asked = []
+    monkeypatch.setattr(etf_holdings_rs, "_fetch_klines",
+                        lambda syms: asked.extend(syms) or {"BRK-B": _kline(5), "JPM": _kline(1)})
+    out = etf_holdings_rs.compute_extras(_cfg(), ["XLF"], _kline(0), TODAY, tmp_path)
+    assert sorted(asked) == ["BRK-B", "JPM"]
+    assert out == {"XLF": "1M强: BRK.B > JPM"}
+
+
+def test_compute_extras_empty_klines_returns_empty(tmp_path, monkeypatch):
+    monkeypatch.setattr(etf_holdings_rs, "fetch_constituents",
+                        lambda *a, **k: {"XLF": C(["JPM"], "stockanalysis")})
+    monkeypatch.setattr(etf_holdings_rs, "_fetch_klines", lambda syms: {})
+    assert etf_holdings_rs.compute_extras(_cfg(), ["XLF"], _kline(0), TODAY, tmp_path) == {}
+
+
+def test_compute_extras_disabled_does_nothing(tmp_path, monkeypatch):
+    def never(*a, **k):
+        raise AssertionError("fetch_constituents called while disabled")
+    monkeypatch.setattr(etf_holdings_rs, "fetch_constituents", never)
+    assert etf_holdings_rs.compute_extras(_cfg(enabled=False), ["XLF"], None, TODAY, tmp_path) == {}
