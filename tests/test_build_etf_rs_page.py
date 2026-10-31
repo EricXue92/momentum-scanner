@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pandas as pd
 
+import etf_holdings_rs
 import etf_rs
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
@@ -59,3 +60,13 @@ def test_build_fails_when_the_list_is_disabled(tmp_path, monkeypatch):
     cfg = _config(tmp_path, _CFG.replace("[etf_rs]\n", "[etf_rs]\nenabled = false\n"))
     assert build_etf_rs_page.build(site, cfg) == 1
     assert not site.exists()
+
+
+def test_build_disables_holdings_rs(tmp_path, monkeypatch):
+    monkeypatch.setattr(etf_rs, "_fetch_klines", lambda *a, **k: {
+        "AAA": _walk(1), "BBB": _walk(2), "SPY": _walk(9)})
+
+    def never(*a, **k):
+        raise AssertionError("holdings step must not run in the cloud build")
+    monkeypatch.setattr(etf_holdings_rs, "compute_extras", never)
+    assert build_etf_rs_page.build(tmp_path / "site", _config(tmp_path, _CFG)) == 0

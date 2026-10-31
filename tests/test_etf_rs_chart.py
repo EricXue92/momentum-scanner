@@ -12,6 +12,15 @@ from datetime import date
 import pandas as pd
 
 import etf_rs
+import etf_holdings_rs
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _no_holdings_rs_network(monkeypatch):
+    """run_etf_rs now runs the holdings 1M step, whose default path goes
+    online; stub it to "nothing" unless a test installs its own fake."""
+    monkeypatch.setattr(etf_holdings_rs, "compute_extras", lambda *a, **k: {})
 import etf_rs_chart
 
 _END = "2026-09-11"

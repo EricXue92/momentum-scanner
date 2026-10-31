@@ -9,6 +9,15 @@ from pathlib import Path
 import pandas as pd
 
 import etf_rs
+import etf_holdings_rs
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _no_holdings_rs_network(monkeypatch):
+    """run_etf_rs now runs the holdings 1M step, whose default path goes
+    online; stub it to "nothing" unless a test installs its own fake."""
+    monkeypatch.setattr(etf_holdings_rs, "compute_extras", lambda *a, **k: {})
 
 
 def _kline(total_return_pct: float, n: int = 90) -> pd.DataFrame:
@@ -371,3 +380,65 @@ def test_fetch_klines_fills_nan_last_close(monkeypatch):
     monkeypatch.setattr(etf_rs.us_rs_3m, "fetch_us_klines_yf", fake_fetch)
     etf_rs._fetch_klines(["AAA", "SPY"])
     assert seen.get("fill_last_close") is True and seen.get("period") == "1y"
+
+
+# --- holdings 1M continuation line (etf_holdings_rs) ---
+
+
+def test_write_ranking_appends_indented_extra_line(tmp_path):
+    table = pd.DataFrame({"raw_score": [0.2, 0.1], "rs_percentile": [99, 50]}, index=["AAA", "BBB"])
+    out = etf_rs.write_ranking(table, {"AAA": "甲", "BBB": "乙"}, {"AAA": "X、Y"}, tmp_path,
+                               date(2026, 10, 31), extras={"AAA": "1M强: X > Y"})
+    assert out.read_text() == "1. AAA - 甲 | X、Y\n   1M强: X > Y\n2. BBB - 乙\n"
+
+
+def test_write_ranking_without_extras_is_unchanged(tmp_path):
+    table = pd.DataFrame({"raw_score": [0.2], "rs_percentile": [99]}, index=["AAA"])
+    out = etf_rs.write_ranking(table, {"AAA": "甲"}, {}, tmp_path, date(2026, 10, 31), extras={})
+    assert out.read_text() == "1. AAA - 甲\n"
+
+
+def test_read_previous_ranks_ignores_indented_continuation_lines(tmp_path):
+    d = tmp_path / "TV" / "US"
+    d.mkdir(parents=True)
+    (d / "2026_10_30_ETF_rs_3m.txt").write_text(
+        "1. AAA - 甲\n   1M强: X > Y\n2. BBB - 乙\n   1M强: Z\n")
+    assert etf_rs.read_previous_ranks(tmp_path, date(2026, 10, 31)) == {"AAA": 1, "BBB": 2}
+
+
+def test_run_passes_extras_to_both_files(tmp_path, monkeypatch):
+    monkeypatch.setattr(etf_rs, "_fetch_klines", lambda *a, **k: {
+        "AAA": _kline(5), "BBB": _kline(1), "SPY": _kline(0)})
+    seen = {}
+
+    def fake(cfg, etfs, bench, today, out):
+        seen["etfs"] = list(etfs)
+        seen["bench_rows"] = len(bench)
+        return {"AAA": "1M强: X > Y"}
+    monkeypatch.setattr(etf_holdings_rs, "compute_extras", fake)
+    etf_rs.run_etf_rs(_cfg(tickers={"AAA": "甲", "BBB": "乙"}), tmp_path, date(2026, 10, 31))
+    for stem in ("ETF_rs_3m", "ETF_rs_1m"):
+        txt = (tmp_path / "TV" / "US" / f"2026_10_31_{stem}.txt").read_text()
+        assert "\n   1M强: X > Y\n" in txt, stem
+    assert seen["etfs"] == ["AAA", "BBB"] and seen["bench_rows"] == 90
+
+
+def test_run_writes_files_without_extras_when_step_raises(tmp_path, monkeypatch):
+    monkeypatch.setattr(etf_rs, "_fetch_klines", lambda *a, **k: {"AAA": _kline(5), "SPY": _kline(0)})
+
+    def boom(*a, **k):
+        raise RuntimeError("boom")
+    monkeypatch.setattr(etf_holdings_rs, "compute_extras", boom)
+    assert etf_rs.run_etf_rs(_cfg(tickers={"AAA": "甲"}), tmp_path, date(2026, 10, 31)) is not None
+    txt = (tmp_path / "TV" / "US" / "2026_10_31_ETF_rs_3m.txt").read_text()
+    assert "1M强" not in txt and txt.startswith("1. AAA")
+
+
+def test_run_holdings_rs_false_skips_step(tmp_path, monkeypatch):
+    monkeypatch.setattr(etf_rs, "_fetch_klines", lambda *a, **k: {"AAA": _kline(5), "SPY": _kline(0)})
+
+    def never(*a, **k):
+        raise AssertionError("compute_extras called with holdings_rs=False")
+    monkeypatch.setattr(etf_holdings_rs, "compute_extras", never)
+    assert etf_rs.run_etf_rs(_cfg(tickers={"AAA": "甲"}), tmp_path, date(2026, 10, 31),
+                             holdings_rs=False) is not None

@@ -29,6 +29,14 @@ klines on the 1M weekly ladder ``us_rs_3m.WEIGHTS_1M_BARS`` (cumulative
 view next to the 3M one. It is a soft step after the 3M file: a failure
 there never costs the 3M ranking. The trend page stays 3M-only.
 
+Under each ETF's row both files carry one indented continuation line
+``   1M强: A > B > C > D > E`` — the ETF's US-listed constituents ranked by
+the same 1M ladder (``etf_holdings_rs``; constituents from stockanalysis
+top-25 with a daily cache, yfinance top-10 fallback flagged ``(前十大)``).
+Computed once before the files are written; a failure costs only that
+line. ``read_previous_ranks`` skips indented lines, so the markers above
+are unaffected.
+
 The same klines also feed the trend page ``Reports/ETF/etf_rs_trend.html``
 (``etf_rs_chart``: per-day rank / score history recomputed from closes, top
 ``chart_top_n`` drawn thick) — a soft step after the ranking is written.
@@ -198,8 +206,10 @@ def read_previous_ranks(output_dir: Path, today: date,
     dated strictly before ``today`` (so a same-day rerun compares against the
     same prior snapshot, not its own earlier output). The ticker is the first
     whitespace token of each line after an optional ``N.`` rank prefix — works
-    on numbered, bare and already-annotated lines. None when no earlier snapshot exists (long weekend past the 5-day
-    retention, first run) or the file cannot be read."""
+    on numbered, bare and already-annotated lines; indented continuation
+    lines (the per-ETF ``1M强:`` holdings line) are skipped. None when no
+    earlier snapshot exists (long weekend past the 5-day retention, first
+    run) or the file cannot be read."""
     target = output_dir / "TV" / "US"
     if not target.is_dir():
         return None
@@ -225,6 +235,8 @@ def read_previous_ranks(output_dir: Path, today: date,
         return None
     ranks: dict[str, int] = {}
     for line in lines:
+        if line[:1].isspace():
+            continue  # indented "   1M强: …" continuation line (etf_holdings_rs), not an ETF row
         parts = line.split()
         if parts and _RANK_PREFIX_RE.match(parts[0]):
             parts = parts[1:]  # "12." rank prefix (current format); legacy lines have none
@@ -261,14 +273,17 @@ def write_ranking(
     today: date,
     prev_ranks: dict[str, int] | None = None,
     stem: str = _STEM,
+    extras: dict[str, str] | None = None,
 ) -> Path | None:
     """Write ``TV/US/<YYYY_MM_DD>_<stem>.txt`` (``_STEM`` 3M / ``_STEM_1M`` 1M): one
     ``N. TICKER 🟢↑N - 中文名 | 前十大持仓`` per line (``N.`` = 1-based rank),
     strongest at the top (name /
     holdings segments omitted when unknown). The rank-change marker
     (``rank_delta_marker`` vs ``prev_ranks``) is omitted entirely when there
-    is no previous snapshot. Empty table → no file (no 0-byte artifacts);
-    returns the path or None."""
+    is no previous snapshot. ``extras`` (``etf_holdings_rs.compute_extras``)
+    adds one 3-space-indented continuation line under an ETF's row, verbatim
+    (``   1M强: A > B > …``); absent / empty → no extra line. Empty table →
+    no file (no 0-byte artifacts); returns the path or None."""
     if table is None or table.empty:
         return None
     target = output_dir / "TV" / "US"
@@ -278,6 +293,9 @@ def write_ranking(
     for i, t in enumerate(table.index, start=1):
         marker = rank_delta_marker(prev_ranks.get(t), i) if prev_ranks is not None else ""
         lines.append(_format_line(t, names.get(t, ""), holdings.get(t, ""), marker, rank=i))
+        extra = (extras or {}).get(t)
+        if extra:
+            lines.append(f"   {extra}")
     out.write_text("\n".join(lines) + "\n")
     return out
 
@@ -302,6 +320,7 @@ def _write_1m_ranking(
     holdings: dict[str, str],
     output_dir: Path,
     today: date,
+    extras: dict[str, str] | None = None,
 ) -> Path | None:
     """The 1M counterpart of the 3M block in ``run_etf_rs``: same klines,
     ``WEIGHTS_1M_BARS`` lookbacks, same-name collapse, rank-change markers
@@ -318,7 +337,8 @@ def _write_1m_ranking(
     prev_ranks = read_previous_ranks(output_dir, today, stem=_STEM_1M)
     if prev_ranks is None:
         logger.info(f"[{label}] no earlier 1M snapshot before {today}; rank-change markers omitted")
-    out = write_ranking(table, names, holdings, output_dir, today, prev_ranks, stem=_STEM_1M)
+    out = write_ranking(table, names, holdings, output_dir, today, prev_ranks, stem=_STEM_1M,
+                        extras=extras)
     if out is None:
         logger.warning(f"[{label}] nothing scored; no file written")
         return None
@@ -327,10 +347,14 @@ def _write_1m_ranking(
     return out
 
 
-def run_etf_rs(cfg: dict, output_dir: Path, today: date) -> Path | None:
+def run_etf_rs(cfg: dict, output_dir: Path, today: date,
+               holdings_rs: bool = True) -> Path | None:
     """Entry point for us-eod / ``--mode etf-rs``. Returns the written path,
     or None when disabled, unconfigured, or nothing could be scored. Never
-    raises on data problems (a fetch that returns nothing is a warning)."""
+    raises on data problems (a fetch that returns nothing is a warning).
+    ``holdings_rs=False`` skips the per-ETF strongest-holdings line
+    (``etf_holdings_rs``) — the cloud Pages build passes it, so GitHub
+    Actions never scrapes stockanalysis or downloads ~1000 constituents."""
     if not cfg.get("enabled", True):
         logger.info(f"[{_LABEL}] disabled in config; skipping")
         return None
@@ -355,6 +379,20 @@ def run_etf_rs(cfg: dict, output_dir: Path, today: date) -> Path | None:
     if benchmark not in klines:
         logger.warning(f"[{_LABEL}] {benchmark} missing from fetch; ranking on absolute 3M scores")
 
+    # Per-ETF "1M强: A > B > …" continuation line (etf_holdings_rs): computed
+    # once, before either file is written, so the 3M and 1M snapshots carry
+    # the same lines. Soft — any failure here means the rankings go out
+    # without the extra lines, exactly as before this step existed.
+    extras: dict[str, str] = {}
+    if holdings_rs:
+        try:
+            import etf_holdings_rs
+            extras = etf_holdings_rs.compute_extras(
+                cfg.get("holdings_rs", {}), etfs, klines.get(benchmark), today, output_dir)
+        except Exception as e:
+            logger.warning(f"[{_LABEL}] holdings 1M RS failed, rankings written without it: {e}")
+            extras = {}
+
     table = rank_etfs(klines, etfs, benchmark)
     missing = [t for t in etfs if t not in table.index]
     if missing:
@@ -371,7 +409,7 @@ def run_etf_rs(cfg: dict, output_dir: Path, today: date) -> Path | None:
     prev_ranks = read_previous_ranks(output_dir, today)
     if prev_ranks is None:
         logger.info(f"[{_LABEL}] no earlier snapshot before {today}; rank-change markers omitted")
-    out = write_ranking(table, names, holdings, output_dir, today, prev_ranks)
+    out = write_ranking(table, names, holdings, output_dir, today, prev_ranks, extras=extras)
     if out is None:
         logger.warning(f"[{_LABEL}] nothing scored; no file written")
         return None
@@ -380,7 +418,8 @@ def run_etf_rs(cfg: dict, output_dir: Path, today: date) -> Path | None:
     # 1M weekly ladder on the same klines → <date>_ETF_rs_1m.txt. Soft — a
     # failure here must not cost the 3M file above or the trend page below.
     try:
-        _write_1m_ranking(klines, etfs, benchmark, names, holdings, output_dir, today)
+        _write_1m_ranking(klines, etfs, benchmark, names, holdings, output_dir, today,
+                          extras=extras)
     except Exception as e:
         logger.warning(f"[{_LABEL} 1M] failed, 3M ranking unaffected: {e}")
     # Trend page (Reports/ETF/etf_rs_trend.html): same klines, same order as

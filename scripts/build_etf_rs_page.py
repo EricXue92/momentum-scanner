@@ -43,7 +43,9 @@ def build(site_dir: Path, config_path: Path = _REPO_ROOT / "config.toml") -> int
     # Same calendar day the local us-eod stamps on the page.
     today = datetime.now(ZoneInfo("Asia/Hong_Kong")).date()
     with tempfile.TemporaryDirectory() as scratch:
-        etf_rs.run_etf_rs(cfg, Path(scratch), today)
+        # No stockanalysis scrape / constituent download in the cloud: the
+        # page does not show the per-ETF holdings line.
+        etf_rs.run_etf_rs(cfg, Path(scratch), today, holdings_rs=False)
         page = Path(scratch) / _PAGE
         if not page.is_file():
             logger.error("[ETF RS] no trend page produced; keeping the deployed one")
