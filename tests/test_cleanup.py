@@ -334,3 +334,13 @@ def test_master_backups_use_two_day_window(tmp_path: Path) -> None:
     assert (state / "eod_seen_US.txt.bak.20260514_100000").exists()
     assert not (state / "eod_seen_US.txt.bak.20260513_100000").exists()
     assert not (state / "eod_seen_HK.txt.bak.20260401_200000").exists()
+
+
+def test_etf_holdings_cache_uses_eight_day_window(output_tree: Path) -> None:
+    # etf_holdings_rs cache: 7-day walk-back + today = 8-day window.
+    for d in ("2026_05_15", "2026_05_08", "2026_05_07"):
+        _touch(output_tree / "state" / f"etf_holdings_{d}.json")
+    cleanup_old_outputs(output_tree, date(2026, 5, 15))
+    assert (output_tree / "state" / "etf_holdings_2026_05_15.json").exists()
+    assert (output_tree / "state" / "etf_holdings_2026_05_08.json").exists()
+    assert not (output_tree / "state" / "etf_holdings_2026_05_07.json").exists()

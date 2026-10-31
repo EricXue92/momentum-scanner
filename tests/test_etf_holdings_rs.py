@@ -47,6 +47,7 @@ def test_parse_unescapes_and_strips_anchor():
     ("NVDA", True), ("BRK.B", True), ("A", True),
     ("TLV:NXSN", False), ("688836.SZ", False), ("SHE:002472", False),
     ("278A.T", False), ("-", False), ("", False), ("brk.b", False),
+    ("GOOGL", True), ("AGPXX", False), ("FDRXX", False),   # 5-letter + trailing X = mutual / money-market fund
 ])
 def test_is_us_symbol(sym, ok):
     assert etf_holdings_rs.is_us_symbol(sym) is ok

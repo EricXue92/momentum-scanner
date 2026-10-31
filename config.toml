@@ -112,6 +112,19 @@ enabled = true
 benchmark = "SPY"
 chart_top_n = 20          # 走势页里画粗线的名次数 (按最新一天排名)
 
+# 成分股 1M 强势前 5 (etf_holdings_rs.py): 每只 ETF 行下缩进一行 "1M强: A > B > C > D > E"
+# (3M / 1M 两个文件都有, 同一次计算结果)。
+# 成分股来源链: 当日缓存 → stockanalysis.com holdings 页 (免费版只给权重前 25)
+# → ≤ cache_max_age_days 天内旧缓存 → yfinance 前十大 (行尾标 "(前十大)") → 放弃 (不写该行)。
+# 只算美股上市的成分股 (海外代码跳过); 1M 算法与上面的 _1m 文件相同 (对 SPY 超额), 只在该 ETF 内部排序。
+# 缓存 output/state/etf_holdings_<date>.json (只存 stockanalysis 结果, 8 天清理); 同日重跑读缓存不上网。
+# 软步骤: 失败只少这一行, 排名文件照常。GitHub Pages 云端构建不跑这一步 (页面不显示)。
+[etf_rs.holdings_rs]
+enabled = true
+top_n = 5                   # 每只 ETF 下面列几只
+cache_max_age_days = 7      # stockanalysis 抓取失败时最多走回几天缓存
+request_delay_sec = 0.8     # 相邻两次 stockanalysis 请求的间隔 (秒)
+
 [etf_rs.tickers]
 # --- 美股行业 / 主题 ---
 DRAM = "内存与存储芯片"

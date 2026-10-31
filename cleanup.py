@@ -48,6 +48,11 @@ _RETENTION_RULES: tuple[_Rule, ...] = (
     # today's file is ever appended to. 2-day window like other state caches.
     _Rule("state", re.compile(rf"^premarket_catalyst_{_DATE_U}\.md$"),
           "%Y_%m_%d", 2),
+    # ETF constituent cache (etf_holdings_rs.py): stockanalysis top-25 per
+    # ETF, one JSON per day. 8-day window = today + the 7-day walk-back
+    # (``[etf_rs.holdings_rs].cache_max_age_days``) a failed scrape may use.
+    _Rule("state", re.compile(rf"^etf_holdings_{_DATE_U}\.json$"),
+          "%Y_%m_%d", 8),
     # Master backups written by every prune (rs-line audit, daily SMA50
     # prune): eod_seen_<MKT>.txt.bak.<YYYYmmdd_HHMMSS>. 2-day window (today +
     # yesterday) like the other state files. The masters themselves

@@ -313,6 +313,27 @@ local (throttle-prone) k-line fetch.
   the 3M calendar and embeds them as `s`/`p` (3M) and `s1`/`p1` (1M) per
   series; `run_etf_rs` passes the 3M-unscored names too (`missing`, 21-63
   bars) so they get a 1M line with null 3M.
+  **Per-ETF strongest-holdings line** (since 2026-10-31, `etf_holdings_rs.py`,
+  `[etf_rs.holdings_rs]`): under every ETF row in BOTH `.txt` files one
+  3-space-indented continuation line `   1M强: A > B > C > D > E` — the
+  ETF's **US-listed** constituents ranked by the same 1M ladder vs SPY
+  (within the ETF only, no percentile), top `top_n` (5), fewer when fewer
+  score, no line when none. Constituent source chain per ETF, first hit
+  wins: today's cache → stockanalysis `/etf/<slug>/holdings/` (SSR table;
+  **free tier = top 25 by weight**, "Showing 25 of 78 holdings") → earlier
+  cache ≤ `cache_max_age_days` (7) → yfinance `funds_data.top_holdings`
+  (line gets ` (前十大)`) → nothing. Cache
+  `output/state/etf_holdings_<YYYY_MM_DD>.json` holds stockanalysis
+  results only (foreign codes included; filtered at ranking), 8-day
+  cleanup rule; a same-day rerun reads it and never goes online. `BRK.B`
+  is requested as `BRK-B`, displayed as `BRK.B`. Computed once in
+  `run_etf_rs` **before** either file is written (soft: failure → files
+  without the line); `read_previous_ranks` skips indented lines so the
+  rank markers ignore it. The cloud Pages build passes
+  `run_etf_rs(holdings_rs=False)` — no scrape, no ~1000-ticker download in
+  GH Actions, page unchanged. Full holdings later = add an issuer source
+  function in front of the stockanalysis step. Spec:
+  `docs/superpowers/specs/2026-10-31-etf-holdings-1m-rs-design.md`.
   **Also published to GitHub Pages** (https://ericxue92.github.io/momentum-scanner/):
   `.github/workflows/etf_rs_page.yml` rebuilds it in the cloud
   (`scripts/build_etf_rs_page.py` → `_site/index.html`, deployed as a Pages

@@ -59,6 +59,9 @@ _LABEL = "ETF 持仓RS"
 
 #: Plain US listing: 1-5 capitals, optional one-letter share class (``BRK.B``).
 US_SYMBOL_RE = re.compile(r"^[A-Z]{1,5}(\.[A-Z])?$")
+#: 5 letters ending in X = mutual / money-market fund (``AGPXX`` sat in
+#: BWET's collateral and got ranked on 2026-10-31), never a listed stock.
+_FUND_SYMBOL_RE = re.compile(r"^[A-Z]{4}X$")
 
 
 class Constituents(NamedTuple):
@@ -109,7 +112,8 @@ def parse_holdings_html(page: str) -> list[str] | None:
 # --- symbols --------------------------------------------------------------
 
 def is_us_symbol(sym: str) -> bool:
-    return bool(US_SYMBOL_RE.match(sym or ""))
+    sym = sym or ""
+    return bool(US_SYMBOL_RE.match(sym)) and not _FUND_SYMBOL_RE.match(sym)
 
 
 def to_yf_symbol(sym: str) -> str:
