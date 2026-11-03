@@ -241,3 +241,11 @@ day: **price ≥ $20 and 20-day average dollar volume ≥ $100M** as entry and
 retention floors for the master (user request; a sub-$20 or thin name is not
 tradable on this list even when it tops an ETF's 1M line). One bar download
 per run serves the entry gate and the prune. — ETF section.
+
+### 2026-11-03 — leaders master: ADR% ≥ 2.5 floor
+Third entry and retention floor next to price and dollar volume (user
+request): 20-session mean of (High − Low) / Close ≥ 2.5%. Fewer than 20 usable
+bars is not judged and the name is kept — this module's pass-through
+convention, not the strict drop of `main._filter_adr_percent`. Existing names
+are cut too (user decision). 2.5 rather than a first try of 3.0: on the day's
+master 3.0 removed 50 of 61 names. — ETF section.

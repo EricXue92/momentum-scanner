@@ -28,12 +28,15 @@ into TradingView as they are:
   today (comma-separated; absent when none; a same-day rerun merges, since
   the rerun no longer sees the names the first run removed). Same 5-day rule.
 
-**Floors** (``min_price`` 20 / ``min_dollar_volume`` 100M, 0 = off): latest
-close and the 20-session average of close × volume. Applied at **entry** (a
-candidate under a floor is not added today — it comes in the day it
-qualifies; no bars for it → added, like every other gate's pass-through) and
-to the **existing master** in the same prune pass below. One 6mo batch for
-master ∪ today's candidates serves both (``run_leaders``).
+**Floors** (``min_price`` 20 / ``min_dollar_volume`` 100M /
+``min_adr_percent`` 2.5, 0 = off): latest close, the 20-session average of
+close × volume, and ADR% = 20-session mean of (High − Low) / Close × 100 (same
+formula as ``main._filter_adr_percent``, but < 20 usable bars → not judged,
+kept, unlike that strict filter). Applied at **entry** (a candidate under a
+floor is not added today — it comes in the day it qualifies; no bars for it →
+added, like every other gate's pass-through) and to the **existing master** in
+the same prune pass below. One 6mo batch for master ∪ today's candidates serves
+both (``run_leaders``).
 
 **Prune rule** (``find_break_drops``, after today's names were added, over
 the whole master): the trailing streak of completed sessions whose close is
@@ -72,6 +75,8 @@ DEFAULT_SMA_PERIOD = 50
 DEFAULT_MIN_PRICE = 20.0
 DEFAULT_MIN_DOLLAR_VOLUME = 100_000_000.0
 DOLLAR_VOLUME_WINDOW = 20
+DEFAULT_MIN_ADR_PERCENT = 2.5
+ADR_WINDOW = 20
 _UNSET = object()
 
 
@@ -80,6 +85,7 @@ class Bars(NamedTuple):
     closes: dict[str, pd.Series]
     lows: dict[str, pd.Series]
     volumes: dict[str, pd.Series]
+    highs: dict[str, pd.Series]
 
 _EXTRA_PREFIX = "1M强:"
 _EXTRA_SUFFIX_RE = re.compile(r"\s*\([^()]*\)\s*$")       # " (前十大)"
@@ -164,9 +170,22 @@ def _todays_new(cfg: dict, output_dir: Path, ranking_path: Path | None) -> tuple
     return master, new
 
 
-def _floors(cfg: dict) -> tuple[float, float]:
+def _floors(cfg: dict) -> tuple[float, float, float]:
     return (float(cfg.get("min_price", DEFAULT_MIN_PRICE)),
-            float(cfg.get("min_dollar_volume", DEFAULT_MIN_DOLLAR_VOLUME)))
+            float(cfg.get("min_dollar_volume", DEFAULT_MIN_DOLLAR_VOLUME)),
+            float(cfg.get("min_adr_percent", DEFAULT_MIN_ADR_PERCENT)))
+
+
+def _floors_label(cfg: dict) -> str:
+    min_price, min_dv, min_adr = _floors(cfg)
+    return f"price ≥ {min_price:g}, $vol ≥ {min_dv:,.0f}, ADR% ≥ {min_adr:g}"
+
+
+def _below_floors(cfg: dict, closes: dict[str, pd.Series], bars: Bars) -> list[str]:
+    """Names in ``closes`` under any of the three floors (sorted)."""
+    min_price, min_dv, min_adr = _floors(cfg)
+    return sorted(set(find_floor_drops(closes, bars.volumes, min_price, min_dv))
+                  | set(find_adr_drops(closes, bars.highs, bars.lows, min_adr)))
 
 
 def update_leaders(cfg: dict, output_dir: Path, today: date, ranking_path: Path | None,
@@ -174,8 +193,8 @@ def update_leaders(cfg: dict, output_dir: Path, today: date, ranking_path: Path 
                    plan: tuple[list[str], list[str]] | None = None) -> list[str]:
     """Grow the master from today's 1M ranking file; returns the names added
     today (``[]`` when disabled, no file, or nothing new). With ``bars``,
-    candidates under the price / dollar-volume floors are not added (a
-    candidate with no bars passes through). ``plan`` is ``_todays_new``'s
+    candidates under the price / dollar-volume / ADR% floors are not added
+    (a candidate with no bars passes through). ``plan`` is ``_todays_new``'s
     result when the caller already computed it. Writes
     ``<date>_ETF_rs_new.txt`` only when there is something new AND the day
     has no such file yet."""
@@ -183,10 +202,9 @@ def update_leaders(cfg: dict, output_dir: Path, today: date, ranking_path: Path 
     if not new:
         return []
     if bars is not None:
-        min_price, min_dv = _floors(cfg)
-        rejected = set(find_floor_drops(bars.closes, bars.volumes, min_price, min_dv))
+        rejected = set(_below_floors(cfg, bars.closes, bars))
         if rejected:
-            logger.info(f"[{_LABEL}] entry gate (price ≥ {min_price:g}, $vol ≥ {min_dv:,.0f}) "
+            logger.info(f"[{_LABEL}] entry gate ({_floors_label(cfg)}) "
                         f"rejected: {sorted(r for r in rejected if r in new)}")
             new = [s for s in new if s not in rejected]
             if not new:
@@ -211,7 +229,7 @@ def update_leaders(cfg: dict, output_dir: Path, today: date, ranking_path: Path 
 
 
 def _fetch_daily_bars(tickers: list[str]) -> Bars | None:
-    """One 6mo yfinance batch → ``Bars`` (close / low / volume per ticker),
+    """One 6mo yfinance batch → ``Bars`` (close / low / volume / high per ticker),
     the closes with ``sma50_prune``'s stale-series exclusion and trailing-NaN
     Close fill applied (the shared EOD conventions); None when the batch
     failed entirely. Monkeypatched in tests."""
@@ -227,21 +245,24 @@ def _fetch_daily_bars(tickers: list[str]) -> Bars | None:
     closes: dict[str, pd.Series] = {}
     lows: dict[str, pd.Series] = {}
     volumes: dict[str, pd.Series] = {}
+    highs: dict[str, pd.Series] = {}
     for t in tickers:
         try:
             frame = data if single else data[t]
-            close, low, vol = frame["Close"], frame["Low"], frame["Volume"]
+            close, low, vol, high = frame["Close"], frame["Low"], frame["Volume"], frame["High"]
         except (KeyError, IndexError):
             continue
         if close.notna().any():
             closes[t] = close
             lows[t] = low
             volumes[t] = vol
+            highs[t] = high
     closes = drop_stale_series(closes)
     closes = fill_missing_last_close(closes, label=_LABEL)
     closes = {t: c.dropna() for t, c in closes.items() if c.notna().any()}
     return Bars(closes, {t: lows[t] for t in closes if t in lows},
-                {t: volumes[t] for t in closes if t in volumes})
+                {t: volumes[t] for t in closes if t in volumes},
+                {t: highs[t] for t in closes if t in highs})
 
 
 def find_floor_drops(
@@ -267,6 +288,30 @@ def find_floor_drops(
             dv = (close * vol.reindex(close.index)).tail(window).fillna(0.0)
             if dv.empty or float(dv.mean()) < min_dollar_volume:
                 drops.append(t)
+    return sorted(drops)
+
+
+def find_adr_drops(
+    closes: dict[str, pd.Series],
+    highs: dict[str, pd.Series],
+    lows: dict[str, pd.Series],
+    min_adr_percent: float,
+    window: int = ADR_WINDOW,
+) -> list[str]:
+    """Names whose mean (High − Low) / Close × 100 over the last ``window``
+    usable sessions is below ``min_adr_percent`` (0 disables). No high / low
+    series or fewer than ``window`` usable bars → not judged, kept (sorted
+    result)."""
+    if min_adr_percent <= 0:
+        return []
+    drops: list[str] = []
+    for t, close in closes.items():
+        high, low = highs.get(t), lows.get(t)
+        if high is None or low is None:
+            continue
+        ranges = ((high.reindex(close.index) - low.reindex(close.index)) / close).dropna().tail(window)
+        if len(ranges) == window and float(ranges.mean()) * 100 < min_adr_percent:
+            drops.append(t)
     return sorted(drops)
 
 
@@ -333,8 +378,7 @@ def prune_master(cfg: dict, output_dir: Path, today: date, bars: Bars | None | o
         logger.warning(f"[{_LABEL}] no usable bars for {len(missing)} name(s), kept: {missing}")
     in_master = set(master)
     closes = {t: c for t, c in bars.closes.items() if t in in_master}
-    min_price, min_dv = _floors(cfg)
-    floor_drops = find_floor_drops(closes, bars.volumes, min_price, min_dv)
+    floor_drops = _below_floors(cfg, closes, bars)
     break_drops = find_break_drops(closes, bars.lows, int(cfg.get("sma_period", DEFAULT_SMA_PERIOD)))
     drops = sorted(set(floor_drops) | set(break_drops))
     if not drops:
@@ -349,7 +393,7 @@ def prune_master(cfg: dict, output_dir: Path, today: date, bars: Bars | None | o
     except OSError as e:
         logger.warning(f"[{_LABEL}] could not write {pruned_path}: {e}")
     logger.info(f"[{_LABEL}] pruned {len(drops)} -> master {len(kept)}; floors "
-                f"(price ≥ {min_price:g}, $vol ≥ {min_dv:,.0f}): {floor_drops}; "
+                f"({_floors_label(cfg)}): {floor_drops}; "
                 f"SMA50 first-break: {break_drops}")
     return drops
 
@@ -362,8 +406,7 @@ def run_leaders(cfg: dict, output_dir: Path, today: date, ranking_path: Path | N
     master, new = _todays_new(cfg, output_dir, ranking_path)
     if not master and not new:
         return
-    min_price, min_dv = _floors(cfg)
-    want_bars = (min_price > 0 or min_dv > 0) or (cfg.get("prune", True) and bool(master))
+    want_bars = any(f > 0 for f in _floors(cfg)) or (cfg.get("prune", True) and bool(master))
     bars: Bars | None = None
     if want_bars:
         bars = _fetch_daily_bars(master + new)

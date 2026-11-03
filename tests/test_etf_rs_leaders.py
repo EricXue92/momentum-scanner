@@ -14,6 +14,9 @@ from cleanup import cleanup_old_outputs
 TODAY = date(2026, 10, 31)
 
 
+_REAL_FETCH_DAILY_BARS = etf_rs_leaders._fetch_daily_bars   # the autouse stub below replaces it
+
+
 @pytest.fixture(autouse=True)
 def _no_prune_network(monkeypatch):
     """prune_master's default fetch hits yfinance; the wiring tests below
@@ -229,51 +232,53 @@ def _bars(tail_closes: list[float], tail_lows: list[float], base_days: int = 56,
 
 
 def _split(d):
+    """No High series: these fixtures exercise the other gates, ADR% skips them."""
     return etf_rs_leaders.Bars({t: c for t, (c, _, _) in d.items()},
                                {t: l for t, (_, l, _) in d.items()},
-                               {t: v for t, (_, _, v) in d.items()})
+                               {t: v for t, (_, _, v) in d.items()},
+                               {})
 
 
 def test_drop_when_two_days_below_and_close_breaks_first_day_low():
-    closes, lows, _ = _split({"A": _bars([97, 94], [95, 93])})
+    closes, lows, _, _ = _split({"A": _bars([97, 94], [95, 93])})
     assert etf_rs_leaders.find_break_drops(closes, lows) == ["A"]
 
 
 def test_keep_when_second_close_holds_above_first_day_low():
-    closes, lows, _ = _split({"A": _bars([97, 96], [95, 94])})     # 96 ≥ 95
+    closes, lows, _, _ = _split({"A": _bars([97, 96], [95, 94])})     # 96 ≥ 95
     assert etf_rs_leaders.find_break_drops(closes, lows) == []
 
 
 def test_keep_after_only_one_day_below():
-    closes, lows, _ = _split({"A": _bars([97], [90])})
+    closes, lows, _, _ = _split({"A": _bars([97], [90])})
     assert etf_rs_leaders.find_break_drops(closes, lows) == []
 
 
 def test_keep_when_close_equals_first_day_low():
-    closes, lows, _ = _split({"A": _bars([97, 95], [95, 90])})
+    closes, lows, _, _ = _split({"A": _bars([97, 95], [95, 90])})
     assert etf_rs_leaders.find_break_drops(closes, lows) == []
 
 
 def test_longer_streak_compares_with_the_first_break_day_not_yesterday():
     # 4 days below; last close 94.5 < first-day low 95 (drop) even though it
     # is above yesterday's low 93.
-    closes, lows, _ = _split({"A": _bars([97, 96, 95.5, 94.5], [95, 94, 93, 92])})
+    closes, lows, _, _ = _split({"A": _bars([97, 96, 95.5, 94.5], [95, 94, 93, 92])})
     assert etf_rs_leaders.find_break_drops(closes, lows) == ["A"]
     # last close 95.2 < yesterday's low 95.5 but ≥ first-day low 95 → keep
-    closes, lows, _ = _split({"B": _bars([97, 96, 95.5, 95.2], [95, 94, 93, 95.5])})
+    closes, lows, _, _ = _split({"B": _bars([97, 96, 95.5, 95.2], [95, 94, 93, 95.5])})
     assert etf_rs_leaders.find_break_drops(closes, lows) == []
 
 
 def test_streak_restarts_after_a_close_back_above_the_line():
     # below, above, below, below: the streak is the last two days only
-    closes, lows, _ = _split({"A": _bars([97, 101, 97, 96.5], [80, 100, 96, 95])})
+    closes, lows, _, _ = _split({"A": _bars([97, 101, 97, 96.5], [80, 100, 96, 95])})
     assert etf_rs_leaders.find_break_drops(closes, lows) == []            # 96.5 ≥ 96
-    closes, lows, _ = _split({"A": _bars([97, 101, 97, 95.5], [80, 100, 96, 95])})
+    closes, lows, _, _ = _split({"A": _bars([97, 101, 97, 95.5], [80, 100, 96, 95])})
     assert etf_rs_leaders.find_break_drops(closes, lows) == ["A"]         # 95.5 < 96
 
 
 def test_short_history_and_missing_low_are_kept():
-    closes, lows, _ = _split({"A": _bars([97, 94], [95, 93], base_days=40)})   # < 50 bars
+    closes, lows, _, _ = _split({"A": _bars([97, 94], [95, 93], base_days=40)})   # < 50 bars
     assert etf_rs_leaders.find_break_drops(closes, lows) == []
     c, l, _ = _bars([97, 94], [95, 93])
     assert etf_rs_leaders.find_break_drops({"A": c}, {}) == []               # no low series
@@ -357,7 +362,7 @@ def test_cleanup_ages_the_pruned_file(tmp_path):
 
 
 def test_find_floor_drops_price_and_dollar_volume():
-    closes, _, volumes = _split({
+    closes, _, volumes, _ = _split({
         "CHEAP": _bars([19.5, 19.0], [19, 18]),                      # price < 20
         "THIN": _bars([101, 102], [100, 101], volume=500_000),       # ~$51M/day < 100M
         "OK": _bars([101, 102], [100, 101]),                         # $1B/day
@@ -456,3 +461,113 @@ def test_run_leaders_does_not_download_when_nothing_to_check(tmp_path, monkeypat
     ranking = _write_ranking(tmp_path, "1. E = - n\n")          # no 1M line, empty master
     etf_rs_leaders.run_leaders(_cfg(), tmp_path, TODAY, ranking)
     assert not (_tv(tmp_path) / "ETF_rs_leaders.txt").exists()
+
+
+# --- ADR% floor ---
+
+
+def _ohlc(ranges: list[float], close: float = 64.0):
+    """Flat ``close`` with the given daily High − Low. 64 and powers-of-two
+    ranges keep the percentages exact: range 2 → ADR 3.125%."""
+    import pandas as pd
+    idx = pd.bdate_range(end="2026-10-30", periods=len(ranges))
+    c = pd.Series([close] * len(ranges), index=idx)
+    r = pd.Series(ranges, index=idx)
+    return c, c + r / 2, c - r / 2
+
+
+def _adr_bars(**daily_range):
+    """``Bars`` for names with a constant daily range over 60 sessions; price
+    and $vol clear their floors ($640M/day), and flat closes never break SMA50."""
+    import pandas as pd
+    closes, highs, lows, vols = {}, {}, {}, {}
+    for t, r in daily_range.items():
+        closes[t], highs[t], lows[t] = _ohlc([r] * 60)
+        vols[t] = pd.Series([10_000_000.0] * 60, index=closes[t].index)
+    return etf_rs_leaders.Bars(closes, lows, vols, highs)
+
+
+def _adr_of(ranges, floor):
+    c, h, l = _ohlc(ranges)
+    return etf_rs_leaders.find_adr_drops({"A": c}, {"A": h}, {"A": l}, floor)
+
+
+def test_adr_floor_is_inclusive_and_divides_by_the_close():
+    assert _adr_of([2.0] * 20, 3.125) == []        # 2 / 64 = exactly 3.125%
+    assert _adr_of([2.0] * 20, 3.13) == ["A"]      # ÷ Low (63) would give 3.17% and keep it
+
+
+def test_adr_averages_only_the_last_20_sessions():
+    # 40 wide days (12.5%) then 20 narrow (1.5625%): only the narrow ones count
+    assert _adr_of([8.0] * 40 + [1.0] * 20, 3.0) == ["A"]
+    # 19 days of 6.25% and one dead last day (1%): mean 5.99%, not the last bar
+    assert _adr_of([4.0] * 19 + [0.64], 3.0) == []
+
+
+def test_adr_keeps_names_it_cannot_judge():
+    import numpy as np
+    assert _adr_of([1.0] * 19, 3.0) == []          # < 20 bars (fresh IPO)
+    c, h, l = _ohlc([1.0] * 20)
+    h.iloc[5] = np.nan                             # 19 usable bars
+    assert etf_rs_leaders.find_adr_drops({"A": c}, {"A": h}, {"A": l}, 3.0) == []
+    c, _, l = _ohlc([1.0] * 20)
+    assert etf_rs_leaders.find_adr_drops({"A": c}, {}, {"A": l}, 3.0) == []   # no High series
+
+
+def test_adr_floor_zero_is_off():
+    assert _adr_of([1.0] * 20, 0) == []
+
+
+def test_entry_gate_rejects_low_adr_at_the_default_2_5_percent(tmp_path):
+    ranking = _write_ranking(tmp_path, "1. E = - n\n   1M强: CALM > WILD\n")
+    bars = _adr_bars(CALM=1.568, WILD=1.632)       # 2.45% / 2.55%
+    assert etf_rs_leaders.update_leaders(_cfg(), tmp_path, TODAY, ranking, bars=bars) == ["WILD"]
+    assert (_tv(tmp_path) / "ETF_rs_leaders.txt").read_text(encoding="utf-8") == "WILD\n"
+    assert (_tv(tmp_path) / "2026_10_31_ETF_rs_new.txt").read_text(encoding="utf-8") == "WILD\n"
+
+
+def test_prune_master_removes_existing_low_adr_names(tmp_path, monkeypatch):
+    master = _master(tmp_path, ["CALM", "WILD"])
+    monkeypatch.setattr(etf_rs_leaders, "_fetch_daily_bars", lambda t: _adr_bars(CALM=1.0, WILD=2.0))
+    assert etf_rs_leaders.prune_master(_cfg(), tmp_path, TODAY) == ["CALM"]
+    assert master.read_text(encoding="utf-8") == "WILD\n"
+    assert (_tv(tmp_path) / "2026_10_31_ETF_rs_pruned.txt").read_text(encoding="utf-8") == "CALM\n"
+
+
+def test_min_adr_percent_comes_from_config(tmp_path, monkeypatch):
+    master = _master(tmp_path, ["CALM"])
+    monkeypatch.setattr(etf_rs_leaders, "_fetch_daily_bars", lambda t: _adr_bars(CALM=1.0))
+    assert etf_rs_leaders.prune_master(_cfg(min_adr_percent=0), tmp_path, TODAY) == []
+    assert master.read_text(encoding="utf-8") == "CALM\n"
+
+
+def test_run_leaders_downloads_when_adr_is_the_only_active_gate(tmp_path, monkeypatch):
+    ranking = _write_ranking(tmp_path, "1. E = - n\n   1M强: CALM > WILD\n")
+    monkeypatch.setattr(etf_rs_leaders, "_fetch_daily_bars", lambda t: _adr_bars(CALM=1.0, WILD=2.0))
+    cfg = _cfg(min_price=0, min_dollar_volume=0, prune=False)
+    etf_rs_leaders.run_leaders(cfg, tmp_path, TODAY, ranking)
+    assert (_tv(tmp_path) / "ETF_rs_leaders.txt").read_text(encoding="utf-8") == "WILD\n"
+
+
+def test_run_leaders_with_every_gate_off_does_not_download(tmp_path, monkeypatch):
+    def never(t):
+        raise AssertionError("must not fetch")
+    monkeypatch.setattr(etf_rs_leaders, "_fetch_daily_bars", never)
+    ranking = _write_ranking(tmp_path, "1. E = - n\n   1M强: CALM\n")
+    cfg = _cfg(min_price=0, min_dollar_volume=0, min_adr_percent=0, prune=False)
+    etf_rs_leaders.run_leaders(cfg, tmp_path, TODAY, ranking)
+    assert (_tv(tmp_path) / "ETF_rs_leaders.txt").read_text(encoding="utf-8") == "CALM\n"
+
+
+@pytest.mark.parametrize("tickers", [["A"], ["A", "B"]])
+def test_fetch_daily_bars_carries_the_high_series(monkeypatch, tickers):
+    import pandas as pd
+    import main
+    idx = pd.bdate_range(end="2026-10-30", periods=3)
+    one = pd.DataFrame({"High": [11.0, 12.0, 13.0], "Low": [9.0, 9.0, 9.0],
+                        "Close": [10.0, 10.0, 10.0], "Volume": [1e6, 1e6, 1e6]}, index=idx)
+    # Runtime shape: flat for one ticker, (ticker, field) MultiIndex for a batch
+    frame = one if len(tickers) == 1 else pd.concat({t: one for t in tickers}, axis=1)
+    monkeypatch.setattr(main, "_yf_download_with_retry", lambda *a, **k: frame)
+    bars = _REAL_FETCH_DAILY_BARS(tickers)
+    assert list(bars.highs["A"]) == [11.0, 12.0, 13.0]

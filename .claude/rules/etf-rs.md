@@ -93,10 +93,11 @@ file keeps the cross-cutting pieces: the undated-file exceptions under
   rule; stem rationale → decisions, standing). Soft step; no ntfy / Webull
   / Futu / eod_seen. **One bar download per run** (`run_leaders`: 6mo
   Close + Low + Volume for master ∪ today's candidates,
-  `sma50_prune.drop_stale_series` + `fill_missing_last_close` reused)
-  serves two gates. **Floors** (`min_price` 20 / `min_dollar_volume` 100M
-  = 20-session mean of close × volume, `find_floor_drops`, 0 = off): a
-  candidate under a floor is **not added** today (enters the day it
+  `sma50_prune.drop_stale_series` + `fill_missing_last_close` reused;
+  High too, for ADR%) serves two gates. **Floors** (`min_price` 20 /
+  `min_dollar_volume` 100M = 20-session mean of close × volume,
+  `find_floor_drops`; `min_adr_percent` 2.5 = 20-session mean of
+  (High − Low) / Close × 100, `find_adr_drops`; 0 = off): a candidate under a floor is **not added** today (enters the day it
   qualifies; no bars → added, pass-through), and an existing name under a
   floor is removed by the prune. **Master prune** (`prune_master`, right
   AFTER today's names were added, `prune = true` / `sma_period = 50`):
@@ -107,7 +108,8 @@ file keeps the cross-cutting pieces: the undated-file exceptions under
   close) — do not unify them. Streak of 1 / close back above the line
   (streak restarts) / close ≥ first-day low / < 50 bars / no data / stale
   series / NaN first-day low → kept by the SMA rule; no volume series →
-  kept by the dollar-volume floor. Failed batch → entry gate waived, prune
+  kept by the dollar-volume floor; no high / low series or < 20 usable bars →
+  kept by the ADR% floor (unlike the strict `main._filter_adr_percent`). Failed batch → entry gate waived, prune
   skipped. No `.bak`; the pruned file is the record. A pruned name
   re-enters the next day it is in a top ETF's top 5 and clears the floors.
   Test files that run `run_etf_rs` stub `etf_rs_leaders._fetch_daily_bars`
