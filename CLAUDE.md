@@ -26,37 +26,6 @@ uv run main.py --mode rs-line-audit --market {us,hk,both} --dry-run  # audit the
 uv run pytest tests/ -v             # `uv run python -m pytest` works too
 ```
 
-## Module map
-
-- `main.py` — US pipeline + CLI (`--mode`), Finviz discovery, Longs/Leaders/
-  RS/Shorts filters, dedup masters, yfinance download helpers
-  (`_yf_download_with_retry`, `_download_daily_batch`), US **and HK**
-  morning-gap scans (`run_morning_gap` / `run_hk_morning_gap`), alerts.
-  `hk_eod.py` — the HK EOD pipeline (universe, Shorts, Longs/Leaders/RS,
-  IPO, HK k-line fetch).
-- Universe RS: `rs_rating.py` (12M table fetch + freshness wait),
-  `us_rs_3m.py` (3M scorer, k-line fetcher, cloud script's core),
-  `hk_rs.py` / `hk_metrics.py` (HK RS + metrics cloud fetch with local
-  fallback), `rs_line.py` + `rs_line_audit.py` (RS-line trend, audit mode,
-  daily top-10 snapshot). Cloud side: `scripts/compute_us_rs_3m_cloud.py`,
-  `scripts/compute_hk_rs_cloud.py`.
-- Master maintenance: `sma50_prune.py` (SMA50 prune + delisting removal,
-  shared close fetch), `ema20_break.py` (first-break list), `us_ipo.py`
-  (US IPO ladder).
-- ETF: `etf_rs.py` (ranking files) → `etf_holdings_rs.py` (per-ETF
-  constituents + 1M top-5 line) → `etf_rs_leaders.py` (cumulative
-  watchlist + its prune) → `etf_rs_chart.py` (trend page);
-  `scripts/build_etf_rs_page.py` is the Pages build.
-- Integrations: `finviz_screener.py` (post-redesign screener),
-  `finviz_timeout.py` (socket timeouts for the `finviz` lib),
-  `futu_sync.py`, `tv_sync.py`, `notify.py` (ntfy), `power.py` (battery
-  probe), `net_ready.py` (wait for network), `cleanup.py` (retention
-  rules). `report/` — CANSLIM + catalyst reports (own `CLAUDE.md`).
-- `scripts/run_*.sh` are the launchd entry points (watchdog, caffeinate,
-  log rotation, soft trailing steps); `scripts/*.plist` the schedules;
-  `scripts/schedule_morning_gap_wakes.py` seeds the pmset wakes;
-  `scripts/trigger_rs_workflow.sh` dispatches the GH RS workflows.
-
 ## Invariants (don't break these)
 
 - **Dated files only**, no "latest" copy. `write_watchlist` skips empty lists
@@ -313,32 +282,6 @@ and must never be aged out.
   k-lines are counted as `drops['no_data']` (warned; re-evaluated next
   run), not silently lost.
 
-## Futu sync
-
-Soft side-effect — logs a warning on failure, never raises. No-op when disabled /
-unmapped / empty tickers (an empty `.txt` must not wipe the existing group).
-Diff-based (one DEL + one ADD max). Append-only groups skip DEL and accumulate.
-Ticker format: US `AAPL`→`US.AAPL`, HK `522`→`HK.00522` (5-digit). The 18 custom
-groups must be created by hand in the client (API can't create groups).
-
-**Gotchas (do not regress):**
-
-- TCP probe `_opend_reachable` (1.5s) before `OpenQuoteContext` — without it the
-  SDK retries forever on `ECONNREFUSED`. **Do not remove.**
-- **OpenD-down ntfy** (`main._alert_if_opend_down` → `notify.notify_opend_down`):
-  every Futu consumer soft-fails, so a dead OpenD would otherwise leave only
-  WARNINGs while scans come back empty (→ decisions 2026-09-28). One probe
-  at the top of us-eod / hk-eod and of each **in-window** morning-gap scan
-  (out-of-window fires stay silent); high-priority push **once per HKT day**
-  across all modes (`state/opend_down_alerted_<date>.txt`, written only after
-  a successful POST so a failed push retries on the next scan; 2-day cleanup).
-  Alert only — it never changes the run.
-- `get_market_snapshot` has no `change_rate` — derive from `(last_price -
-prev_close_price) / prev_close_price`. `pre_/after_change_rate` do exist.
-- `suspension` is a string (`"N/A"`), not bool — use bool `delisting` instead.
-- HK long-side data fetch hard-depends on OpenD (Futu _sync_ being soft-fail does
-  not make the _fetch_ soft).
-
 ## Scheduling (launchd, HKT)
 
 - US EOD Tue-Sat 10:00; HK EOD Mon-Fri 20:00; morning-gap modes fire many entries
@@ -348,62 +291,9 @@ prev_close_price) / prev_close_price`. `pre_/after_change_rate` do exist.
   the run path after it: an out-of-window fire exits in < 1s instead of
   paying the 20s settle — or, offline, the 300s wait plus a false
   "scan skipped" ntfy.
-- pmset wake keyword is **`wakeorpoweron`** on macOS 26+ (`wakepoweron` no longer
-  parses). US EOD uses mode `us-eod` not `eod` (HK bar is incomplete at 10:00 HKT).
-- **The schedule assumes AC power; every scheduled job holds a `caffeinate
-  -i -s` assertion** (`run_eod.sh` / `run_hk_eod.sh` / `trigger_rs_workflow.sh`
-  source `scripts/lib/hold_awake.sh` → `caffeinate -i -s -w $$ &`;
-  `run_morning_gap.sh` / `run_hk_morning_gap.sh` `exec caffeinate -i -s uv
-  run …`; the detached catalyst subprocess prepends its own
-  `/usr/bin/caffeinate -i -s`, `main._CAFFEINATE_BIN`). Do not remove. `-i`
-  works on battery, `-s` is AC-only; a lid-close by the user still sleeps
-  the Mac (→ decisions 2026-10-17). Belt-and-suspenders: EOD/in-window
-  morning-gap runs probe `pmset -g batt` (`power.py`,
-  `main._alert_if_on_battery`) and ntfy once per HKT day
-  (`state/on_battery_alerted_<date>.txt`, 2-day cleanup); the conditional
-  RS group retries network errors (`_retry_on_network_error`: wait for
-  finviz reachable ≤ 180s, 3 attempts; non-network errors propagate); and
-  the trigger script polls `gh run view` status/conclusion for up to ~20 min
-  before alerting — `completed`+non-success → "failed", never confirmed →
-  "unconfirmed" (default priority, exit 2). `TRIGGER_*` env overrides exist
-  only for `tests/test_trigger_rs_workflow.py`. The US morning-gap plist
-  runs `run_morning_gap.sh` (log rotated daily like the other wrappers).
-- **RS workflow self-trigger:** GH Actions' scheduled cron is unreliable
-  (delayed hours, sometimes skipped; → decisions 2026-06-16). Launchd
-  dispatches the workflow via `gh workflow run` 75 min before EOD:
-  `us-rs-3m-trigger` (Tue-Sat 08:45) and `hk-rs-trigger` (Mon-Fri 18:45) →
-  `scripts/trigger_rs_workflow.sh`. The GH-side cron is kept as
-  belt-and-suspenders; the workflow's commit step is idempotent (`git diff
-  --staged --quiet → exit 0`) so a double-fire is harmless. Failures ntfy via
-  the morning-gap topic. Each trigger has a pmset wake 1 min before it
-  (08:44 Tue-Sat / 18:44 Mon-Fri, seeded weekly by
-  `schedule_morning_gap_wakes.py` with the morning-gap wakes) and the script
-  retries the dispatch ~5 min (→ decisions 2026-10-15). Every other launchd
-  slot gets the same 1-min-lead wake (Mon-Fri): one per US / HK morning-gap
-  slot (`US_GAP_SLOTS` / `HK_GAP_SLOTS` — `pmset sleep 1` re-sleeps an idle
-  Mac within a minute and caffeinate only holds during a scan, so one wake
-  covers one slot; the 20:59 / 21:59 11-min-lead wakes stay) and 19:59 for
-  hk-eod (→ decisions 2026-10-16). `tests/test_schedule_wakes.py` reads the
-  plists and fails when a slot has no wake — edit the slot lists together
-  with the plists.
-- **Finviz 1000-row cap:** pages past r=1000 403 without Elite and the
-  library swallows it. `run_screener` compares against the page's total and
-  re-queries `order="-ticker"` for the tail (covers ≤ 2000 rows; beyond that
-  it WARNs "still truncated"). Keep every Screener call inside `run_screener`
-  — it (and `check_market_down`) also retries transient network errors via
-  `_retry_on_network_error` (DNS/reset/5xx/finviz timeout/"Too many
-  requests"; a Finviz 4xx is deterministic and NOT retried, except 429).
-  Nothing else needs its own wrapper.
-- **Finviz screener is `finviz_screener.Screener`** (not the library's; →
-  decisions 2026-10-20): the site serves `/screener/stocks` with rows as SSR
-  JSON (same `.data` / `._total_rows` / NoResults surface; 20 rows/page,
-  `r=` paging to the 1000 cap; Market Cap from the overview row, `table`
-  ignored). A page with no rows block raises `FinvizLayoutError`; a filter
-  code the page does not define raises `FinvizFilterError` — the site
-  **silently ignores** unknown codes (Leaders 52W is the preset `+100%`;
-  `ta_perf` has no custom range). `ind_stocksonly` is implied by the path
-  and whitelisted. `finviz.get_stock` (market check) still uses the library.
-  **Guard:** `run_screener` counts into `_finviz_tally` (reset at us-eod
-  start); after the RS section `_alert_if_finviz_broken` logs ERROR + ntfys
-  (once/day, `state/finviz_broken_alerted_<date>.txt`, 2-day cleanup) when
-  ≥ 5 screens all returned 0 rows or any code was rejected. Alert only.
+- Every scheduled job holds a `caffeinate -i -s` assertion. Do not remove it.
+- Keep every Finviz Screener call inside `run_screener`.
+
+The launchd / pmset wake, Finviz and Futu rules live in
+`.claude/rules/{scheduling,finviz,futu}.md` (path-scoped: they load when you
+touch the matching files).
