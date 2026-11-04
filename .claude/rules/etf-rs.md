@@ -94,7 +94,15 @@ file keeps the cross-cutting pieces: the undated-file exceptions under
   / Futu / eod_seen. **One bar download per run** (`run_leaders`: 6mo
   Close + Low + Volume for master ∪ today's candidates,
   `sma50_prune.drop_stale_series` + `fill_missing_last_close` reused;
-  High too, for ADR%) serves two gates. **Floors** (`min_price` 20 /
+  High too, for ADR%; `1y` since the SMA200 gate) serves two gates. **Entry-only
+  gates** (`entry_above_sma` [50, 200], `find_below_sma_drops`, latest close
+  strictly above each, a period longer than the history not judged;
+  `entry_min_rs_percentile_1m` 90, `find_rs_1m_drops`, market-wide percentile
+  `rs_percentile_1m` from the cloud US RS table, via `build_3m_table`; no table /
+  no column / absent ticker → not judged, WARNING; `[]` / 0 = off): a NEW name
+  must clear them. They are **not retention rules** — a held name leaves only
+  through the floors or the first-break prune, do not apply them to the master
+  (→ decisions 2026-11-04). **Floors** (`min_price` 20 /
   `min_dollar_volume` 100M = 20-session mean of close × volume,
   `find_floor_drops`; `min_adr_percent` 2.5 = 20-session mean of
   (High − Low) / Close × 100, `find_adr_drops`; 0 = off): a candidate under a floor is **not added** today (enters the day it
@@ -111,7 +119,8 @@ file keeps the cross-cutting pieces: the undated-file exceptions under
   kept by the dollar-volume floor; no high / low series or < 20 usable bars →
   kept by the ADR% floor (unlike the strict `main._filter_adr_percent`). Failed batch → entry gate waived, prune
   skipped. No `.bak`; the pruned file is the record. A pruned name
-  re-enters the next day it is in a top ETF's top 5 and clears the floors.
+  re-enters the next day it is in a top ETF's top 5 and clears the floors and
+  the entry-only gates.
   Test files that run `run_etf_rs` stub `etf_rs_leaders._fetch_daily_bars`
   (autouse) or the step goes online.
 - **Trend page** (`etf_rs_chart.py`): the same run writes

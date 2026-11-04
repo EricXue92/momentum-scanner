@@ -20,6 +20,7 @@ def _no_holdings_rs_network(monkeypatch):
     monkeypatch.setattr(etf_holdings_rs, "compute_extras", lambda *a, **k: {})
     import etf_rs_leaders
     monkeypatch.setattr(etf_rs_leaders, "_fetch_daily_bars", lambda tickers: None)
+    monkeypatch.setattr(etf_rs_leaders, "_fetch_rs_1m_table", lambda output_dir, today: None)
 
 
 def _kline(total_return_pct: float, n: int = 90) -> pd.DataFrame:

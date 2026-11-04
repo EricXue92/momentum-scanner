@@ -33,6 +33,7 @@ from rs_line import (  # noqa: E402
     params_from_config,
 )
 from us_rs_3m import (  # noqa: E402
+    WEIGHTS_1M_BARS,
     _fetch_spy_kline,
     compute_us_rs_3m_table,
     fetch_us_klines_yf,
@@ -99,6 +100,15 @@ def main() -> int:
     import pandas as pd  # local import to keep top-of-file imports minimal
     spy_for_compute = spy_kline if spy_kline is not None else pd.DataFrame({"time_key": [], "close": []})
     table = compute_us_rs_3m_table(klines, spy_for_compute)
+
+    # Market-wide 1M percentile for the ETF leaders entry gate, scored on the
+    # same klines. Best-effort: a failure must NOT cost the 3M table.
+    try:
+        table_1m = compute_us_rs_3m_table(klines, spy_for_compute, weights_bars=WEIGHTS_1M_BARS)
+        if not table_1m.empty:
+            table = table.join(table_1m["rs_percentile"].rename("rs_percentile_1m"), how="left")
+    except Exception as exc:
+        logger.warning(f"[Cloud RS 3M] 1M percentile failed ({exc}); column omitted")
 
     # RS-line-vs-MA features (TraderLion-style) merged as extra columns —
     # best-effort/annotation-only: a config read failure must NOT fail the run.

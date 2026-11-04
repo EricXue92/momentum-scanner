@@ -17,6 +17,7 @@ One CSV per weekday, named `<YYYY-MM-DD>.csv` (ISO date, dashes).
 | `ticker` | string (index) | NASDAQ/NYSE symbol, uppercase |
 | `raw_score` | float | `Σ wᵢ·Rᵢ - SPY_score` where `WEIGHTS_3M = [(1,0.5),(2,0.3),(3,0.2)]` |
 | `rs_percentile` | int (0-99) | rank of `raw_score` across the universe |
+| `rs_percentile_1m` | int (0-99) | market-wide percentile on the 1M weekly ladder (`WEIGHTS_1M_BARS`); blank when a ticker has no 1M score. ETF leaders entry gate |
 | `rs_below_ma` | int (0/1) | RS line (price/SPY) below its own EMA21 on the latest bar |
 | `rs_days_below_ma` | int | trailing consecutive sessions the RS line stayed below its MA |
 | `rs_frac_below_ma` | float 0-1 | fraction of the last 20 sessions the RS line was below its MA |

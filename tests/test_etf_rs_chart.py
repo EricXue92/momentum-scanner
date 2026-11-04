@@ -23,6 +23,7 @@ def _no_holdings_rs_network(monkeypatch):
     monkeypatch.setattr(etf_holdings_rs, "compute_extras", lambda *a, **k: {})
     import etf_rs_leaders
     monkeypatch.setattr(etf_rs_leaders, "_fetch_daily_bars", lambda tickers: None)
+    monkeypatch.setattr(etf_rs_leaders, "_fetch_rs_1m_table", lambda output_dir, today: None)
 import etf_rs_chart
 
 _END = "2026-09-11"

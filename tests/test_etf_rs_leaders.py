@@ -1,9 +1,11 @@
 """Tests for etf_rs_leaders — the cumulative TradingView watchlist of the
 strongest constituents of the top-N ETFs in the daily 1M ranking file."""
 
+import tomllib
 from datetime import date
 from pathlib import Path
 
+import pandas as pd
 import pytest
 
 import etf_holdings_rs
@@ -22,6 +24,7 @@ def _no_prune_network(monkeypatch):
     """prune_master's default fetch hits yfinance; the wiring tests below
     only need the add step."""
     monkeypatch.setattr(etf_rs_leaders, "_fetch_daily_bars", lambda tickers: None)
+    monkeypatch.setattr(etf_rs_leaders, "_fetch_rs_1m_table", lambda output_dir, today: None)
 
 RANKING = """\
 1. XLV 🟢↑2 - 医疗保健 | LLY、JNJ
@@ -98,7 +101,9 @@ def test_load_master_accepts_commas_and_newlines_and_dedupes(tmp_path):
 
 
 def _cfg(**kw):
-    return {"enabled": True, "top_etfs": 2, **kw}
+    # The trend + 1M RS entry gates are off here; their own tests turn them on.
+    return {"enabled": True, "top_etfs": 2, "entry_above_sma": [],
+            "entry_min_rs_percentile_1m": 0, **kw}
 
 
 def test_first_run_writes_master_and_new_file_comma_separated(tmp_path):
@@ -175,7 +180,8 @@ def _kline(bias: float, n: int = 90):
 
 def _etf_cfg():
     return {"enabled": True, "benchmark": "SPY", "tickers": {"AAA": "甲", "BBB": "乙"},
-            "holdings": {}, "leaders": {"enabled": True, "top_etfs": 1}}
+            "holdings": {}, "leaders": {"enabled": True, "top_etfs": 1, "entry_above_sma": [],
+                                        "entry_min_rs_percentile_1m": 0}}
 
 
 def test_run_etf_rs_grows_the_leaders_master_from_the_1m_top_etf(tmp_path, monkeypatch):
@@ -571,3 +577,175 @@ def test_fetch_daily_bars_carries_the_high_series(monkeypatch, tickers):
     monkeypatch.setattr(main, "_yf_download_with_retry", lambda *a, **k: frame)
     bars = _REAL_FETCH_DAILY_BARS(tickers)
     assert list(bars.highs["A"]) == [11.0, 12.0, 13.0]
+
+
+# --- entry gate: price above SMA50 + SMA200, 1M RS percentile (market-wide) ---
+
+
+def _series(values) -> pd.Series:
+    return pd.Series([float(v) for v in values],
+                     index=pd.bdate_range(end="2026-10-30", periods=len(values)))
+
+
+# 260 bars. SMA50 / SMA200 at the last bar are given next to each shape.
+_ABOVE_BOTH = _series(list(range(100, 360)))                       # rising
+_BELOW_SMA200_ONLY = _series([200] * 200 + [100] * 59 + [110])     # SMA50 100.2, SMA200 150.3
+_BELOW_SMA50_ONLY = _series([100] * 240 + [200] * 19 + [120])      # SMA50 138.4, SMA200 109.6
+
+
+def _closes_bars(closes: dict[str, pd.Series]) -> etf_rs_leaders.Bars:
+    return etf_rs_leaders.Bars(closes, {}, {}, {})
+
+
+def _rs_table(**percentiles) -> pd.DataFrame:
+    return pd.DataFrame({"rs_percentile_1m": percentiles})
+
+
+_ENTRY_CFG = {"min_price": 0, "min_dollar_volume": 0, "min_adr_percent": 0,
+              "entry_above_sma": [50, 200], "entry_min_rs_percentile_1m": 90}
+
+
+def test_trend_gate_needs_the_close_above_both_averages():
+    closes = {"UP": _ABOVE_BOTH, "U200": _BELOW_SMA200_ONLY, "U50": _BELOW_SMA50_ONLY}
+    assert etf_rs_leaders.find_below_sma_drops(closes, [50, 200]) == ["U200", "U50"]
+
+
+def test_trend_gate_is_strict_a_close_on_the_average_fails():
+    assert etf_rs_leaders.find_below_sma_drops({"FLAT": _series([100] * 60)}, [50]) == ["FLAT"]
+
+
+def test_trend_gate_does_not_judge_an_average_the_history_cannot_fill():
+    # 60 rising bars: SMA50 is judged and passes, SMA200 cannot be computed.
+    assert etf_rs_leaders.find_below_sma_drops({"IPO": _series(range(100, 160))}, [50, 200]) == []
+    # 60 falling bars: SMA50 still catches it.
+    assert etf_rs_leaders.find_below_sma_drops({"IPO": _series(range(160, 100, -1))}, [50, 200]) == ["IPO"]
+    # Too short for either average → kept.
+    assert etf_rs_leaders.find_below_sma_drops({"NEW": _series([100, 90, 80])}, [50, 200]) == []
+
+
+def test_trend_gate_with_no_periods_is_off():
+    assert etf_rs_leaders.find_below_sma_drops({"U50": _BELOW_SMA50_ONLY}, []) == []
+
+
+def test_rs_gate_threshold_is_inclusive():
+    table = _rs_table(STRONG=90, WEAK=89)
+    assert etf_rs_leaders.find_rs_1m_drops(["STRONG", "WEAK"], table, 90) == ["WEAK"]
+
+
+def test_rs_gate_keeps_names_it_cannot_judge():
+    table = _rs_table(BLANK=float("nan"), WEAK=10)
+    assert etf_rs_leaders.find_rs_1m_drops(["ABSENT", "BLANK"], table, 90) == []
+    assert etf_rs_leaders.find_rs_1m_drops(["WEAK"], None, 90) == []
+    assert etf_rs_leaders.find_rs_1m_drops(["WEAK"], pd.DataFrame({"rs_percentile": {"WEAK": 10}}), 90) == []
+    assert etf_rs_leaders.find_rs_1m_drops(["WEAK"], table, 0) == []
+
+
+def test_entry_gate_only_adds_names_passing_trend_and_1m_rs(tmp_path):
+    ranking = _write_ranking(tmp_path, "1. X = - x | a\n   1M强: GOOD > U200 > U50 > WEAK\n")
+    bars = _closes_bars({"GOOD": _ABOVE_BOTH, "U200": _BELOW_SMA200_ONLY,
+                         "U50": _BELOW_SMA50_ONLY, "WEAK": _ABOVE_BOTH})
+    table = _rs_table(GOOD=95, U200=95, U50=95, WEAK=50)
+    new = etf_rs_leaders.update_leaders(_ENTRY_CFG, tmp_path, TODAY, ranking, bars=bars, rs_table=table)
+    assert new == ["GOOD"]
+    assert (_tv(tmp_path) / "ETF_rs_leaders.txt").read_text(encoding="utf-8") == "GOOD\n"
+    assert (_tv(tmp_path) / "2026_10_31_ETF_rs_new.txt").read_text(encoding="utf-8") == "GOOD\n"
+
+
+def test_rs_gate_still_applies_when_the_bar_download_failed(tmp_path):
+    ranking = _write_ranking(tmp_path, "1. X = - x | a\n   1M强: GOOD > WEAK\n")
+    new = etf_rs_leaders.update_leaders(_ENTRY_CFG, tmp_path, TODAY, ranking, bars=None,
+                                        rs_table=_rs_table(GOOD=95, WEAK=50))
+    assert new == ["GOOD"]
+
+
+def test_entry_gates_are_not_a_retention_rule_for_the_existing_master(tmp_path, monkeypatch):
+    """A name already on the list only leaves through the floors or the SMA50
+    first-break rule: under SMA200 or weak on 1M RS alone it stays."""
+    _tv(tmp_path).mkdir(parents=True)
+    (_tv(tmp_path) / "ETF_rs_leaders.txt").write_text("HELD,U200\n", encoding="utf-8")
+    ranking = _write_ranking(tmp_path, "1. X = - x | a\n   1M强: HELD > U200\n")
+    bars = _closes_bars({"HELD": _ABOVE_BOTH, "U200": _BELOW_SMA200_ONLY})
+    monkeypatch.setattr(etf_rs_leaders, "_fetch_daily_bars", lambda tickers: bars)
+    monkeypatch.setattr(etf_rs_leaders, "_fetch_rs_1m_table",
+                        lambda output_dir, today: _rs_table(HELD=10, U200=10))
+    etf_rs_leaders.run_leaders(_ENTRY_CFG, tmp_path, TODAY, ranking)
+    assert (_tv(tmp_path) / "ETF_rs_leaders.txt").read_text(encoding="utf-8") == "HELD,U200\n"
+    assert not (_tv(tmp_path) / "2026_10_31_ETF_rs_pruned.txt").exists()
+
+
+def test_run_leaders_passes_the_1m_table_to_the_entry_gate(tmp_path, monkeypatch):
+    ranking = _write_ranking(tmp_path, "1. X = - x | a\n   1M强: GOOD > WEAK\n")
+    monkeypatch.setattr(etf_rs_leaders, "_fetch_daily_bars",
+                        lambda tickers: _closes_bars({"GOOD": _ABOVE_BOTH, "WEAK": _ABOVE_BOTH}))
+    monkeypatch.setattr(etf_rs_leaders, "_fetch_rs_1m_table",
+                        lambda output_dir, today: _rs_table(GOOD=95, WEAK=50))
+    etf_rs_leaders.run_leaders(_ENTRY_CFG, tmp_path, TODAY, ranking)
+    assert (_tv(tmp_path) / "ETF_rs_leaders.txt").read_text(encoding="utf-8") == "GOOD\n"
+
+
+def test_run_leaders_skips_the_table_fetch_when_nothing_is_new_or_the_gate_is_off(tmp_path, monkeypatch):
+    calls = []
+    monkeypatch.setattr(etf_rs_leaders, "_fetch_rs_1m_table",
+                        lambda output_dir, today: calls.append(today))
+    ranking = _write_ranking(tmp_path, "1. X = - x | a\n   1M强: HELD\n")
+    _tv(tmp_path).joinpath("ETF_rs_leaders.txt").write_text("HELD\n", encoding="utf-8")
+    etf_rs_leaders.run_leaders(_ENTRY_CFG, tmp_path, TODAY, ranking)          # nothing new
+    assert calls == []
+    ranking = _write_ranking(tmp_path, "1. X = - x | a\n   1M强: FRESH\n")
+    etf_rs_leaders.run_leaders({**_ENTRY_CFG, "entry_min_rs_percentile_1m": 0}, tmp_path, TODAY, ranking)
+    assert calls == []
+
+
+def test_run_leaders_downloads_when_the_trend_gate_is_the_only_active_gate(tmp_path, monkeypatch):
+    calls = []
+    def fake(tickers):
+        calls.append(list(tickers))
+        return None
+    monkeypatch.setattr(etf_rs_leaders, "_fetch_daily_bars", fake)
+    ranking = _write_ranking(tmp_path, "1. X = - x | a\n   1M强: FRESH\n")
+    cfg = {**_ENTRY_CFG, "entry_min_rs_percentile_1m": 0, "prune": False}
+    etf_rs_leaders.run_leaders(cfg, tmp_path, TODAY, ranking)
+    assert calls == [["FRESH"]]
+
+
+def test_fetch_rs_1m_table_is_soft_on_a_loader_failure(tmp_path, monkeypatch, caplog):
+    monkeypatch.undo()                     # the real wrapper, not the autouse stub
+    def boom(output_dir, today):
+        raise OSError("disk full")
+    monkeypatch.setattr(etf_rs_leaders.us_rs_3m, "build_3m_table", boom)
+    with caplog.at_level("WARNING", logger="momentum_scanner"):
+        assert etf_rs_leaders._fetch_rs_1m_table(tmp_path, TODAY) is None
+    assert "1M RS" in caplog.text
+
+
+def test_fetch_rs_1m_table_warns_when_the_table_has_no_1m_column(tmp_path, monkeypatch, caplog):
+    monkeypatch.undo()
+    old = pd.DataFrame({"rs_percentile": {"AAA": 95}})
+    monkeypatch.setattr(etf_rs_leaders.us_rs_3m, "build_3m_table", lambda output_dir, today: old)
+    with caplog.at_level("WARNING", logger="momentum_scanner"):
+        assert etf_rs_leaders._fetch_rs_1m_table(tmp_path, TODAY) is None
+    assert "rs_percentile_1m" in caplog.text
+
+
+def test_fetch_daily_bars_asks_for_enough_history_for_sma200(monkeypatch):
+    seen = {}
+    idx = pd.bdate_range(end="2026-10-30", periods=3)
+    frame = pd.DataFrame({f: [1.0, 2.0, 3.0] for f in ("Open", "High", "Low", "Close", "Volume")}, index=idx)
+    def fake_download(tickers, **kw):
+        seen.update(kw)
+        return frame
+    monkeypatch.setattr("main._yf_download_with_retry", fake_download)
+    _REAL_FETCH_DAILY_BARS(["AAA"])
+    assert seen["period"] == "1y"
+
+
+def test_entry_gate_config_ships_with_the_requested_thresholds():
+    with open(Path(__file__).resolve().parents[1] / "config.toml", "rb") as f:
+        leaders = tomllib.load(f)["etf_rs"]["leaders"]
+    assert leaders["entry_above_sma"] == [50, 200]
+    assert leaders["entry_min_rs_percentile_1m"] == 90
+
+
+def test_entry_gate_defaults_match_the_config():
+    assert etf_rs_leaders.DEFAULT_ENTRY_ABOVE_SMA == (50, 200)
+    assert etf_rs_leaders.DEFAULT_ENTRY_MIN_RS_1M == 90

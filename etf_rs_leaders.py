@@ -35,8 +35,16 @@ formula as ``main._filter_adr_percent``, but < 20 usable bars → not judged,
 kept, unlike that strict filter). Applied at **entry** (a candidate under a
 floor is not added today — it comes in the day it qualifies; no bars for it →
 added, like every other gate's pass-through) and to the **existing master** in
-the same prune pass below. One 6mo batch for master ∪ today's candidates serves
+the same prune pass below. One 1y batch for master ∪ today's candidates serves
 both (``run_leaders``).
+
+**Entry-only gates** (``entry_above_sma`` [50, 200] / ``entry_min_rs_percentile_1m``
+90; ``[]`` / 0 = off): a NEW name also needs its latest close strictly above
+both SMAs (a period longer than its history is not judged) and a market-wide 1M
+RS percentile ≥ 90 (``rs_percentile_1m`` in the cloud US RS table; no table, no
+column, or a ticker absent from it → not judged). They are NOT retention rules:
+once on the list, a name leaves only through the floors or the prune below, so
+the first-break rule keeps its meaning.
 
 **Prune rule** (``find_break_drops``, after today's names were added, over
 the whole master): the trailing streak of completed sessions whose close is
@@ -64,6 +72,8 @@ from typing import NamedTuple
 
 import pandas as pd
 
+import us_rs_3m
+
 logger = logging.getLogger("momentum_scanner")
 
 _LABEL = "ETF RS 龙头"
@@ -77,6 +87,9 @@ DEFAULT_MIN_DOLLAR_VOLUME = 100_000_000.0
 DOLLAR_VOLUME_WINDOW = 20
 DEFAULT_MIN_ADR_PERCENT = 2.5
 ADR_WINDOW = 20
+DEFAULT_ENTRY_ABOVE_SMA = (50, 200)
+DEFAULT_ENTRY_MIN_RS_1M = 90
+RS_1M_COLUMN = "rs_percentile_1m"
 _UNSET = object()
 
 
@@ -188,27 +201,44 @@ def _below_floors(cfg: dict, closes: dict[str, pd.Series], bars: Bars) -> list[s
                   | set(find_adr_drops(closes, bars.highs, bars.lows, min_adr)))
 
 
+def _entry_sma_periods(cfg: dict) -> list[int]:
+    return [int(p) for p in cfg.get("entry_above_sma", DEFAULT_ENTRY_ABOVE_SMA)]
+
+
+def _entry_rs_threshold(cfg: dict) -> float:
+    return float(cfg.get("entry_min_rs_percentile_1m", DEFAULT_ENTRY_MIN_RS_1M))
+
+
 def update_leaders(cfg: dict, output_dir: Path, today: date, ranking_path: Path | None,
                    bars: Bars | None = None,
-                   plan: tuple[list[str], list[str]] | None = None) -> list[str]:
+                   plan: tuple[list[str], list[str]] | None = None,
+                   rs_table: pd.DataFrame | None = None) -> list[str]:
     """Grow the master from today's 1M ranking file; returns the names added
     today (``[]`` when disabled, no file, or nothing new). With ``bars``,
-    candidates under the price / dollar-volume / ADR% floors are not added
-    (a candidate with no bars passes through). ``plan`` is ``_todays_new``'s
-    result when the caller already computed it. Writes
-    ``<date>_ETF_rs_new.txt`` only when there is something new AND the day
-    has no such file yet."""
+    candidates under the price / dollar-volume / ADR% floors or not above the
+    entry SMAs are not added (a candidate with no bars passes through); with
+    ``rs_table``, neither are those under the market-wide 1M RS threshold.
+    ``plan`` is ``_todays_new``'s result when the caller already computed it.
+    Writes ``<date>_ETF_rs_new.txt`` only when there is something new AND the
+    day has no such file yet."""
     master, new = plan if plan is not None else _todays_new(cfg, output_dir, ranking_path)
     if not new:
         return []
+    gates: list[tuple[str, list[str]]] = []
     if bars is not None:
-        rejected = set(_below_floors(cfg, bars.closes, bars))
-        if rejected:
-            logger.info(f"[{_LABEL}] entry gate ({_floors_label(cfg)}) "
-                        f"rejected: {sorted(r for r in rejected if r in new)}")
-            new = [s for s in new if s not in rejected]
-            if not new:
-                return []
+        new_closes = {t: bars.closes[t] for t in new if t in bars.closes}
+        gates.append((_floors_label(cfg), _below_floors(cfg, bars.closes, bars)))
+        gates.append((f"close > SMA{_entry_sma_periods(cfg)}",
+                      find_below_sma_drops(new_closes, _entry_sma_periods(cfg))))
+    threshold = _entry_rs_threshold(cfg)
+    gates.append((f"1M RS ≥ {threshold:g}", find_rs_1m_drops(new, rs_table, threshold)))
+    for label, rejected in gates:
+        hit = sorted(r for r in rejected if r in new)
+        if hit:
+            logger.info(f"[{_LABEL}] entry gate ({label}) rejected: {hit}")
+            new = [s for s in new if s not in hit]
+    if not new:
+        return []
     tv_dir = output_dir / "TV" / "US"
     master_path = tv_dir / MASTER_NAME
     tv_dir.mkdir(parents=True, exist_ok=True)
@@ -229,7 +259,7 @@ def update_leaders(cfg: dict, output_dir: Path, today: date, ranking_path: Path 
 
 
 def _fetch_daily_bars(tickers: list[str]) -> Bars | None:
-    """One 6mo yfinance batch → ``Bars`` (close / low / volume / high per ticker),
+    """One 1y yfinance batch → ``Bars`` (close / low / volume / high per ticker),
     the closes with ``sma50_prune``'s stale-series exclusion and trailing-NaN
     Close fill applied (the shared EOD conventions); None when the batch
     failed entirely. Monkeypatched in tests."""
@@ -237,7 +267,7 @@ def _fetch_daily_bars(tickers: list[str]) -> Bars | None:
     from sma50_prune import drop_stale_series, fill_missing_last_close
 
     data = _yf_download_with_retry(
-        tickers, period="6mo", progress=False, group_by="ticker", threads=False
+        tickers, period="1y", progress=False, group_by="ticker", threads=False
     )
     if data is None or data.empty:
         return None
@@ -263,6 +293,49 @@ def _fetch_daily_bars(tickers: list[str]) -> Bars | None:
     return Bars(closes, {t: lows[t] for t in closes if t in lows},
                 {t: volumes[t] for t in closes if t in volumes},
                 {t: highs[t] for t in closes if t in highs})
+
+
+def _fetch_rs_1m_table(output_dir: Path, today: date) -> pd.DataFrame | None:
+    """The cloud-published US RS table, when it carries the market-wide 1M
+    percentile. None (gate waived, WARNING) when it is unreachable or was
+    published before the column existed. Monkeypatched in tests."""
+    try:
+        table = us_rs_3m.build_3m_table(output_dir, today)
+    except Exception as e:
+        logger.warning(f"[{_LABEL}] 1M RS table failed to load ({e}); 1M RS gate waived")
+        return None
+    if table is None:
+        logger.warning(f"[{_LABEL}] no cloud RS table; 1M RS gate waived")
+        return None
+    if RS_1M_COLUMN not in table.columns:
+        logger.warning(f"[{_LABEL}] cloud RS table has no {RS_1M_COLUMN} column; 1M RS gate waived")
+        return None
+    return table
+
+
+def find_below_sma_drops(closes: dict[str, pd.Series], periods) -> list[str]:
+    """Names whose latest close is not strictly above every SMA in ``periods``.
+    A period longer than the name's history is not judged (sorted result)."""
+    drops: list[str] = []
+    for t, close in closes.items():
+        for period in periods:
+            if len(close) >= period and not float(close.iloc[-1]) > float(close.tail(period).mean()):
+                drops.append(t)
+                break
+    return sorted(drops)
+
+
+def find_rs_1m_drops(names: list[str], table: pd.DataFrame | None, threshold: float) -> list[str]:
+    """Names whose market-wide 1M RS percentile is below ``threshold``. A
+    missing table or column, an absent ticker, or a blank value is not judged
+    (the RS gates' missing → kept policy); ``threshold`` ≤ 0 is off."""
+    if threshold <= 0 or table is None or RS_1M_COLUMN not in table.columns:
+        return []
+    drops: list[str] = []
+    for t in names:
+        if t in table.index and pd.notna(table.at[t, RS_1M_COLUMN]) and float(table.at[t, RS_1M_COLUMN]) < threshold:
+            drops.append(t)
+    return sorted(drops)
 
 
 def find_floor_drops(
@@ -401,16 +474,20 @@ def prune_master(cfg: dict, output_dir: Path, today: date, bars: Bars | None | o
 def run_leaders(cfg: dict, output_dir: Path, today: date, ranking_path: Path | None) -> None:
     """The daily step: one bar download for master ∪ today's candidates, then
     the gated add (``update_leaders``) and the prune (``prune_master``). No
-    download when there is nothing to gate or prune, or when both the floors
-    and the prune are off."""
+    download when there is nothing to gate or prune, or when the floors, the
+    trend gate and the prune are all off. The RS table is only loaded when
+    there is a new name for its gate to judge."""
     master, new = _todays_new(cfg, output_dir, ranking_path)
     if not master and not new:
         return
-    want_bars = any(f > 0 for f in _floors(cfg)) or (cfg.get("prune", True) and bool(master))
+    want_bars = (any(f > 0 for f in _floors(cfg))
+                 or (bool(new) and bool(_entry_sma_periods(cfg)))
+                 or (cfg.get("prune", True) and bool(master)))
     bars: Bars | None = None
     if want_bars:
         bars = _fetch_daily_bars(master + new)
         if bars is None:
-            logger.warning(f"[{_LABEL}] bar download failed; entry gate waived, prune skipped")
-    update_leaders(cfg, output_dir, today, ranking_path, bars=bars, plan=(master, new))
+            logger.warning(f"[{_LABEL}] bar download failed; price gates waived, prune skipped")
+    rs_table = _fetch_rs_1m_table(output_dir, today) if new and _entry_rs_threshold(cfg) > 0 else None
+    update_leaders(cfg, output_dir, today, ranking_path, bars=bars, plan=(master, new), rs_table=rs_table)
     prune_master(cfg, output_dir, today, bars=bars)

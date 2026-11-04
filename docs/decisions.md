@@ -249,3 +249,15 @@ bars is not judged and the name is kept — this module's pass-through
 convention, not the strict drop of `main._filter_adr_percent`. Existing names
 are cut too (user decision). 2.5 rather than a first try of 3.0: on the day's
 master 3.0 removed 50 of 61 names. — ETF section.
+
+### 2026-11-04 — leaders master: SMA50 / SMA200 / 1M RS entry gates
+New names must close strictly above SMA50 and SMA200 and rank ≥ 90 on a 1M RS
+percentile (user request; on the day, 3 of the 5 new names sat under SMA200).
+**Entry only, with one manual clean of the existing master** (user decision):
+as a daily retention rule the SMA50 check would remove a name on its first
+close under the line and void the first-break rule, and a 1M percentile would
+turn the cumulative list into a daily snapshot. The percentile is **market-wide**
+(`rs_percentile_1m`, a new column in `data/us_rs_3m/`, scored in the cloud on the
+same klines), matching what RS ≥ 90 means everywhere else; a percentile within
+the candidates or within one ETF would only restate "top few of the pool". The
+bar batch went from 6mo to 1y for SMA200. — ETF section.

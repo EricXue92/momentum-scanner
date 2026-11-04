@@ -19,6 +19,7 @@ import etf_rs_leaders  # noqa: E402
 @pytest.fixture(autouse=True)
 def _no_leaders_prune_network(monkeypatch):
     monkeypatch.setattr(etf_rs_leaders, "_fetch_daily_bars", lambda tickers: None)
+    monkeypatch.setattr(etf_rs_leaders, "_fetch_rs_1m_table", lambda output_dir, today: None)
 
 
 def _walk(seed: int, n: int = 120) -> pd.DataFrame:
