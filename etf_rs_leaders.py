@@ -58,8 +58,14 @@ no data / < 50 bars / a stale series (halted, delisted) / a NaN first-day
 low are kept. A pruned name comes back the next day it is in a top ETF's
 top 5 again. No ``.bak``: the pruned file is the record.
 
+**EOD master dedup** (``state/eod_seen_US.txt``, read-only): a candidate the
+EOD master holds is not added, and a name already on this list leaves the day
+the EOD master holds it (``run_leaders``, before the download; logged, not in
+the pruned file). It can come back once the EOD master has dropped it. No EOD
+master file (the cloud Pages build) → no dedup.
+
 Soft step: ``run_etf_rs`` wraps it; a failure costs neither ranking file nor
-the trend page. No ntfy, no Webull mirror, no Futu/TV sync, no eod_seen.
+the trend page. No ntfy, no Webull mirror, no Futu/TV sync.
 """
 
 from __future__ import annotations
@@ -163,9 +169,37 @@ def _write_csv(path: Path, symbols: list[str]) -> None:
     path.write_text(",".join(symbols) + "\n", encoding="utf-8")
 
 
+def _canon(symbol: str) -> str:
+    """Comparison key across the two masters: Finviz writes ``BRK-B`` into the
+    EOD master, the ETF 1M line displays ``BRK.B``."""
+    return symbol.replace("-", ".")
+
+
+def _eod_seen(output_dir: Path) -> set[str]:
+    """The US EOD master as comparison keys; no file (the cloud Pages build) → empty."""
+    from main import _eod_seen_path, _load_seen  # local import: main imports etf_rs
+
+    return {_canon(t) for t in _load_seen(_eod_seen_path(output_dir, "US"))}
+
+
+def _drop_eod_seen_from_master(output_dir: Path, master: list[str]) -> list[str]:
+    """Remove the names the US EOD master holds from the leaders master, now
+    that they sit on the EOD list; returns what is left. Logged only: a
+    duplicate is not a weak name, so it stays out of the pruned file."""
+    seen = _eod_seen(output_dir)
+    dupes = [t for t in master if _canon(t) in seen]
+    if not dupes:
+        return master
+    kept = [t for t in master if _canon(t) not in seen]
+    _write_csv(output_dir / "TV" / "US" / MASTER_NAME, kept)
+    logger.info(f"[{_LABEL}] removed {len(dupes)} already in eod_seen_US -> master {len(kept)}: {dupes}")
+    return kept
+
+
 def _todays_new(cfg: dict, output_dir: Path, ranking_path: Path | None) -> tuple[list[str], list[str]]:
-    """``(master, new)``: the master as stored and today's candidates it lacks,
-    in rank order. ``([], [])`` when disabled or the ranking file is missing."""
+    """``(master, new)``: the master as stored and today's candidates that
+    neither it nor the US EOD master holds, in rank order. ``([], [])`` when
+    disabled or the ranking file is missing."""
     if not cfg.get("enabled", True):
         logger.info(f"[{_LABEL}] disabled in config; skipping")
         return [], []
@@ -177,9 +211,11 @@ def _todays_new(cfg: dict, output_dir: Path, ranking_path: Path | None) -> tuple
     cands = candidates(entries, top_etfs)
     master = load_master(output_dir / "TV" / "US" / MASTER_NAME)
     known = set(master)
-    new = [s for s in cands if s not in known]
+    seen = _eod_seen(output_dir)
+    in_eod = [s for s in cands if s not in known and _canon(s) in seen]
+    new = [s for s in cands if s not in known and _canon(s) not in seen]
     logger.info(f"[{_LABEL}] top {min(top_etfs, len(entries))} ETFs -> {len(cands)} candidates, "
-                f"master {len(master)}, new {len(new)}: {new}")
+                f"master {len(master)}, already in eod_seen_US {in_eod}, new {len(new)}: {new}")
     return master, new
 
 
@@ -478,6 +514,9 @@ def run_leaders(cfg: dict, output_dir: Path, today: date, ranking_path: Path | N
     trend gate and the prune are all off. The RS table is only loaded when
     there is a new name for its gate to judge."""
     master, new = _todays_new(cfg, output_dir, ranking_path)
+    if not master and not new:
+        return
+    master = _drop_eod_seen_from_master(output_dir, master)
     if not master and not new:
         return
     want_bars = (any(f > 0 for f in _floors(cfg))

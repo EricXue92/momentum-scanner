@@ -267,3 +267,10 @@ bar batch went from 6mo to 1y for SMA200. — ETF section.
 inclusive. 3.5 rather than a first try of 4.0: on the day's master of 17, 4.0
 would keep only GKOS and CVNA; 3.5 also keeps CMG and DLTR and removes the other
 13. — ETF section.
+
+### 2026-11-05 — leaders master deduped against the EOD master
+`ETF_rs_leaders.txt` and `<date>_ETF_rs_new.txt` no longer repeat names in
+`eod_seen_US.txt` (user request; GKOS was on both that day). The EOD master wins
+in both directions: not added, and removed from the leaders master if it shows
+up later. Removals stay out of `_ETF_rs_pruned.txt`, which records names that got
+weak, and a duplicate has not. — ETF section.

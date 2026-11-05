@@ -460,6 +460,87 @@ def test_run_leaders_fetch_failure_adds_ungated_and_skips_the_prune(tmp_path, mo
     assert not (_tv(tmp_path) / "2026_10_31_ETF_rs_pruned.txt").exists()
 
 
+# --- dedup against the EOD master (state/eod_seen_US.txt) ---
+
+
+def _seen(tmp_path: Path, names: list[str]) -> None:
+    state = tmp_path / "state"
+    state.mkdir(parents=True, exist_ok=True)
+    (state / "eod_seen_US.txt").write_text("".join(f"{n}\n" for n in names), encoding="utf-8")
+
+
+def _healthy(tickers):
+    return _split({t: _bars([101, 102], [100, 101]) for t in tickers})
+
+
+def test_candidate_already_in_the_eod_master_is_not_added(tmp_path, monkeypatch):
+    _seen(tmp_path, ["DUP"])
+    ranking = _write_ranking(tmp_path, "1. E = - n\n   1M强: DUP > GOOD\n")
+    asked = []
+    monkeypatch.setattr(etf_rs_leaders, "_fetch_daily_bars",
+                        lambda t: asked.append(list(t)) or _healthy(t))
+    etf_rs_leaders.run_leaders(_cfg(), tmp_path, TODAY, ranking)
+    assert (_tv(tmp_path) / "ETF_rs_leaders.txt").read_text(encoding="utf-8") == "GOOD\n"
+    assert (_tv(tmp_path) / "2026_10_31_ETF_rs_new.txt").read_text(encoding="utf-8") == "GOOD\n"
+    assert asked == [["GOOD"]]
+
+
+def test_name_held_by_the_leaders_master_leaves_when_it_is_in_the_eod_master(tmp_path, monkeypatch):
+    _master(tmp_path, ["KEEP", "DUP", "KEEP2"])
+    _seen(tmp_path, ["DUP"])
+    ranking = _write_ranking(tmp_path, "1. E = - n\n")
+    asked = []
+    monkeypatch.setattr(etf_rs_leaders, "_fetch_daily_bars",
+                        lambda t: asked.append(list(t)) or _healthy(t))
+    etf_rs_leaders.run_leaders(_cfg(), tmp_path, TODAY, ranking)
+    assert (_tv(tmp_path) / "ETF_rs_leaders.txt").read_text(encoding="utf-8") == "KEEP,KEEP2\n"
+    assert asked == [["KEEP", "KEEP2"]]
+    # A duplicate is not a weak name: the first-break / floor record stays clean.
+    assert not (_tv(tmp_path) / "2026_10_31_ETF_rs_pruned.txt").exists()
+
+
+def test_candidate_held_by_both_masters_does_not_come_back(tmp_path):
+    _master(tmp_path, ["DUP"])
+    _seen(tmp_path, ["DUP"])
+    ranking = _write_ranking(tmp_path, "1. E = - n\n   1M强: DUP\n")
+    etf_rs_leaders.run_leaders(_cfg(), tmp_path, TODAY, ranking)
+    assert (_tv(tmp_path) / "ETF_rs_leaders.txt").read_text(encoding="utf-8") == "\n"
+    assert not (_tv(tmp_path) / "2026_10_31_ETF_rs_new.txt").exists()
+
+
+def test_eod_dedup_needs_no_bars_and_still_runs_when_the_download_fails(tmp_path, monkeypatch):
+    _master(tmp_path, ["KEEP", "DUP"])
+    _seen(tmp_path, ["DUP"])
+    ranking = _write_ranking(tmp_path, "1. E = - n\n")
+    monkeypatch.setattr(etf_rs_leaders, "_fetch_daily_bars", lambda t: None)
+    etf_rs_leaders.run_leaders(_cfg(), tmp_path, TODAY, ranking)
+    assert (_tv(tmp_path) / "ETF_rs_leaders.txt").read_text(encoding="utf-8") == "KEEP\n"
+
+
+def test_share_class_spellings_match_across_the_two_masters(tmp_path):
+    # Finviz fills the EOD master with BRK-B; the ETF 1M line displays BRK.B.
+    _seen(tmp_path, ["BRK-B"])
+    ranking = _write_ranking(tmp_path, "1. E = - n\n   1M强: BRK.B > GOOD\n")
+    etf_rs_leaders.run_leaders(_cfg(), tmp_path, TODAY, ranking)
+    assert (_tv(tmp_path) / "ETF_rs_leaders.txt").read_text(encoding="utf-8") == "GOOD\n"
+
+
+def test_disabled_step_leaves_the_leaders_master_alone(tmp_path):
+    _master(tmp_path, ["DUP"])
+    _seen(tmp_path, ["DUP"])
+    ranking = _write_ranking(tmp_path, "1. E = - n\n")
+    etf_rs_leaders.run_leaders(_cfg(enabled=False), tmp_path, TODAY, ranking)
+    assert (_tv(tmp_path) / "ETF_rs_leaders.txt").read_text(encoding="utf-8") == "DUP\n"
+
+
+def test_no_eod_master_means_no_dedup(tmp_path):
+    # The cloud Pages build runs this chain in a scratch dir with no state/.
+    _master(tmp_path, ["OLD"])
+    ranking = _write_ranking(tmp_path, "1. E = - n\n   1M强: GOOD\n")
+    etf_rs_leaders.run_leaders(_cfg(), tmp_path, TODAY, ranking)
+    assert (_tv(tmp_path) / "ETF_rs_leaders.txt").read_text(encoding="utf-8") == "OLD,GOOD\n"
+
+
 def test_run_leaders_does_not_download_when_nothing_to_check(tmp_path, monkeypatch):
     def never(t):
         raise AssertionError("must not fetch")

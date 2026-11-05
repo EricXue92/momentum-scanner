@@ -91,7 +91,13 @@ file keeps the cross-cutting pieces: the undated-file exceptions under
   `<date>_ETF_rs_new.txt` (comma-sep; absent when nothing new; a same-day
   rerun grows the master but keeps the first run's file; `TV/US` 5-day
   rule; stem rationale → decisions, standing). Soft step; no ntfy / Webull
-  / Futu / eod_seen. **One bar download per run** (`run_leaders`: 6mo
+  / Futu. **Deduped against `state/eod_seen_US.txt`** (read-only, → decisions
+  2026-11-05): a candidate it holds is not added; a held name leaves the day
+  it appears there, before the download, even when the batch fails — logged
+  only, NOT in the pruned file (a duplicate is not a weak name); re-enters
+  once the EOD master dropped it. `BRK-B` = `BRK.B` (`_canon`). No file (cloud
+  Pages build) → no dedup. An already-written same-day `_new` file is not
+  rewritten. **One bar download per run** (`run_leaders`: 6mo
   Close + Low + Volume for master ∪ today's candidates,
   `sma50_prune.drop_stale_series` + `fill_missing_last_close` reused;
   High too, for ADR%; `1y` since the SMA200 gate) serves two gates. **Entry-only

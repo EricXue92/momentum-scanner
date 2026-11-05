@@ -136,6 +136,7 @@ request_delay_sec = 0.8     # 相邻两次 stockanalysis 请求的间隔 (秒)
 # 入池和留池的门槛 (0 = 关闭): 最新收盘 ≥ min_price, 近 20 日 收盘×成交量 均值 ≥ min_dollar_volume,
 # 近 20 日 ADR% (High−Low)/Close 均值 ≥ min_adr_percent (不足 20 根不判, 保留)。
 # 不够的名字当天不加入 (日后达标再进); 已在主表的随每日裁剪一起移出。
+# 和 state/eod_seen_US.txt 去重 (无开关): 在其中的名字不加入, 已在主表的也移除 (不写 pruned 文件)。
 [etf_rs.leaders]
 enabled = true
 top_etfs = 10
