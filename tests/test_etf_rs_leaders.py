@@ -524,9 +524,9 @@ def test_adr_floor_zero_is_off():
     assert _adr_of([1.0] * 20, 0) == []
 
 
-def test_entry_gate_rejects_low_adr_at_the_default_2_5_percent(tmp_path):
+def test_entry_gate_rejects_low_adr_at_the_default_3_5_percent(tmp_path):
     ranking = _write_ranking(tmp_path, "1. E = - n\n   1M强: CALM > WILD\n")
-    bars = _adr_bars(CALM=1.568, WILD=1.632)       # 2.45% / 2.55%
+    bars = _adr_bars(CALM=2.208, WILD=2.272)       # 3.45% / 3.55%
     assert etf_rs_leaders.update_leaders(_cfg(), tmp_path, TODAY, ranking, bars=bars) == ["WILD"]
     assert (_tv(tmp_path) / "ETF_rs_leaders.txt").read_text(encoding="utf-8") == "WILD\n"
     assert (_tv(tmp_path) / "2026_10_31_ETF_rs_new.txt").read_text(encoding="utf-8") == "WILD\n"
@@ -534,7 +534,7 @@ def test_entry_gate_rejects_low_adr_at_the_default_2_5_percent(tmp_path):
 
 def test_prune_master_removes_existing_low_adr_names(tmp_path, monkeypatch):
     master = _master(tmp_path, ["CALM", "WILD"])
-    monkeypatch.setattr(etf_rs_leaders, "_fetch_daily_bars", lambda t: _adr_bars(CALM=1.0, WILD=2.0))
+    monkeypatch.setattr(etf_rs_leaders, "_fetch_daily_bars", lambda t: _adr_bars(CALM=1.0, WILD=4.0))
     assert etf_rs_leaders.prune_master(_cfg(), tmp_path, TODAY) == ["CALM"]
     assert master.read_text(encoding="utf-8") == "WILD\n"
     assert (_tv(tmp_path) / "2026_10_31_ETF_rs_pruned.txt").read_text(encoding="utf-8") == "CALM\n"
@@ -549,7 +549,7 @@ def test_min_adr_percent_comes_from_config(tmp_path, monkeypatch):
 
 def test_run_leaders_downloads_when_adr_is_the_only_active_gate(tmp_path, monkeypatch):
     ranking = _write_ranking(tmp_path, "1. E = - n\n   1M强: CALM > WILD\n")
-    monkeypatch.setattr(etf_rs_leaders, "_fetch_daily_bars", lambda t: _adr_bars(CALM=1.0, WILD=2.0))
+    monkeypatch.setattr(etf_rs_leaders, "_fetch_daily_bars", lambda t: _adr_bars(CALM=1.0, WILD=4.0))
     cfg = _cfg(min_price=0, min_dollar_volume=0, prune=False)
     etf_rs_leaders.run_leaders(cfg, tmp_path, TODAY, ranking)
     assert (_tv(tmp_path) / "ETF_rs_leaders.txt").read_text(encoding="utf-8") == "WILD\n"

@@ -261,3 +261,9 @@ turn the cumulative list into a daily snapshot. The percentile is **market-wide*
 same klines), matching what RS ≥ 90 means everywhere else; a percentile within
 the candidates or within one ETF would only restate "top few of the pool". The
 bar batch went from 6mo to 1y for SMA200. — ETF section.
+
+### 2026-11-05 — leaders master: ADR% floor raised to 3.5
+`min_adr_percent` 2.5 → 3.5 (user request). Still entry and retention, still
+inclusive. 3.5 rather than a first try of 4.0: on the day's master of 17, 4.0
+would keep only GKOS and CVNA; 3.5 also keeps CMG and DLTR and removes the other
+13. — ETF section.

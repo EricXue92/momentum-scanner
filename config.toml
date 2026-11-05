@@ -143,7 +143,7 @@ prune = true
 sma_period = 50
 min_price = 20.0
 min_dollar_volume = 100_000_000
-min_adr_percent = 2.5
+min_adr_percent = 3.5
 # 只卡新进名字 (已在名单里的仍只走上面的下限 + SMA50 首破): 收盘价严格高于这些均线,
 # 且全美股 1M RS 百分位 >= 阈值 (云端 data/us_rs_3m 的 rs_percentile_1m)。[] / 0 = 关。
 entry_above_sma = [50, 200]

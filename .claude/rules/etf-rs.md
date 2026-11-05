@@ -104,7 +104,7 @@ file keeps the cross-cutting pieces: the undated-file exceptions under
   through the floors or the first-break prune, do not apply them to the master
   (→ decisions 2026-11-04). **Floors** (`min_price` 20 /
   `min_dollar_volume` 100M = 20-session mean of close × volume,
-  `find_floor_drops`; `min_adr_percent` 2.5 = 20-session mean of
+  `find_floor_drops`; `min_adr_percent` 3.5 = 20-session mean of
   (High − Low) / Close × 100, `find_adr_drops`; 0 = off): a candidate under a floor is **not added** today (enters the day it
   qualifies; no bars → added, pass-through), and an existing name under a
   floor is removed by the prune. **Master prune** (`prune_master`, right
