@@ -63,7 +63,7 @@ uv run main.py --mode report --market us             # CANSLIM report for today'
 uv run pytest tests/ -v                              # tests
 ```
 
-`--mode eod` still runs US + HK together, but the schedule uses the per-market modes — at 10:00 HKT the HK daily bar is incomplete.
+`--mode eod` still runs US + HK together, but the schedule uses the per-market modes — at 12:00 HKT the HK daily bar is incomplete.
 
 ## US Screeners
 
@@ -420,7 +420,7 @@ macOS launchd + pmset; all times HKT. Plists live in `~/Library/LaunchAgents/` (
 - 10:00 lands after the US close (EDT and EST) and the upstream 12M RS commit; 20:00 leaves 4 hours after the HK close for data to settle.
 
 ```bash
-sudo pmset repeat wakeorpoweron TWRFS 09:59:00       # wake for the US slot ("wakeorpoweron" on macOS 26+)
+sudo pmset repeat wakeorpoweron TWRFS 11:59:00       # wake for the US slot ("wakeorpoweron" on macOS 26+)
 launchctl load ~/Library/LaunchAgents/com.xue.finviz-to-tv.plist
 launchctl load ~/Library/LaunchAgents/com.xue.finviz-to-tv.hk-eod.plist
 launchctl load ~/Library/LaunchAgents/com.xue.finviz-to-tv.morning-gap.plist

@@ -274,3 +274,14 @@ would keep only GKOS and CVNA; 3.5 also keeps CMG and DLTR and removes the other
 in both directions: not added, and removed from the leaders master if it shows
 up later. Removals stay out of `_ETF_rs_pruned.txt`, which records names that got
 weak, and a duplicate has not. — ETF section.
+
+### 2026-11-07 — us-eod moved from 10:00 to 12:00 HKT
+Fred6725/rs-log has published the 12M table later and later: ~08:00 HKT in
+August, ~09:30 in September, 10:00–11:20 in October, and 11:17 / 12:08 / 11:47 /
+11:45 on 11-03 … 11-06. us-eod at 10:00 gives up its 60-min freshness wait at
+~11:00, so the November runs most likely gated on the previous session's 12M table
+(confirmed for 11-07; older logs are rotated away). The slot moved to 12:00 (user decision); the
+60-min wait and `EOD_TIMEOUT` are unchanged, so the run still finishes by ~13:00
+on a late-table day. The pmset repeat wake moved to 11:59 Tue-Sat. The
+us-rs-3m trigger stays at 08:45: the 3M table is scored on yfinance closes, so
+an early run is correct and is published well before 12:00. — Scheduling section.

@@ -63,7 +63,7 @@ uv run main.py --mode report --market us             # 為當天美股個股生�
 uv run pytest tests/ -v                              # 測試
 ```
 
-`--mode eod` 仍可同時跑美股 + 港股,但定時任務用分市場的模式——10:00 HKT 時港股日線尚未走完。
+`--mode eod` 仍可同時跑美股 + 港股,但定時任務用分市場的模式——12:00 HKT 時港股日線尚未走完。
 
 ## 美股篩選器
 
@@ -401,7 +401,7 @@ macOS launchd + pmset;時間均為 HKT。plist 放在 `~/Library/LaunchAgents/`(
 - 10:00 落在美股收盤(EDT 與 EST 都覆蓋)和上游 12M RS 提交之後;20:00 距港股收盤留了 4 小時讓數據穩定。
 
 ```bash
-sudo pmset repeat wakeorpoweron TWRFS 09:59:00       # 為美股槽喚醒 (macOS 26+ 關鍵字是 "wakeorpoweron")
+sudo pmset repeat wakeorpoweron TWRFS 11:59:00       # 為美股槽喚醒 (macOS 26+ 關鍵字是 "wakeorpoweron")
 launchctl load ~/Library/LaunchAgents/com.xue.finviz-to-tv.plist
 launchctl load ~/Library/LaunchAgents/com.xue.finviz-to-tv.hk-eod.plist
 launchctl load ~/Library/LaunchAgents/com.xue.finviz-to-tv.morning-gap.plist

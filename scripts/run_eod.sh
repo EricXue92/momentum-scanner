@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Wrapper for the US EOD launchd job (10:00 HKT, Tue-Sat). Two responsibilities:
+# Wrapper for the US EOD launchd job (12:00 HKT, Tue-Sat; 10:00 until 2026-11-07). Two responsibilities:
 #   1. Rotate output/launchd_US.log if its last-modification date is not today,
 #      so each calendar day starts with a fresh log. Multiple same-day
 #      invocations (launchd + manual reruns) still append.

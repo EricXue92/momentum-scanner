@@ -6,7 +6,7 @@ name: Publish ETF RS Trend Page
 #   - workflow_run: rides the US 3M RS workflow, which launchd dispatches
 #     Tue-Sat 08:45 HKT (GH's own cron is unreliable — see CLAUDE.md), so the
 #     page refreshes once the US close is in, whatever that run's outcome.
-#   - schedule: belt-and-suspenders, after the local 10:00 HKT us-eod.
+#   - schedule: belt-and-suspenders, after the local 12:00 HKT us-eod.
 #   - workflow_dispatch: manual rebuild.
 on:
   workflow_run:

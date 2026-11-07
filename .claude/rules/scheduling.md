@@ -15,7 +15,7 @@ Loaded only when working with the files above (moved out of the root
 window rule and the caffeinate prohibition stay in the root file.
 
 - pmset wake keyword is **`wakeorpoweron`** on macOS 26+ (`wakepoweron` no longer
-  parses). US EOD uses mode `us-eod` not `eod` (HK bar is incomplete at 10:00 HKT).
+  parses). US EOD uses mode `us-eod` not `eod` (HK bar is incomplete at 12:00 HKT).
 - **The schedule assumes AC power; every scheduled job holds a `caffeinate
   -i -s` assertion** (`run_eod.sh` / `run_hk_eod.sh` / `trigger_rs_workflow.sh`
   source `scripts/lib/hold_awake.sh` → `caffeinate -i -s -w $$ &`;
