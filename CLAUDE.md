@@ -56,44 +56,14 @@ uv run pytest tests/ -v             # `uv run python -m pytest` works too
   master. **US Longs + Repeat files are written right after the Longs loop**,
   before the Leaders / Shorts / RS screens — a later Finviz outage that runs
   into the watchdog must not cost them (→ decisions 2026-11-12).
-- **SMA50 prune of the US master** (`sma50_prune.py`, `[sma50_prune]`), at
-  the top of every us-eod before the master is loaded, backs the master up
-  as `.bak.<stamp>` first (so does the manual `rs-line-audit` prune): close
-  below SMA50 for `consecutive_days` (2) completed days AND latest close
-  below the prior day's close (a rebound under the line is kept) → removed,
-  can re-qualify later. Soft-fail: total yfinance failure skips the prune;
-  missing/short-history tickers are KEPT. **Stale series are KEPT**
-  (`drop_stale_series` in `_fetch_daily_closes`, so EMA20 shares it): last
-  valid close > 1 session behind the batch (session = a date ≥ half the
-  tickers have a close) → delisted/halted, excluded from both checks with a
-  WARNING; a 1-session lag is Yahoo lag → intraday fill (→ decisions
-  2026-10-17). **Delistings are the one removal for missing data:** stale ≥
-  `delisted_after_sessions` (10; unset/0 = off) AND a separate 6mo
-  re-download (`_confirm_no_new_bars`) shows no newer bar → removed in the
-  same backup/prune, logged, NOT written to `SMA50Pruned.txt`; a failed
-  recheck removes nothing. Stale info rides on the shared closes as
-  `MasterCloses.stale`; a plain dict (test fakes) means no delistings. US
-  only. The day's removed names go to `output/TV/US/<date>_SMA50Pruned.txt`
-  (comma-sep; absent when nothing was pruned; a same-day rerun **merges**
-  into it, since the rerun no longer sees names the first run removed; no
-  Webull mirror / Futu / TV sync; `TV/US` 5-day rule; write failure is
-  soft). **Trailing-NaN Close fill** (`fill_missing_last_close`): Yahoo
-  sometimes publishes the latest session's daily row with OHLV but NaN
-  Close for hours; the prune fills such a row from one batch of that day's
-  1h bars (last bar's close), warns, and falls back to the stale day only
-  when intraday has nothing either (→ decisions 2026-09-22). The ETF RS
-  ranking gets the same fill (`us_rs_3m.fetch_us_klines_yf(fill_last_close=True)`,
-  default off — the cloud RS jobs are unchanged; → decisions 2026-10-22).
-  The rest of us-eod still `dropna`s and runs a day stale on such days.
-- **EMA20 first-break list (US, read-only):** `ema20_break.py`
-  (`[ema20_break]`) runs right before the SMA50 prune over the same master
-  (`main._run_us_master_lists` fetches the master's 6mo closes ONCE and
-  passes `closes=` to both; each step is still independently soft) —
-  latest close < EMA20 AND prior close ≥ prior EMA20 (cross-down day only) →
-  `output/TV/US/<date>_EMA20Break.txt` (comma-sep). Never touches the master.
-  Empty → no file; same-day rerun overwrites; keeps only the newest
-  `keep_files` (3) lists itself (stricter than the `TV/US` 5-day rule).
-  Reuses `sma50_prune._fetch_daily_closes` (incl. the NaN-Close fill). Soft-fail.
+- **SMA50 prune + EMA20 first-break list (US master)** run at the top of
+  every us-eod, before the master is loaded (`main._run_us_master_lists`,
+  one shared 6mo fetch, each step independently soft). Details live in
+  `.claude/rules/master-lists.md` (path-scoped to `sma50_prune.py` /
+  `ema20_break.py`). The parts that must hold everywhere: the prune backs
+  the master up as `.bak.<stamp>` first; missing, short-history and
+  **stale series are KEPT** (the confirmed-delisting rule is the one
+  removal for missing data); EMA20 never touches the master.
 - **EOD Repeat (US):** tickers the master would drop that still fired an
   _event_ Longs group today are collected by `_repeat_hits` **before**
   `_dedup_seen` (which mutates `us_seen`) and written to
@@ -215,37 +185,13 @@ k-line fetch.
   above this 60-min wait plus a full run** and logs an `[ERROR] [watchdog]`
   line when it fires; change `_STALE_MAX_WAIT_SEC` and `EOD_TIMEOUT`
   together (→ decisions 2026-10-27).
-- **RS-line trend (annotate in EOD; manual prune via audit mode):** cloud scripts
-  publish `rs_below_ma` / `rs_days_below_ma` / `rs_frac_below_ma` (TraderLion-style
-  RS line = price/index vs its own EMA21) as extra columns in
-  `data/{us_rs_3m,hk_rs}/<date>.csv`. The EOD log annotates long-side survivors
-  whose RS line is persistently below its MA; EOD itself has **no `.txt`/dedup
-  effect**. Computed cloud-side only (local never refetches klines). Config:
-  `[rs_line]`. Spec:
-  `docs/superpowers/specs/2026-05-27-rs-line-trend-filter-design.md`.
-- **`uv run main.py --mode rs-line-audit [--market us|hk|both] [--dry-run|--yes]`**
-  scores the cross-day master, writes
-  `output/rs-audit/rs_line_audit_<MKT>_<date>{,_drop,_keep_ranked}.txt`, prints the
-  report, then **prompts y/N** to prune the drops from
-  `output/state/eod_seen_{US,HK}.txt` so they can re-qualify on a future EOD run.
-  Confirmed prunes back the master up first as `eod_seen_<MKT>.txt.bak.<stamp>`.
-  `--yes` skips the prompt (auto-prune, legacy non-interactive behavior);
-  `--dry-run` writes the report + sidecars but does NOT touch the master
-  (no prompt, no backup). **Pruning** stays manual/operator-triggered, but a
-  `--dry-run` audit is chained daily as a soft step at the end of
-  `run_eod.sh` / `run_hk_eod.sh` (after the report) to produce the
-  strongest-RS snapshot below.
-- **Daily strongest-RS snapshot:** every audit run also writes the top
-  `[rs_line].top_n` (10) of `keep_ranked` (unknowns excluded, never padded) to
-  `output/TV/US/rs_us_<date>.txt` / `output/hk_rs_<date>.txt` — dated, skipped
-  when empty, overwritten on same-day rerun (ranking snapshot, no dedup
-  semantics; not Webull-mirrored, no eod_seen effect). **Not written when
-  k-line coverage of the master < 50%** (`MIN_SNAPSHOT_COVERAGE`; an earlier
-  same-day snapshot stays; → decisions 2026-10-17). The report lists such
-  names as `no data fetched` (KEPT), separate from `insufficient history`.
-  Cleanup: snapshots 4-day window; audit report + sidecars (`rs-audit/`)
-  5-day window.
-
+- **RS-line trend + `rs-line-audit` + daily strongest-RS snapshot:**
+  details in `.claude/rules/rs-line.md` (path-scoped to `rs_line.py` /
+  `rs_line_audit.py`). The parts that must hold everywhere: EOD only
+  *annotates* (no `.txt` / dedup effect, columns computed cloud-side);
+  **pruning the master stays manual** — the audit chained at the end of
+  `run_eod.sh` / `run_hk_eod.sh` runs with `--dry-run`, which is
+  load-bearing (no prompt, no prune, no backup).
 ## ETF RS ranking
 
 Rules for `etf_rs.py` / `etf_holdings_rs.py` / `etf_rs_leaders.py` /
