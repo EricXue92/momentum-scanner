@@ -31,7 +31,7 @@ A scheduled momentum scanner for US and HK stocks. Every day it screens long and
 
 | Run            | Schedule                         | Produces                                                                                            |
 | -------------- | -------------------------------- | --------------------------------------------------------------------------------------------------- |
-| US EOD         | Tue–Sat 10:00                    | Longs (6 groups), Leaders, conditional RS, Shorts, IPO, Repeat, **ETF strength ranking**, RS top-10 |
+| US EOD         | Tue–Sat 12:00                    | Longs (6 groups), Leaders, conditional RS, Shorts, IPO, Repeat, **ETF strength ranking**, RS top-10 |
 | HK EOD         | Mon–Fri 20:00                    | EarningsGap / HighVolume / GapUp / Leaders / conditional RS, Shorts, IPO, RS top-10                 |
 | US Morning Gap | 9 scans around the 09:30 ET open | pre-market gappers (−20/−10/−5 min) and volume-confirmed post-open gappers (+5…+30 min), ntfy push  |
 | HK Morning Gap | 6 scans after the 09:30 HKT open | post-open gappers (+10…+60 min), ntfy push                                                          |
@@ -245,7 +245,7 @@ Priority-ordered; each ticker enters at most one file per day.
 
 - **Data:** the metrics frame and RS tables are fetched from the cloud (`data/hk_metrics/`, `data/hk_rs/`); a cloud miss falls back to a local yfinance fetch.
 - **Data-day rule:** only the 20:00 slot uses today's close; earlier runs trim today's incomplete bar and skip the HSI-triggered RS group. Weekend reruns map to the previous Friday.
-- **OpenD:** market caps and the HSI trigger come from Futu. With OpenD offline the run still completes, but the cap gate filters everything out. A high-priority ntfy alert is pushed (once per day).
+- **OpenD:** market caps and the HSI trigger come from Futu. A failed snapshot batch is retried once; if caps are still unavailable (OpenD offline), the names that clear the price and dollar-volume floors get their cap from yfinance instead (slower, ≤ 400 names). Without caps from either source the cap gate filters everything out and the log says so explicitly. A high-priority ntfy alert is pushed when OpenD is down (once per day).
 
 ### HK Shorts
 
@@ -265,11 +265,13 @@ Post-open only (Futu has no HK pre-market data): 6 scans at +10…+60 min after 
 
 | Table  | Formula                                                 | Benchmark | Published to                                                                           |
 | ------ | ------------------------------------------------------- | --------- | -------------------------------------------------------------------------------------- |
-| US 12M | `0.4·P3 + 0.2·P6 + 0.2·P9 + 0.2·P12`                    | SPY       | [Fred6725/rs-log](https://github.com/Fred6725/relative-strength) (weekdays ~01:30 UTC) |
-| US 3M  | `0.5·R21 + 0.3·R42 + 0.2·R63`, universe ≈ 6,100 tickers | SPY       | `data/us_rs_3m/<date>.csv` (GitHub Actions)                                            |
+| US 12M | `0.4·P3 + 0.2·P6 + 0.2·P9 + 0.2·P12`                    | SPY       | [Fred6725/rs-log](https://github.com/Fred6725/relative-strength) (Tue–Sat, see below)  |
+| US 3M  | `0.5·R21 + 0.3·R42 + 0.2·R63`, universe ≈ 6,000 tickers | SPY       | `data/us_rs_3m/<date>.csv` (GitHub Actions)                                            |
 | HK     | both formulas, ranked within the HK main board          | HSI       | `data/hk_rs/<date>.csv` (GitHub Actions)                                               |
 
-The local pipeline only fetches these CSVs (cached in `output/state/`, walking back ≤ 3 days on a miss). Because GitHub's own cron is unreliable, launchd dispatches the workflows 75 minutes before each EOD — see [Automation](#automation).
+The local pipeline only fetches these CSVs (cached in `output/state/`, walking back ≤ 3 days on a miss). Because GitHub's own cron is unreliable, launchd dispatches the workflows ahead of each EOD — see [Automation](#automation).
+
+**12M table timing.** The upstream commit is labelled with its *run* date and holds the previous US session's close; as of November 2026 it lands around 11:00–12:00 HKT, occasionally later (it has drifted later through the year: ~08:00 in August, 10:00–11:20 in October). The CSV carries no date, so `us-eod` matches its `Price` column against the raw closes of five mega caps: a table one session behind is re-fetched every 5 minutes for up to 60 minutes, after which the run gates on the stale table with a WARNING (a manual rerun later picks up the fresh one). Only the Longs event groups use the 12M table, so a stale day shifts names near the RS 90 line and nothing else. The US 3M cloud job takes its ticker universe from the same CSV but does not wait for a fresh one, and publishes nothing if the SPY benchmark fetch fails (the local run then walks back to the previous table).
 
 ### RS-Line Annotation
 
@@ -363,15 +365,19 @@ One "Any alert() function call" alert covers all seven conditions; the file's ta
 
 ### ntfy Notifications
 
-Configure `[notify]` and subscribe to the topic in the [ntfy](https://ntfy.sh) app; a launchd subscriber bridges the same topic to macOS Notification Center.
+Enable `[notify]`, put the topic in `.env` as `NTFY_TOPIC=<long random string>` and subscribe to it in the [ntfy](https://ntfy.sh) app; a launchd subscriber bridges the same topic to macOS Notification Center.
+
+> **The topic is not in git.** This repository is public and a topic name is the only secret ntfy.sh has — anyone who knows it can read the alerts or push fake ones. `config.toml` ships `ntfy_topic = ""`; the Python side resolves a non-empty config value, then the `NTFY_TOPIC` environment variable, then `.env`, and the two shell scripts (`trigger_rs_workflow.sh`, `run_ntfy_subscriber.sh`) read the same `.env` line. After changing the topic, restart the subscriber: `launchctl kickstart -k gui/$(id -u)/com.xue.finviz-to-tv.ntfy-subscriber`.
 
 | Notification          | Sent when                                                                                           |
 | --------------------- | --------------------------------------------------------------------------------------------------- |
-| New gappers           | a morning-gap scan finds names not seen in an earlier same-phase scan that day                      |
+| New gappers           | a morning-gap scan finds names not seen in an earlier same-phase scan that day (a name counts as seen only once its push went out, so a failed push is repeated by the next scan) |
 | **PROMOTED** (high)   | a pre-market gapper first passes the post-open cumulative-volume gate                               |
 | **SKIPPED** (high)    | a scheduled scan exits because the network never came up                                            |
-| RS workflow failure   | a launchd RS-workflow trigger fails                                                                 |
+| RS workflow failure   | a launchd RS-workflow trigger fails, or the cloud run it dispatched fails / is cancelled            |
 | **OpenD down** (high) | Futu OpenD is unreachable at the start of an EOD run or an in-window morning-gap scan; once per day |
+| **On battery** (high) | a scheduled run starts on battery power (scans are unreliable there); once per day                  |
+| **Finviz broken** (high) | a US EOD run's Finviz screens all return 0 rows or a filter code is rejected; once per day       |
 | Catalyst Report Ready | the pre-market catalyst report is written (only when that report is enabled)                        |
 
 ## LLM Reports
@@ -405,7 +411,7 @@ macOS launchd + pmset; all times HKT. Plists live in `~/Library/LaunchAgents/` (
 
 | Slot            | Trigger                               | Runs                            | Plist (`com.xue.finviz-to-tv.*`) |
 | --------------- | ------------------------------------- | ------------------------------- | -------------------------------- |
-| US EOD          | Tue–Sat 10:00                         | `scripts/run_eod.sh`            | `plist`                          |
+| US EOD          | Tue–Sat 12:00                         | `scripts/run_eod.sh`            | `plist`                          |
 | HK EOD          | Mon–Fri 20:00                         | `scripts/run_hk_eod.sh`         | `hk-eod.plist`                   |
 | US Morning Gap  | 90 entries/week (9 offsets × EDT/EST) | `--mode morning-gap`            | `morning-gap.plist`              |
 | HK Morning Gap  | Mon–Fri × 6 offsets (09:40–10:30)     | `--mode hk-morning-gap`         | `hk-morning-gap.plist`           |
@@ -414,10 +420,11 @@ macOS launchd + pmset; all times HKT. Plists live in `~/Library/LaunchAgents/` (
 | ntfy subscriber | resident (KeepAlive)                  | ntfy → Notification Center      | `ntfy-subscriber.plist`          |
 | Wake reschedule | Sundays 18:00 (root LaunchDaemon)     | `schedule_morning_gap_wakes.py` | `schedule-wakes.plist`           |
 
-- Each EOD wrapper runs the EOD scan (watchdog: 30 min US / 45 min HK), then the `--dry-run` rs-line audit as a soft step; the exit code reflects only the EOD scan.
+- Each EOD wrapper runs the EOD scan (watchdog: 90 min US — it must outlast the 60-minute 12M freshness wait plus a full run — / 45 min HK; a watchdog kill logs an `[ERROR] [watchdog]` line), then the `--dry-run` rs-line audit as a soft step; the exit code reflects only the EOD scan.
 - Morning-gap runs **self-validate their time window and clean-exit outside it**, so extra or missed wakes are harmless.
-- The RS triggers dispatch the cloud workflows 75 minutes before each EOD because GitHub's scheduled cron can be hours late or skipped; the workflow commit is idempotent, so a double-fire is harmless.
-- 10:00 lands after the US close (EDT and EST) and the upstream 12M RS commit; 20:00 leaves 4 hours after the HK close for data to settle.
+- Before a run starts, a network gate waits (≤ 300 s) for the hosts that mode actually uses: morning-gap probes Yahoo only, `hk-eod` GitHub raw + Yahoo, `us-eod` adds finviz.com — a Finviz blip no longer costs the HK run or a gap-scan window.
+- The RS triggers dispatch the cloud workflows ahead of each EOD (US 08:45, HK 18:45) because GitHub's scheduled cron can be hours late or skipped; the workflow commit is idempotent, so a double-fire is harmless. A failed run pushes an ntfy alert and the EOD falls back to the previous day's table.
+- 12:00 lands after the US close (EDT and EST) and, on most days, after the upstream 12M RS commit (around 11:00–12:00 HKT, occasionally later — see [Cloud RS Tables](#cloud-rs-tables)); 20:00 leaves 4 hours after the HK close for data to settle.
 
 ```bash
 sudo pmset repeat wakeorpoweron TWRFS 11:59:00       # wake for the US slot ("wakeorpoweron" on macOS 26+)
@@ -429,7 +436,7 @@ sudo uv run scripts/schedule_morning_gap_wakes.py    # one-shot morning-gap wake
 
 ## Configuration
 
-All filters, thresholds, group mappings and the ETF list live in [`config.toml`](config.toml); API keys go in `.env`. Architecture notes and invariants: [`CLAUDE.md`](CLAUDE.md).
+All filters, thresholds, group mappings and the ETF list live in [`config.toml`](config.toml); API keys and the ntfy topic (`NTFY_TOPIC`) go in `.env` (gitignored; see `.env.example`). Architecture notes and invariants: [`CLAUDE.md`](CLAUDE.md).
 
 ## Dependencies
 
