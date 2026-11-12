@@ -830,3 +830,24 @@ def test_entry_gate_config_ships_with_the_requested_thresholds():
 def test_entry_gate_defaults_match_the_config():
     assert etf_rs_leaders.DEFAULT_ENTRY_ABOVE_SMA == (50, 200)
     assert etf_rs_leaders.DEFAULT_ENTRY_MIN_RS_1M == 90
+
+
+def test_fetch_daily_bars_requests_class_shares_in_yahoo_form(monkeypatch):
+    """`BRK.B` (display form, as held in the master) is `BRK-B` on Yahoo.
+    Sent unconverted it came back with no bars, so it passed every entry gate
+    and the prune could never judge it (it sat in the master on 2026-11-12)."""
+    import main
+    idx = pd.bdate_range(end="2026-10-30", periods=3)
+    one = pd.DataFrame({"High": [11.0, 12.0, 13.0], "Low": [9.0, 9.0, 9.0],
+                        "Close": [10.0, 10.0, 10.0], "Volume": [1e6, 1e6, 1e6]}, index=idx)
+    asked = []
+
+    def fake_download(tickers, **kw):
+        asked.append(list(tickers))
+        return pd.concat({t: one for t in tickers}, axis=1)
+
+    monkeypatch.setattr(main, "_yf_download_with_retry", fake_download)
+    bars = _REAL_FETCH_DAILY_BARS(["BRK.B", "NVDA"])
+    assert asked == [["BRK-B", "NVDA"]]
+    assert set(bars.closes) == {"BRK.B", "NVDA"}       # keyed by the display form
+    assert list(bars.highs["BRK.B"]) == [11.0, 12.0, 13.0]

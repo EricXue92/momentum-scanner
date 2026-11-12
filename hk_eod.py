@@ -977,6 +977,55 @@ def _to_tv(code: str) -> str:
     return "HKEX:" + (stripped or "0")
 
 
+_NO_CAPS_MSG = (
+    "[HK Longs] Futu market caps unavailable — every Longs group and the IPO "
+    "list will be EMPTY today (market_cap is NaN for the whole universe)"
+)
+# Above this many names the per-ticker yfinance lookup (~1s each) is not worth
+# the run time; the pre-filter below normally leaves a couple of hundred.
+_YF_CAPS_MAX_NAMES = 400
+
+
+def _yf_caps_fallback(metrics: pd.DataFrame, hk_settings: dict) -> dict[str, float]:
+    """Market caps from yfinance when the Futu snapshot failed, for the names
+    that can still matter: price at the floor, and dollar volume at the floor
+    or a history too short to have one (IPO ladder). Returns
+    ``{'HK.00700': cap}``; ``{}`` (with an ERROR) when nothing could be
+    fetched. Per-ticker and slow, hence the pre-filter and the size cap."""
+    from main import _get_market_cap  # local import: main imports hk_eod
+
+    try:
+        price = metrics["last_price"] >= hk_settings.get("min_price", 50.0)
+        dvol = metrics["avg_dollar_vol_20d"]
+        liquid = dvol.isna() | (dvol >= hk_settings.get("min_dollar_volume", 100_000_000))
+        codes = list(metrics.index[price & liquid])
+    except KeyError as e:
+        logger.error(f"{_NO_CAPS_MSG} — no yfinance fallback (metrics lack {e})")
+        return {}
+    if not codes or len(codes) > _YF_CAPS_MAX_NAMES:
+        logger.error(
+            f"{_NO_CAPS_MSG} — no yfinance fallback ({len(codes)} names after the "
+            f"price / dollar-volume pre-filter, limit {_YF_CAPS_MAX_NAMES})"
+        )
+        return {}
+    logger.warning(
+        f"[HK Longs] Futu market caps unavailable; yfinance fallback for "
+        f"{len(codes)} names that clear the price / dollar-volume floors"
+    )
+    caps: dict[str, float] = {}
+    for code in codes:
+        # 'HK.00700' -> '0700.HK'
+        cap = _get_market_cap(f"{code.split('.')[-1][-4:]}.HK")
+        if cap:
+            caps[code] = float(cap)
+        time.sleep(0.5)
+    if not caps:
+        logger.error(f"{_NO_CAPS_MSG} — the yfinance fallback returned nothing either")
+    else:
+        logger.info(f"[HK Longs] yfinance fallback: caps for {len(caps)}/{len(codes)} names")
+    return caps
+
+
 def run_hk_eod(
     config: dict,
     output_dir: Path,
@@ -1092,13 +1141,14 @@ def run_hk_eod(
         use_yesterday = False
         logger.info("[HK Longs] Fetching market caps via Futu snapshot...")
         tv_codes = [_to_tv(c) for c in metrics.index]
-        futu_caps_by_tv = (
-            get_market_caps_futu(tv_codes, market="HK", host=host, port=port) or {}
-        )
-        caps = {
-            f"HK.{tv.replace('HKEX:', '').zfill(5)}": v
-            for tv, v in futu_caps_by_tv.items()
-        }
+        futu_caps_by_tv = get_market_caps_futu(tv_codes, market="HK", host=host, port=port)
+        if futu_caps_by_tv:
+            caps = {
+                f"HK.{tv.replace('HKEX:', '').zfill(5)}": v
+                for tv, v in futu_caps_by_tv.items()
+            }
+        else:
+            caps = _yf_caps_fallback(metrics, hk_settings)
         metrics["market_cap"] = metrics.index.map(lambda c: caps.get(c, float("nan")))
     else:
         logger.warning(
@@ -1147,9 +1197,12 @@ def run_hk_eod(
 
         logger.info("[HK Longs] Fetching market caps via Futu snapshot...")
         tv_codes = [_to_tv(c) for c in klines.keys()]
-        futu_caps_by_tv = (
-            get_market_caps_futu(tv_codes, market="HK", host=host, port=port) or {}
-        )
+        futu_caps_by_tv = get_market_caps_futu(tv_codes, market="HK", host=host, port=port)
+        if not futu_caps_by_tv:
+            # No yfinance fallback here: this path is already the degraded
+            # one (no cloud metrics) and has no metrics frame to pre-filter on.
+            logger.error(_NO_CAPS_MSG)
+            futu_caps_by_tv = {}
         caps = {
             f"HK.{tv.replace('HKEX:', '').zfill(5)}": v
             for tv, v in futu_caps_by_tv.items()

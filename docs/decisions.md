@@ -252,10 +252,25 @@ Fixed (each with a test unless noted):
   a Saturday 3M walk-back is a WARNING (the Tue-Sat dispatch has published
   Saturday files since 2026-06-16, so it means the trigger failed);
   `run_hk_eod` no longer raises `KeyError: 'n_rows'` on an empty frame.
-Left open, operator's call: ntfy topic is in a public repo; `BRK.B` in the
-ETF leaders master is sent to Yahoo unconverted (no bars →
-passes every gate); HK Longs market caps have no fallback when one Futu
-snapshot batch fails.
+The three items first left open were done the same day:
+- **ntfy topic in a public repo** (config.toml + two scripts): anyone could
+  read the alerts or push fakes. → rotated; the topic now lives only in
+  `.env` (`NTFY_TOPIC`), resolved by `notify._topic` (non-empty config >
+  env > `.env`) and read from `.env` by `trigger_rs_workflow.sh` /
+  `run_ntfy_subscriber.sh`. `config.toml` ships `ntfy_topic = ""` (a test
+  pins it); `tests/conftest.py` keeps the suite off the real topic. The old
+  name stays in git history and old docs — it is dead, not secret.
+- **`BRK.B` in the ETF leaders master** was sent to Yahoo unconverted → no
+  bars → passed every gate, never pruned. → `_fetch_daily_bars` requests
+  `to_yf_symbol(t)` and keys the result by the display form. The cloud RS
+  table has no class shares at all, so the 1M RS entry gate still does not
+  judge them (missing → kept, as designed).
+- **HK Longs market caps**: one failed Futu snapshot batch returned `None`,
+  `or {}` made every cap NaN, and all Longs groups + the IPO list came back
+  empty with no specific log line. → one retry per batch
+  (`get_market_caps_futu`); on the cloud-metrics path a yfinance fallback
+  for the names at the price / dollar-volume floors (`_yf_caps_fallback`,
+  ≤ 400 names); otherwise an ERROR that says the lists will be empty.
 
 ### 2026-10-31 — per-ETF strongest-holdings line
 `etf_holdings_rs.py`: stockanalysis free tier gives the top 25 holdings

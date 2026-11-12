@@ -43,12 +43,21 @@ hold_awake "$CAFFEINATE"
 # launchd inherits no PATH; gh shells out to git which expects a usable PATH.
 export PATH="/opt/homebrew/bin:/usr/bin:/bin"
 
-# ntfy topic is reused from the morning-gap subscriber so all pipeline alerts
-# land in the same place (config.toml [notify]).
-NTFY_TOPIC="xue-finviz-morning-gap-9f3k2"
+# Same topic as every other pipeline alert. It is NOT in git (public repo):
+# NTFY_TOPIC from the environment, else from the project's .env. Only that
+# one line is read — the API keys in .env have no business in gh's env.
+ENV_FILE="${TRIGGER_ENV_FILE:-/Users/xue/momentum-scanner/.env}"
+NTFY_TOPIC="${NTFY_TOPIC:-}"
+if [[ -z "$NTFY_TOPIC" && -f "$ENV_FILE" ]]; then
+    NTFY_TOPIC=$(sed -n 's/^NTFY_TOPIC=//p' "$ENV_FILE" | tail -1 | tr -d "\"'")
+fi
 ntfy_alert() {
     local title="$1" body="$2"
     local priority="${3:-high}"
+    if [[ -z "$NTFY_TOPIC" ]]; then
+        echo "[$(ts)] [trigger:$MARKET] NTFY_TOPIC not set (.env) — alert not sent: $title"
+        return 0
+    fi
     "$CURL" -fsS -m 10 \
         -H "Title: $title" \
         -H "Priority: $priority" \

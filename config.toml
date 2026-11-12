@@ -669,10 +669,13 @@ hk_morning_gap        = "HKMorningGap"
 
 # 推送通知 (ntfy.sh) — morning-gap 发现"新"票时推送到 phone + Mac 浏览器。
 # 同一交易日内已出现的票不重复推送 (state: output/state/morning_gap_seen_<date>.txt)。
-# topic 名后缀是随机串 = 私人频道。
+# topic 名是 ntfy.sh 唯一的"密码"，而本仓库是公开的 → 真实 topic 不进 git:
+# 写在 .env 的 NTFY_TOPIC (gitignored；环境变量同名亦可)。这里留空即可；
+# 填了非空值则以这里为准。shell 脚本 (trigger_rs_workflow.sh /
+# run_ntfy_subscriber.sh) 也从 .env 读同一个值。
 [notify]
 enabled = true
-ntfy_topic = "xue-finviz-morning-gap-9f3k2"
+ntfy_topic = ""
 ntfy_server = "https://ntfy.sh"
 max_tickers_in_body = 100
 

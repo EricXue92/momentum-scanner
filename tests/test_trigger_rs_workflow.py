@@ -76,6 +76,8 @@ def harness(tmp_path: Path):
             "TRIGGER_POLL_GAP": "0",
             "TRIGGER_POLL_TRIES": str(poll_tries),
             "TRIGGER_DISPATCH_GAP": "0",
+            "TRIGGER_ENV_FILE": "/dev/null",
+            "NTFY_TOPIC": "test-topic",
             "FAKE_GH_CALLS": str(calls),
             "FAKE_GH_COUNTER": str(counter),
             "FAKE_GH_VIEW_SEQ": str(seq),

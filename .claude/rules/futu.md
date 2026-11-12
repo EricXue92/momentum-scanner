@@ -37,3 +37,8 @@ prev_close_price) / prev_close_price`. `pre_/after_change_rate` do exist.
 - `suspension` is a string (`"N/A"`), not bool — use bool `delisting` instead.
 - HK long-side data fetch hard-depends on OpenD (Futu _sync_ being soft-fail does
   not make the _fetch_ soft).
+  Market caps are the partial exception (→ decisions 2026-11-12):
+  `get_market_caps_futu` retries a failed snapshot batch once, and on the
+  cloud-metrics path `hk_eod._yf_caps_fallback` asks yfinance for the names
+  at the price / dollar-volume floors; no caps at all → an ERROR saying
+  every Longs group and the IPO list will be empty.

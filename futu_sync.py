@@ -8,6 +8,7 @@ The .txt watchlist files remain the primary artifact; failures here log a
 warning and return False without raising.
 """
 
+import time
 import logging
 import socket
 from typing import Literal, NamedTuple
@@ -148,6 +149,9 @@ def pre_market_gap_futu(
                 pass
 
 
+_SNAPSHOT_RETRY_DELAY_SEC = 3.0
+
+
 def get_market_caps_futu(
     tickers: list[str],
     market: Literal["US", "HK"],
@@ -191,6 +195,16 @@ def get_market_caps_futu(
         for i in range(0, len(codes), BATCH):
             batch = codes[i:i + BATCH]
             ret, data = ctx.get_market_snapshot(batch)
+            if ret != RET_OK:
+                # One retry: a single transient error used to throw away
+                # every batch already fetched (HK Longs then had no caps at
+                # all and every group came back empty).
+                logger.warning(
+                    f"  Futu market cap: get_market_snapshot failed — {data}; "
+                    f"retrying once in {_SNAPSHOT_RETRY_DELAY_SEC:.0f}s"
+                )
+                time.sleep(_SNAPSHOT_RETRY_DELAY_SEC)
+                ret, data = ctx.get_market_snapshot(batch)
             if ret != RET_OK:
                 logger.warning(
                     f"  Futu market cap: get_market_snapshot failed — {data}"

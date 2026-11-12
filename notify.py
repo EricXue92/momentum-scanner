@@ -4,6 +4,7 @@ Failures are swallowed and logged. Never raises — same contract as futu_sync.
 """
 
 import logging
+import os
 from pathlib import Path
 from urllib.error import URLError
 from urllib.request import Request, urlopen
@@ -11,6 +12,42 @@ from urllib.request import Request, urlopen
 logger = logging.getLogger(__name__)
 
 _TIMEOUT_SEC = 5.0
+
+
+_DOTENV_PATH = Path(__file__).resolve().parent / ".env"
+_dotenv_topic: str | None | bool = False  # False = not looked up yet
+
+
+def _topic_from_dotenv() -> str | None:
+    """`NTFY_TOPIC` from the project's gitignored `.env`, read once. The
+    morning-gap wrappers do not source `.env`, so the process environment
+    alone is not enough."""
+    global _dotenv_topic
+    if _dotenv_topic is False:
+        found = None
+        try:
+            for raw in _DOTENV_PATH.read_text(encoding="utf-8").splitlines():
+                line = raw.strip()
+                if line.startswith("export "):
+                    line = line[len("export "):]
+                if line.startswith("NTFY_TOPIC="):
+                    found = line.partition("=")[2].strip().strip('"').strip("'") or None
+        except OSError:
+            found = None
+        _dotenv_topic = found
+    return _dotenv_topic or None
+
+
+def _topic(notify_cfg: dict) -> str | None:
+    """The ntfy topic. The repository is public and a topic name is the only
+    secret ntfy.sh has, so the real one lives outside git: `NTFY_TOPIC` in
+    the environment or in `.env`. A non-empty `[notify].ntfy_topic` still
+    wins (tests, or a deliberately local config)."""
+    return (
+        notify_cfg.get("ntfy_topic")
+        or os.environ.get("NTFY_TOPIC")
+        or _topic_from_dotenv()
+    )
 
 
 def _format_body(tickers: list[str], max_in_body: int, total: int) -> str:
@@ -83,7 +120,7 @@ def notify_morning_gap(
     if not notify_cfg.get("enabled", False):
         return True
 
-    topic = notify_cfg.get("ntfy_topic")
+    topic = _topic(notify_cfg)
     if not topic:
         logger.warning("[Notify] ntfy_topic missing in [notify] config")
         return True
@@ -127,7 +164,7 @@ def notify_morning_catalyst_ready(
     if not notify_cfg.get("enabled", False):
         return
 
-    topic = notify_cfg.get("ntfy_topic")
+    topic = _topic(notify_cfg)
     if not topic:
         logger.warning("[Notify] ntfy_topic missing for catalyst report")
         return
@@ -153,7 +190,7 @@ def notify_scan_skipped(mode: str, reason: str, config: dict) -> None:
     if not notify_cfg.get("enabled", False):
         return
 
-    topic = notify_cfg.get("ntfy_topic")
+    topic = _topic(notify_cfg)
     if not topic:
         logger.warning("[Notify] ntfy_topic missing for scan-skipped alert")
         return
@@ -179,7 +216,7 @@ def notify_opend_down(
     if not notify_cfg.get("enabled", False):
         return
 
-    topic = notify_cfg.get("ntfy_topic")
+    topic = _topic(notify_cfg)
     if not topic:
         logger.warning("[Notify] ntfy_topic missing for OpenD-down alert")
         return
@@ -226,7 +263,7 @@ def notify_on_battery(
     if not notify_cfg.get("enabled", False):
         return
 
-    topic = notify_cfg.get("ntfy_topic")
+    topic = _topic(notify_cfg)
     if not topic:
         logger.warning("[Notify] ntfy_topic missing for on-battery alert")
         return
@@ -273,7 +310,7 @@ def notify_finviz_broken(
     if not notify_cfg.get("enabled", False):
         return
 
-    topic = notify_cfg.get("ntfy_topic")
+    topic = _topic(notify_cfg)
     if not topic:
         logger.warning("[Notify] ntfy_topic missing for Finviz-broken alert")
         return

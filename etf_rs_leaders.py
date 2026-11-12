@@ -304,22 +304,28 @@ def _fetch_daily_bars(tickers: list[str]) -> Bars | None:
     the closes with ``sma50_prune``'s stale-series exclusion and trailing-NaN
     Close fill applied (the shared EOD conventions); None when the batch
     failed entirely. Monkeypatched in tests."""
+    from etf_holdings_rs import to_yf_symbol
     from main import _yf_download_with_retry  # local import: main imports etf_rs
     from sma50_prune import drop_stale_series, fill_missing_last_close
 
+    # The master / 1M line carry the display form (`BRK.B`); Yahoo only knows
+    # `BRK-B`. Unconverted, a class share came back with no bars and so
+    # passed every gate and was never pruned ("no bars → kept").
+    yf_of = {t: to_yf_symbol(t) for t in tickers}
     data = _yf_download_with_retry(
-        tickers, period="1y", progress=False, group_by="ticker", threads=False
+        list(dict.fromkeys(yf_of.values())),
+        period="1y", progress=False, group_by="ticker", threads=False,
     )
     if data is None or data.empty:
         return None
-    single = len(tickers) == 1
+    single = not isinstance(data.columns, pd.MultiIndex)  # one ticker → flat frame
     closes: dict[str, pd.Series] = {}
     lows: dict[str, pd.Series] = {}
     volumes: dict[str, pd.Series] = {}
     highs: dict[str, pd.Series] = {}
     for t in tickers:
         try:
-            frame = data if single else data[t]
+            frame = data if single else data[yf_of[t]]
             close, low, vol, high = frame["Close"], frame["Low"], frame["Volume"], frame["High"]
         except (KeyError, IndexError):
             continue

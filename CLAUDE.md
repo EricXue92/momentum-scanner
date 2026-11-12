@@ -306,6 +306,10 @@ and must never be aged out.
   us-eod adds finviz.com).
 - Every scheduled job holds a `caffeinate -i -s` assertion. Do not remove it.
 - Keep every Finviz Screener call inside `run_screener`.
+- **The ntfy topic is not in git** (public repo): `NTFY_TOPIC` in `.env`,
+  resolved by `notify._topic` and read by the two ntfy shell scripts;
+  `config.toml` keeps `ntfy_topic = ""`. Never commit a real topic
+  (→ decisions 2026-11-12).
 
 The launchd / pmset wake, Finviz and Futu rules live in
 `.claude/rules/{scheduling,finviz,futu}.md` (path-scoped: they load when you
