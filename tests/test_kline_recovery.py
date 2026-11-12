@@ -143,6 +143,16 @@ def test_hk_throttled_batch_retries_only_the_names_it_lost(monkeypatch):
     assert downloads.calls[1] == ["0005.HK"]
 
 
+def test_hk_failed_batch_cools_down_before_the_next_batch(monkeypatch):
+    """Going straight from a failed batch into the next one cascades Yahoo's
+    throttle (us_rs_3m has slept 30s here since 2026-05-21; HK did not)."""
+    downloads = _Downloads([None, _grid, _grid])
+    hk_eod, sleeps = _patch_hk(monkeypatch, downloads)
+    hk_eod.fetch_hk_klines_yf(["0700", "0005", "0001", "0002"], period="2y", batch_size=2)
+    assert downloads.calls[0] == ["0700.HK", "0005.HK"]
+    assert sleeps[0] == 30  # before batch 2, not only before the recovery pass
+
+
 def test_hk_healthy_batch_skips_recovery(monkeypatch):
     downloads = _Downloads([_grid])
     hk_eod, sleeps = _patch_hk(monkeypatch, downloads)

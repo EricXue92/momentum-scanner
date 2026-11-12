@@ -44,7 +44,9 @@ set -m
 "$UV" run --directory "$PROJECT" main.py --mode hk-eod &
 EOD_PID=$!
 set +m
-( sleep "$EOD_TIMEOUT" && kill -TERM "-$EOD_PID" 2>/dev/null \
+( sleep "$EOD_TIMEOUT" \
+    && echo "$(date '+%Y-%m-%d %H:%M:%S') [ERROR] [watchdog] hk-eod exceeded EOD_TIMEOUT=${EOD_TIMEOUT}s — sending SIGTERM to process group $EOD_PID" \
+    && kill -TERM "-$EOD_PID" 2>/dev/null \
     && sleep 15 && kill -KILL "-$EOD_PID" 2>/dev/null ) &
 WATCHDOG_PID=$!
 wait "$EOD_PID"

@@ -51,7 +51,7 @@ def notify_morning_gap(
     promoted: list[str] | None = None,
     market: str = "US",
     all_tickers: list[str] | None = None,
-) -> None:
+) -> bool:
     """Push ntfy alert(s) for a morning-gap scan.
 
     Args:
@@ -70,30 +70,35 @@ def notify_morning_gap(
         all_tickers: the full scan list. When given, the regular alert body
             lists every ticker (not just the delta), so a "2 new / total 33"
             scan still shows all 33 names. Falls back to new_tickers if None.
+
+    Returns False only when a POST was attempted and failed — the caller
+    then leaves the seen set alone so the next scan pushes again. Nothing to
+    send / notifications disabled / no topic → True (nothing was lost).
     """
     promoted = promoted or []
     if not new_tickers and not promoted:
-        return
+        return True
 
     notify_cfg = config.get("notify") or {}
     if not notify_cfg.get("enabled", False):
-        return
+        return True
 
     topic = notify_cfg.get("ntfy_topic")
     if not topic:
         logger.warning("[Notify] ntfy_topic missing in [notify] config")
-        return
+        return True
 
     server = notify_cfg.get("ntfy_server", "https://ntfy.sh").rstrip("/")
     max_in_body = int(notify_cfg.get("max_tickers_in_body", 10))
     sign = "" if offset_min < 0 else "+"
     prefix = "HK Morning Gap" if market == "HK" else "Morning Gap"
 
+    ok = True
     if new_tickers:
         title = f"{prefix} {sign}{offset_min}min | {len(new_tickers)} new"
         body_tickers = all_tickers if all_tickers is not None else new_tickers
         body = _format_body(body_tickers, max_in_body, total)
-        _ntfy_post(server, topic, title, body, priority="default")
+        ok = _ntfy_post(server, topic, title, body, priority="default") and ok
 
     if promoted:
         title = f"{prefix} {sign}{offset_min}min | {len(promoted)} PROMOTED"
@@ -101,7 +106,8 @@ def notify_morning_gap(
             _format_body(promoted, max_in_body, total)
             + " · pre-market gap confirmed by RTH volume"
         )
-        _ntfy_post(server, topic, title, body, priority="high")
+        ok = _ntfy_post(server, topic, title, body, priority="high") and ok
+    return ok
 
 
 def notify_morning_catalyst_ready(

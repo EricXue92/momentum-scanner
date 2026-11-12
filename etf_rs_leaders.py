@@ -70,6 +70,7 @@ the trend page. No ntfy, no Webull mirror, no Futu/TV sync.
 
 from __future__ import annotations
 
+import os
 import logging
 import re
 from datetime import date
@@ -166,7 +167,11 @@ def load_master(path: Path) -> list[str]:
 
 
 def _write_csv(path: Path, symbols: list[str]) -> None:
-    path.write_text(",".join(symbols) + "\n", encoding="utf-8")
+    # Temp file + os.replace: the master is undated and never regenerated, so
+    # a kill mid-write must leave the old file, not a truncated one.
+    tmp = path.with_name(f".{path.name}.tmp")
+    tmp.write_text(",".join(symbols) + "\n", encoding="utf-8")
+    os.replace(tmp, path)
 
 
 def _canon(symbol: str) -> str:

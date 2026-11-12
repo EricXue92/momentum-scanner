@@ -153,13 +153,13 @@ def test_build_3m_table_local_cache_short_circuit_skips_http(
     assert list(table.index) == ["AAPL", "MSFT"]
 
 
-def test_build_3m_table_saturday_walkback_logs_info_not_warning(
+def test_build_3m_table_saturday_walkback_is_a_warning(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, caplog
 ) -> None:
-    """Saturday local run walks back 1 day to Friday's CSV — cloud cron is
-    Mon-Fri so Saturday's file is never produced. This is the expected
-    weekday case; log at INFO not WARNING (would otherwise look like
-    degraded mode every single Sat run)."""
+    """The Tue-Sat launchd dispatch publishes a Saturday-stamped CSV (since
+    2026-06-16), so a Saturday run that walks back to Friday's file means the
+    trigger failed — a stale table like any other weekday, logged at WARNING
+    (it used to be INFO "cloud cron runs Mon-Fri", which hid the failure)."""
     import logging
 
     saturday = date(2026, 5, 23)
@@ -176,13 +176,8 @@ def test_build_3m_table_saturday_walkback_logs_info_not_warning(
         table = us_rs_3m.build_3m_table(tmp_path, saturday)
 
     assert table is not None
-    # No WARNING from the fetch path (passthrough warning would only fire if all
-    # 4 fetches returned None).
-    warnings = [r for r in caplog.records if r.levelname == "WARNING"]
-    assert not warnings, f"unexpected warnings: {[r.message for r in warnings]}"
-    # An INFO mentioning Saturday should have been logged.
-    info_msgs = [r.message for r in caplog.records if r.levelname == "INFO"]
-    assert any("Saturday" in m for m in info_msgs), f"missing Saturday note in: {info_msgs}"
+    warnings = [r.message for r in caplog.records if r.levelname == "WARNING"]
+    assert any("stale fallback" in m and "2026-05-22" in m for m in warnings), warnings
 
 
 def test_build_3m_table_non_saturday_walkback_still_warns(

@@ -476,15 +476,6 @@ def build_3m_table(
         if delta == 0:
             logger.info(f"[US RS 3M] Fetched cloud CSV: {len(table)} tickers")
             save_cache(table, today, output_dir)
-        elif delta == 1 and today.weekday() == 5:
-            # Saturday local run (US-EOD launchd fires Tue-Sat) always walks
-            # back 1 day because the cloud cron is Mon-Fri (no Sat run).
-            # Expected, not stale — keep it at INFO so the Sat log doesn't
-            # look like a degraded mode.
-            logger.info(
-                f"[US RS 3M] Fetched cloud CSV from {target_date.isoformat()}: "
-                f"{len(table)} tickers (Saturday: cloud cron runs Mon-Fri)"
-            )
         else:
             logger.warning(
                 f"[US RS 3M] Cloud CSV for {today.isoformat()} not available; "

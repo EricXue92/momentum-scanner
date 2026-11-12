@@ -203,3 +203,21 @@ def test_universe_fetch_does_not_wait_for_a_fresh_table(monkeypatch):
     monkeypatch.setattr(cloud, "fetch_rs_table", fake_fetch)
     assert cloud.main() == 1
     assert seen.get("wait_for_fresh") is False
+
+
+def test_spy_failure_publishes_nothing(monkeypatch, tmp_path):
+    """Without SPY the table's raw_score would be absolute, while the local
+    IPO gate subtracts its own SPY score before ranking against it. No table
+    is better: the local run walks back to yesterday's coherent one."""
+    fetched: list = []
+    monkeypatch.setattr(cloud, "fetch_rs_table", lambda *a, **kw: {"AAA": 99, "BBB": 90})
+    monkeypatch.setattr(cloud, "_fetch_spy_kline", lambda **kw: None)
+    monkeypatch.setattr(
+        cloud, "fetch_us_klines_yf", lambda tickers, **kw: fetched.append(tickers) or {}
+    )
+    monkeypatch.setattr(cloud, "_DATA_DIR", tmp_path / "data" / "us_rs_3m")
+    monkeypatch.setattr(cloud, "_today", lambda: date(2026, 5, 22))
+
+    assert cloud.main() == 1
+    assert fetched == []  # no point paying for the universe download
+    assert not (tmp_path / "data" / "us_rs_3m" / "2026-05-22.csv").exists()

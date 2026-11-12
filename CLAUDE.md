@@ -50,7 +50,12 @@ uv run pytest tests/ -v             # `uv run python -m pytest` works too
   so HK ties stay alphabetical, and HK entries are mapped `HKEX:522` →
   `HK.00522` for the lookup. IPO/HKIPO masters stay alphabetical.
   Order is cosmetic — `_load_seen` reads a set; `_persist_seen` still writes
-  alphabetically mid-run and the pruners preserve order.
+  alphabetically mid-run and the pruners preserve order. Master / seen-set
+  writes go through `_atomic_write_lines` (temp file + `os.replace`; the ETF
+  leaders master likewise) so a watchdog SIGTERM never leaves a truncated
+  master. **US Longs + Repeat files are written right after the Longs loop**,
+  before the Leaders / Shorts / RS screens — a later Finviz outage that runs
+  into the watchdog must not cost them (→ decisions 2026-11-12).
 - **SMA50 prune of the US master** (`sma50_prune.py`, `[sma50_prune]`), at
   the top of every us-eod before the master is loaded, backs the master up
   as `.bak.<stamp>` first (so does the manual `rs-line-audit` prune): close
@@ -139,11 +144,15 @@ uv run pytest tests/ -v             # `uv run python -m pytest` works too
   intraday, but each scan writes its own per-offset `.txt` (not cumulative,
   and morning-gap never touches `eod_seen_*`), so drift only affects the
   one-time ntfy/catalyst gate (`morning_gap_seen_{pre,post}_<date>.txt`),
-  not what's written. Spec:
+  not what's written. That seen file is written **after** the ntfy push and
+  only when it went out (`_morning_gap_classify(persist=False)` →
+  `notify_morning_gap` → `_morning_gap_mark_seen`): a failed POST leaves the
+  names fresh for the next scan, and the catalyst spawn waits with it. Spec:
   `docs/superpowers/specs/2026-08-13-morning-gap-live-price-trend-gate-design.md`.
 - **Report** — daily LLM generation is OFF (→ decisions 2026-09-17); wiring
   and evidence-prefetch details live in `report/CLAUDE.md`.
-- **Catalyst report (pre-market)** is a **detached subprocess** spawned
+- **Catalyst report (pre-market)** — currently OFF
+  (`[morning_gap_catalyst].enabled = false`, 2026-09-17) — is a **detached subprocess** spawned
   from the morning-gap path; it MUST NOT block the morning-gap process.
   Always uses DeepSeek + Tavily regardless of `[report] backend`. Reads
   only the JSON snapshot sidecar — MUST NOT call Futu / yfinance. Output:
@@ -292,7 +301,9 @@ and must never be aged out.
   once **before** the network gate (`_morning_gap_in_window`) and again in
   the run path after it: an out-of-window fire exits in < 1s instead of
   paying the 20s settle — or, offline, the 300s wait plus a false
-  "scan skipped" ntfy.
+  "scan skipped" ntfy. The network gate probes only the hosts the mode uses
+  (`_network_gate_hosts`: morning-gap = Yahoo; hk-eod = GitHub raw + Yahoo;
+  us-eod adds finviz.com).
 - Every scheduled job holds a `caffeinate -i -s` assertion. Do not remove it.
 - Keep every Finviz Screener call inside `run_screener`.
 

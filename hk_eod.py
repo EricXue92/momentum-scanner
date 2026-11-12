@@ -346,6 +346,9 @@ def filter_hk_shorts(
     return universe_size, tv_tickers
 
 
+# Pause after a failed / throttled yfinance batch (Yahoo's throttle window).
+_THROTTLE_COOLDOWN_SEC = 30.0
+
 def fetch_hk_klines_yf(
     codes_4d: list[str],
     period: str = "2y",
@@ -415,6 +418,9 @@ def fetch_hk_klines_yf(
                 logger.warning(f"[HK Longs]   batch failed after retries, skipping {len(batch)} tickers")
                 status.update({t: "missing" for t in batch})
                 lost.extend(batch)
+                if bidx < n_batches:
+                    logger.info("[HK Longs]   throttle cooldown 30s before next batch...")
+                    time.sleep(_THROTTLE_COOLDOWN_SEC)
                 continue
 
             # yfinance batch responses occasionally drop legitimate tickers (all-
@@ -470,7 +476,14 @@ def fetch_hk_klines_yf(
                 lost.extend(t for t in batch if status.get(t) in ("missing", "sparse"))
 
             if bidx < n_batches:
-                time.sleep(5)
+                # Same rule as us_rs_3m._fetch_us_batches: a throttled batch
+                # means Yahoo's window (>= 30s) is open, and going straight
+                # into the next 500 tickers cascades it empty as well.
+                if throttled:
+                    logger.info("[HK Longs]   throttle cooldown 30s before next batch...")
+                    time.sleep(_THROTTLE_COOLDOWN_SEC)
+                else:
+                    time.sleep(5)
         return lost
 
     t0 = time.monotonic()
@@ -1285,7 +1298,7 @@ def run_hk_eod(
         f"price>={hk_settings.get('min_price', 50.0)}, "
         f"+if 20d: avg_vol/dvol/ADR, +if 50d: SMA50, +if 200d: SMA200, "
         f"{perf_4w_note}+if 64d: RS_3M>={rs_3m_threshold}); "
-        f"raw metrics<253: {int((metrics['n_rows'] < 253).sum())}; "
+        f"raw metrics<253: {int((metrics['n_rows'] < 253).sum()) if 'n_rows' in metrics.columns else 0}; "
         f"dropped: {ipo_dropped}"
     )
     ipo_tv = dedup_seen("[HK IPO]", ipo_tv, ipo_seen, ipo_seen_path)

@@ -227,6 +227,36 @@ at k-line batch 30/60 (`conclusion=cancelled`), and us-eod fell back to the
 previous day's 3M CSV. → `fetch_rs_table(wait_for_fresh=False)` in the cloud
 script (default True: local us-eod unchanged). — RS gating.
 
+### 2026-11-12 — whole-code review: hardening batch
+Same day, a read-through of the whole pipeline for the same failure shape.
+Fixed (each with a test unless noted):
+- **Cloud SPY failure published an absolute `raw_score`** while `us_ipo`
+  subtracts its own SPY score before ranking against that column → the
+  cloud script now exits 1 (local walks back to a coherent table).
+- **Network gate probed finviz.com for every mode**: a Finviz blip cost
+  hk-eod its run and morning-gap its window → `_network_gate_hosts`.
+- **HK k-line batches had no throttle cooldown** (US has slept 30s after a
+  failed / throttled batch since 2026-05-21) → same rule in
+  `fetch_hk_klines_yf`.
+- **Morning-gap wrote the seen set before the ntfy push**, so a failed POST
+  was never repeated → seen is written after a successful push; the
+  catalyst spawn waits with it (no double analysis).
+- **US Longs / Repeat files were written after Leaders, Shorts and RS** →
+  moved right after the Longs loop (nothing later feeds back; no dedicated
+  test, the existing us-eod tests cover the outputs).
+- **Masters were rewritten in place** (`_persist_seen`,
+  `_sort_seen_by_rs_3m`, `_write_seen_set`, the ETF leaders master) → temp
+  file + `os.replace`.
+- Small: `run_hk_eod.sh` watchdog now logs `[ERROR] [watchdog]` like the US
+  one (no test); `min_price` code fallbacks 10 → 20 (morning-gap, IPO);
+  a Saturday 3M walk-back is a WARNING (the Tue-Sat dispatch has published
+  Saturday files since 2026-06-16, so it means the trigger failed);
+  `run_hk_eod` no longer raises `KeyError: 'n_rows'` on an empty frame.
+Left open, operator's call: ntfy topic is in a public repo; `BRK.B` in the
+ETF leaders master is sent to Yahoo unconverted (no bars →
+passes every gate); HK Longs market caps have no fallback when one Futu
+snapshot batch fails.
+
 ### 2026-10-31 — per-ETF strongest-holdings line
 `etf_holdings_rs.py`: stockanalysis free tier gives the top 25 holdings
 ("Showing 25 of 78 holdings"), accepted as the source with yfinance top-10 as

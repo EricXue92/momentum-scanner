@@ -92,7 +92,12 @@ def main() -> int:
     # 2. Fetch SPY first (mirror local fix B — SPY-first ordering).
     spy_kline = _fetch_spy_kline(period="6mo")
     if spy_kline is None or spy_kline.empty:
-        logger.warning("[Cloud RS 3M] SPY fetch failed; falling back to absolute scores")
+        # Publishing absolute scores would be wrong for the local IPO gate:
+        # us_ipo subtracts ITS SPY score from a candidate and ranks it in this
+        # table's raw_score distribution, so the two must share a basis. No
+        # table today -> the local run walks back to yesterday's coherent one.
+        logger.error("[Cloud RS 3M] SPY fetch failed — not publishing an un-relativised table")
+        return 1
 
     # 3. Fetch the full universe (curl_cffi auto-active in CI environment).
     klines = fetch_us_klines_yf(universe, period="6mo")
@@ -102,7 +107,7 @@ def main() -> int:
 
     # 4. Compute the table.
     import pandas as pd  # local import to keep top-of-file imports minimal
-    spy_for_compute = spy_kline if spy_kline is not None else pd.DataFrame({"time_key": [], "close": []})
+    spy_for_compute = spy_kline
     table = compute_us_rs_3m_table(klines, spy_for_compute)
 
     # Market-wide 1M percentile for the ETF leaders entry gate, scored on the

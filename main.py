@@ -237,12 +237,41 @@ def _read_seen_set(path: Path) -> set[str]:
         return set()
 
 
+def _atomic_write_lines(path: Path, lines) -> None:
+    """Write one item per line through a temp file in the same directory +
+    `os.replace`. A SIGTERM mid-write (the run_eod.sh watchdog) then leaves
+    the previous file intact instead of a truncated master, which the next
+    run would read as "hundreds of names never seen"."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f".{path.name}.tmp")
+    try:
+        with tmp.open("w", encoding="utf-8") as f:
+            for t in lines:
+                f.write(f"{t}\n")
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
+
+
+def _network_gate_hosts(mode: str) -> list[str]:
+    """Hosts the pre-run network gate probes — only the ones `mode` uses.
+    hk-eod has no Finviz call and morning-gap is Futu (local) + yfinance, so
+    a Finviz or GitHub blip must not cost them the run / the scan window."""
+    yahoo = "query1.finance.yahoo.com"
+    if mode in ("morning-gap", "hk-morning-gap"):
+        return [yahoo]
+    if mode == "hk-eod":
+        return ["raw.githubusercontent.com", yahoo]
+    return ["finviz.com", "raw.githubusercontent.com", yahoo]
+
+
 def _write_seen_set(path: Path, seen: set[str]) -> None:
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open("w", encoding="utf-8") as f:
-            for t in sorted(seen):
-                f.write(f"{t}\n")
+        _atomic_write_lines(path, sorted(seen))
     except OSError as e:
         logger.warning(f"[Morning Gap] could not write {path}: {e}")
 
@@ -253,6 +282,7 @@ def _morning_gap_classify(
     output_dir: Path,
     is_pre: bool,
     market: str = "US",
+    persist: bool = True,
 ) -> tuple[list[str], list[str]]:
     """Categorize tickers vs phase-specific seen sets and update seen file.
 
@@ -268,7 +298,10 @@ def _morning_gap_classify(
         For HK there is no pre phase (Futu does not expose HK pre-auction
         fields), so promoted is always empty.
 
-    Side effect: appends `tickers` to the matching phase's seen file.
+    Side effect: appends `tickers` to the matching phase's seen file —
+    unless `persist=False`. The scan path classifies first and calls
+    `_morning_gap_mark_seen` only after the ntfy push went out: a ticker
+    recorded as seen before a failed push was never pushed again that day.
     """
     pre_path = _morning_gap_seen_path(output_dir, today, "pre", market)
     post_path = _morning_gap_seen_path(output_dir, today, "post", market)
@@ -277,15 +310,32 @@ def _morning_gap_classify(
 
     if is_pre:
         fresh = sorted(current - pre_seen)
-        _write_seen_set(pre_path, pre_seen | current)
+        if persist:
+            _write_seen_set(pre_path, pre_seen | current)
         return fresh, []
 
     post_seen = _read_seen_set(post_path)
     new_post = current - post_seen
     promoted = sorted(new_post & pre_seen)
     fresh = sorted(new_post - pre_seen)
-    _write_seen_set(post_path, post_seen | current)
+    if persist:
+        _write_seen_set(post_path, post_seen | current)
     return fresh, promoted
+
+
+def _morning_gap_mark_seen(
+    today: str,
+    tickers: list[str],
+    output_dir: Path,
+    is_pre: bool,
+    market: str = "US",
+) -> None:
+    """Record `tickers` in the phase's seen file (the write half of
+    `_morning_gap_classify`)."""
+    path = _morning_gap_seen_path(
+        output_dir, today, "pre" if is_pre else "post", market
+    )
+    _write_seen_set(path, _read_seen_set(path) | set(tickers))
 
 
 def _fetch_snapshot_rows(
@@ -442,10 +492,7 @@ def _load_seen(path: Path) -> set[str]:
 
 def _persist_seen(path: Path, seen: set[str]) -> None:
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open("w", encoding="utf-8") as f:
-            for t in sorted(seen):
-                f.write(f"{t}\n")
+        _atomic_write_lines(path, sorted(seen))
     except OSError as e:
         logger.warning(f"[EOD seen] could not write {path}: {e}")
 
@@ -476,9 +523,7 @@ def _sort_seen_by_rs_3m(path: Path, table, key=None) -> None:
                     scores[t] = v
         ranked = sorted(scores, key=lambda t: (-scores[t], t))
         ordered = ranked + sorted(seen - scores.keys())
-        with path.open("w", encoding="utf-8") as f:
-            for t in ordered:
-                f.write(f"{t}\n")
+        _atomic_write_lines(path, ordered)
         logger.info(
             f"[EOD seen] {path.name} sorted by 3M RS: {len(ranked)} ranked, "
             f"{len(ordered) - len(ranked)} without a score (last)"
@@ -1186,7 +1231,7 @@ def run_morning_gap(
     discovery = discover_morning_gap_candidates(
         min_gap_pct=min_gap_pct,
         min_market_cap=config.get("min_market_cap", 300_000_000),
-        min_price=config.get("min_price", 10.0),
+        min_price=config.get("min_price", 20.0),
         pre_market=pre_market,
         exchanges=config.get(
             "exchanges", ["US_NASDAQ", "US_NYSE", "US_AMEX"]
@@ -2521,7 +2566,7 @@ def main() -> int:
         # after a pmset wake to reach finviz, and yfinance stayed flaky a while
         # longer, so batch downloads came back empty). settle_seconds rides out
         # the first-minute flakiness after the handshake succeeds.
-        hosts = ["finviz.com", "raw.githubusercontent.com", "query1.finance.yahoo.com"]
+        hosts = _network_gate_hosts(args.mode)
         if not wait_for_network(hosts, settle_seconds=20.0):
             if args.mode in morning_modes:
                 logger.warning(
@@ -2632,7 +2677,7 @@ def main() -> int:
         ipo_seen_path = _eod_seen_path(output_dir, "IPO")
         ipo_seen = _load_seen(ipo_seen_path)
 
-        # --- Longs (collect per-strategy — write deferred until after cross-group dedup) ---
+        # --- Longs (collect per-strategy, then within-Longs priority dedup) ---
         # Config list order = priority order (earlier wins). After collection,
         # tickers are assigned exclusively to the highest-priority strategy.
         longs_cfgs = config.get("longs", [])
@@ -2703,6 +2748,48 @@ def main() -> int:
                 logger.info(f"[Longs/{key}] Dedup: removed {removed} (kept by higher-priority strategy)")
             longs_dedup.append((key, name, exclusive))
         longs_tickers: set[str] = seen  # union, used for Leaders/RS dedup
+
+        # --- Write Longs + Repeat now, before the Leaders / Shorts / RS screens ---
+        # Nothing later feeds back into them (Leaders only *subtracts*
+        # longs_tickers), and us_seen is not read again until the Leaders
+        # write. Deferring these to the end meant a Finviz outage in a later
+        # section that ran into the run_eod.sh watchdog lost the Longs files
+        # that were already computed.
+        # Filename matches Futu group name (PascalCase).
+        futu_groups_cfg = (config.get("futu") or {}).get("groups") or {}
+        repeat_cfg = config.get("eod_repeat") or {}
+        repeat_keys = set(repeat_cfg.get("keys") or []) if repeat_cfg.get("enabled") else set()
+        repeat_tickers: set[str] = set()
+        written_longs: dict[str, list[str]] = {}
+        for key, name, tickers in longs_dedup:
+            futu_key = f"longs_{key}"
+            file_stem = futu_groups_cfg.get(futu_key) or key  # fallback to key if unmapped
+            sorted_t = sorted(tickers)
+            # Collect repeats BEFORE _dedup_seen — it mutates us_seen.
+            if key in repeat_keys:
+                repeat_tickers.update(_repeat_hits(f"[Repeat/{key}]", sorted_t, us_seen))
+            sorted_t = _dedup_seen(f"[Longs/{key}]", sorted_t, us_seen, us_seen_path)
+            dated = us_output_dir / f"{today}_{file_stem}.txt"
+            write_watchlist(sorted_t, dated, fmt)
+            logger.info(f"[Longs/{key}] {len(sorted_t)} tickers -> {dated}")
+            _write_webull(sorted_t, dated, output_dir)
+            _futu_sync(config, futu_key, sorted_t, "US")
+            _tv_sync(config, futu_key, sorted_t, "US")
+            written_longs[key] = sorted_t
+
+        # --- Write Repeat (old names that re-fired an event group today) ---
+        # These are already in the cross-day master, so they were dropped from
+        # their own group's .txt above. Read-only w.r.t. us_seen — writing them
+        # here neither consults nor mutates the master again.
+        if repeat_keys:
+            sorted_repeat = sorted(repeat_tickers)
+            repeat_stem = repeat_cfg.get("file_stem") or "Repeat"
+            dated = us_output_dir / f"{today}_{repeat_stem}.txt"
+            write_watchlist(sorted_repeat, dated, fmt)
+            logger.info(f"[Repeat] Total unique: {len(sorted_repeat)} -> {dated}")
+            _write_webull(sorted_repeat, dated, output_dir)
+            _futu_sync(config, "eod_repeat", sorted_repeat, "US")
+            _tv_sync(config, "eod_repeat", sorted_repeat, "US")
 
         time.sleep(delay)
 
@@ -2850,29 +2937,6 @@ def main() -> int:
                 f"removed {removed_le} from Leaders"
             )
 
-        # --- Write Longs (one file per strategy; Leaders/RS dedup already applied to union) ---
-        # Filename matches Futu group name (PascalCase).
-        futu_groups_cfg = (config.get("futu") or {}).get("groups") or {}
-        repeat_cfg = config.get("eod_repeat") or {}
-        repeat_keys = set(repeat_cfg.get("keys") or []) if repeat_cfg.get("enabled") else set()
-        repeat_tickers: set[str] = set()
-        written_longs: dict[str, list[str]] = {}
-        for key, name, tickers in longs_dedup:
-            futu_key = f"longs_{key}"
-            file_stem = futu_groups_cfg.get(futu_key) or key  # fallback to key if unmapped
-            sorted_t = sorted(tickers)
-            # Collect repeats BEFORE _dedup_seen — it mutates us_seen.
-            if key in repeat_keys:
-                repeat_tickers.update(_repeat_hits(f"[Repeat/{key}]", sorted_t, us_seen))
-            sorted_t = _dedup_seen(f"[Longs/{key}]", sorted_t, us_seen, us_seen_path)
-            dated = us_output_dir / f"{today}_{file_stem}.txt"
-            write_watchlist(sorted_t, dated, fmt)
-            logger.info(f"[Longs/{key}] {len(sorted_t)} tickers -> {dated}")
-            _write_webull(sorted_t, dated, output_dir)
-            _futu_sync(config, futu_key, sorted_t, "US")
-            _tv_sync(config, futu_key, sorted_t, "US")
-            written_longs[key] = sorted_t
-
         # --- Write Leaders ---
         if config.get("leaders"):
             sorted_leaders = sorted(leaders_tickers)
@@ -2888,20 +2952,6 @@ def main() -> int:
         # After the last _dedup_seen: _persist_seen writes alphabetically, and
         # scores move daily, so this runs every us-eod even with no new names.
         _sort_seen_by_rs_3m(us_seen_path, rs_table_3m)
-
-        # --- Write Repeat (old names that re-fired an event group today) ---
-        # These are already in the cross-day master, so they were dropped from
-        # their own group's .txt above. Read-only w.r.t. us_seen — writing them
-        # here neither consults nor mutates the master again.
-        if repeat_keys:
-            sorted_repeat = sorted(repeat_tickers)
-            repeat_stem = repeat_cfg.get("file_stem") or "Repeat"
-            dated = us_output_dir / f"{today}_{repeat_stem}.txt"
-            write_watchlist(sorted_repeat, dated, fmt)
-            logger.info(f"[Repeat] Total unique: {len(sorted_repeat)} -> {dated}")
-            _write_webull(sorted_repeat, dated, output_dir)
-            _futu_sync(config, "eod_repeat", sorted_repeat, "US")
-            _tv_sync(config, "eod_repeat", sorted_repeat, "US")
 
         # --- Write RS (only if it actually ran) ---
         # RS bypasses cross-day master dedup (eod_seen_US.txt) — see the
@@ -3070,15 +3120,27 @@ def main() -> int:
         _futu_sync(config, futu_key, sorted_tickers, "US")
         _tv_sync(config, futu_key, sorted_tickers, "US")
         fresh, promoted = _morning_gap_classify(
-            today, sorted_tickers, output_dir, is_pre
+            today, sorted_tickers, output_dir, is_pre, persist=False
         )
+        # Seen is written only after the push went out (False = a POST
+        # failed): the next scan then still sees these names as fresh and
+        # pushes them. The catalyst report waits with it, so a ticker is
+        # never analysed twice.
+        notified = True
         if fresh or promoted:
-            notify_morning_gap(
+            notified = notify_morning_gap(
                 fresh, offset, len(sorted_tickers), config, promoted=promoted,
                 all_tickers=sorted_tickers,
+            ) is not False
+        if notified:
+            _morning_gap_mark_seen(today, sorted_tickers, output_dir, is_pre)
+        else:
+            logger.warning(
+                "[Morning Gap] ntfy push failed — seen set not updated, "
+                "the next scan pushes these names again"
             )
 
-        if is_pre and fresh:
+        if is_pre and fresh and notified:
             snapshot_rows = _fetch_snapshot_rows(
                 fresh, futu_cfg=config.get("futu") or {}
             )
@@ -3139,12 +3201,23 @@ def main() -> int:
         _futu_sync(config, "hk_morning_gap", tv_tickers, "HK")
         _tv_sync(config, "hk_morning_gap", tv_tickers, "HK")
         fresh, _ = _morning_gap_classify(
-            today, tv_tickers, output_dir, is_pre=False, market="HK"
+            today, tv_tickers, output_dir, is_pre=False, market="HK",
+            persist=False,
         )
+        notified = True
         if fresh:
-            notify_morning_gap(
+            notified = notify_morning_gap(
                 fresh, offset, len(tv_tickers), config,
                 promoted=[], market="HK", all_tickers=tv_tickers,
+            ) is not False
+        if notified:
+            _morning_gap_mark_seen(
+                today, tv_tickers, output_dir, is_pre=False, market="HK"
+            )
+        else:
+            logger.warning(
+                "[HK Morning Gap] ntfy push failed — seen set not updated, "
+                "the next scan pushes these names again"
             )
 
         try:
