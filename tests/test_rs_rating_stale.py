@@ -151,6 +151,20 @@ def test_stale_table_is_polled_until_fresh(
     assert cache.read_text(encoding="utf-8") == _FRESH
 
 
+def test_wait_for_fresh_false_skips_the_poll(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, clock: _Clock
+) -> None:
+    """The cloud 3M job only needs the universe: no poll, no sleep."""
+    monkeypatch.setattr(rs_rating, "_fetch_reference_closes", lambda: _CLOSES)
+    calls = _serve(monkeypatch, [_STALE, _FRESH])
+
+    table = rs_rating.fetch_rs_table(tmp_path, "2026_10_27", wait_for_fresh=False)
+
+    assert table is not None and table["CART"] == 90
+    assert calls[0] == 1
+    assert clock.sleeps == []
+
+
 def test_stale_table_used_after_deadline_but_not_cached(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, clock: _Clock
 ) -> None:

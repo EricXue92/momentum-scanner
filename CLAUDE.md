@@ -200,7 +200,9 @@ k-line fetch.
   60 min, then gate on the stale table with a WARNING and do **not** cache
   it as `rs_rating_<today>.csv` (a rerun re-fetches). Any failure of the
   check itself (no Price column, yfinance down) → skipped, old behavior (use
-  + cache). **The `run_eod.sh` watchdog (`EOD_TIMEOUT`, 5400s) must stay
+  + cache). The cloud 3M job passes `wait_for_fresh=False` (it only needs
+  the universe; the poll ate its 60-min GH timeout → decisions 2026-11-12).
+  **The `run_eod.sh` watchdog (`EOD_TIMEOUT`, 5400s) must stay
   above this 60-min wait plus a full run** and logs an `[ERROR] [watchdog]`
   line when it fires; change `_STALE_MAX_WAIT_SEC` and `EOD_TIMEOUT`
   together (→ decisions 2026-10-27).

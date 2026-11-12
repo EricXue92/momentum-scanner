@@ -77,8 +77,12 @@ def main() -> int:
     today = _today()
     logger.info(f"[Cloud RS 3M] Starting compute for {today.isoformat()}")
 
-    # 1. Pull Fred6725 12M CSV for the universe.
-    rs_table_12m = fetch_rs_table(Path("/tmp"), today.strftime("%Y_%m_%d"))
+    # 1. Pull Fred6725 12M CSV for the universe. Only the ticker list is
+    # used, so a table one session behind is fine: do NOT poll for a fresh
+    # one (that 60-min wait is this job's whole GH timeout).
+    rs_table_12m = fetch_rs_table(
+        Path("/tmp"), today.strftime("%Y_%m_%d"), wait_for_fresh=False
+    )
     if not rs_table_12m:
         logger.error("[Cloud RS 3M] Fred6725 12M CSV unavailable — no universe to score")
         return 1

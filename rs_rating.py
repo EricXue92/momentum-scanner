@@ -231,12 +231,18 @@ def _wait_for_fresh_table(csv_text: str, timeout: float) -> tuple[str, bool]:
 
 
 def fetch_rs_table(
-    output_dir: Path, today: str, timeout: float = 30.0
+    output_dir: Path,
+    today: str,
+    timeout: float = 30.0,
+    *,
+    wait_for_fresh: bool = True,
 ) -> dict[str, int] | None:
     """Download rs_stocks.csv and return {ticker: percentile (0-99)}.
 
     A table behind the latest completed US session is polled for up to
-    _STALE_MAX_WAIT_SEC (`_wait_for_fresh_table`). Same-day re-runs are
+    _STALE_MAX_WAIT_SEC (`_wait_for_fresh_table`). `wait_for_fresh=False`
+    skips that poll for callers that only need the ticker universe (the
+    cloud 3M job: the wait ate its whole 60-min GH timeout). Same-day re-runs are
     offline (cached at output/state/rs_rating_<today>.csv; a table that
     stayed stale is not cached). Returns None on any failure
     (network, parse, missing columns) so callers can degrade gracefully.
@@ -286,7 +292,9 @@ def fetch_rs_table(
                 f"({age_days} day(s) old)"
             )
         else:
-            csv_text, cacheable = _wait_for_fresh_table(csv_text, timeout)
+            cacheable = True
+            if wait_for_fresh:
+                csv_text, cacheable = _wait_for_fresh_table(csv_text, timeout)
             if cacheable:
                 try:
                     cache_path.parent.mkdir(parents=True, exist_ok=True)

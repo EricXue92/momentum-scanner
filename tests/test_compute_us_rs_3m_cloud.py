@@ -189,3 +189,17 @@ def test_a_1m_scoring_failure_does_not_cost_the_3m_table(tmp_path, monkeypatch):
     out = pd.read_csv(tmp_path / "2026-11-04.csv", index_col="ticker")
     assert "rs_percentile" in out.columns
     assert "rs_percentile_1m" not in out.columns
+
+
+def test_universe_fetch_does_not_wait_for_a_fresh_table(monkeypatch):
+    """2026-11-11/12: the freshness poll (<= 60 min) consumed the job's
+    60-min GH timeout, so no 3M table was published before us-eod."""
+    seen: dict = {}
+
+    def fake_fetch(*a, **kw):
+        seen.update(kw)
+        return None
+
+    monkeypatch.setattr(cloud, "fetch_rs_table", fake_fetch)
+    assert cloud.main() == 1
+    assert seen.get("wait_for_fresh") is False

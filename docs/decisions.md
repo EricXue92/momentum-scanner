@@ -219,6 +219,14 @@ mid-poll (rs-log published 10:42 HKT) with nothing in the python log →
 `EOD_TIMEOUT` 5400s, an `[ERROR] [watchdog]` log line, and the rule that
 `_STALE_MAX_WAIT_SEC` and `EOD_TIMEOUT` change together. — RS gating.
 
+### 2026-11-12 — the cloud 3M job must not wait for a fresh 12M table
+`compute_us_rs_3m_cloud.py` calls `fetch_rs_table` only for the ticker
+universe, but inherited the 60-min freshness poll: the 08:45 HKT dispatches
+on 11-11 and 11-12 polled 55 min, then hit the job's `timeout-minutes: 60`
+at k-line batch 30/60 (`conclusion=cancelled`), and us-eod fell back to the
+previous day's 3M CSV. → `fetch_rs_table(wait_for_fresh=False)` in the cloud
+script (default True: local us-eod unchanged). — RS gating.
+
 ### 2026-10-31 — per-ETF strongest-holdings line
 `etf_holdings_rs.py`: stockanalysis free tier gives the top 25 holdings
 ("Showing 25 of 78 holdings"), accepted as the source with yfinance top-10 as
