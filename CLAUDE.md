@@ -135,8 +135,8 @@ uv run pytest tests/ -v             # `uv run python -m pytest` works too
 ## RS gating
 
 Percentile tables are computed daily on **GitHub Actions** and published as CSVs;
-the local pipeline only fetches them. US: `Fred6725/rs-log` (12M, vs SPY) +
-`data/us_rs_3m/` (3M). HK: `data/hk_rs/` (12M+3M, vs HSI). Thresholds: 12M
+the local pipeline only fetches them. US: `data/us_rs_12m/` (12M, vs SPY) +
+`data/us_rs_3m/` (3M), one job, one ~18mo download (→ decisions 2026-11-14). HK: `data/hk_rs/` (12M+3M, vs HSI). Thresholds: 12M
 tiers 90, 3M tiers 90 in both markets (Leaders / conditional RS / Shorts /
 IPO ≥ 64 rows; US `[settings].min_rs_percentile_3m`, HK
 `[hk_settings].min_rs_percentile_longs_3m` + `[hk_shorts].min_rs_percentile_3m`;
@@ -172,15 +172,26 @@ k-line fetch.
 - **Do NOT make fetch failure hard-fail:** walk back ≤ 3 days of stale cache, then
   pass through (no gate) with a warning. Tickers **missing** from the table are
   KEPT, not dropped.
-- **12M table freshness** (`rs_rating._wait_for_fresh_table`): the CSV has
-  no date, so its `Price` column is matched against raw yfinance closes of 5
-  mega caps (`table_data_session`). Behind the latest completed session (a
+- **US 12M table is our own** (`us_rs_12m.py`, formula = Fred6725's
+  `rs_ranking.py`, verified equal to 2 dp on the same session). Three
+  things differ from upstream on purpose and must stay: stocks are aligned
+  to SPY's calendar **by date**, not tail position; the universe is the
+  nasdaqtrader list filtered by **security name** (`is_common_equity` — no
+  per-ticker Yahoo `.info`); and the cloud job **publishes nothing** (3M
+  included) unless SPY's last bar is `expected_session()` and ≤ 10% of the
+  universe still lacks that bar after one re-fetch. The download uses a
+  relative `period` — never `end=today` (exclusive, drops the day's close).
+  The file is named by run date; the `Session` column is the data day.
+- **12M table freshness** (`rs_rating._wait_for_fresh_table`): the table's
+  `Session` column (`table_data_session`) is compared with the latest
+  completed session in the yfinance closes of 5 mega caps. `_download_csv`
+  serves today's file or walks back ≤ 3 days (a 404 is not retried), so a
+  late cloud job shows up as an older `Session`. Behind the latest completed session (a
   partial bar during US hours doesn't count) → re-fetch every 5 min for ≤
   60 min, then gate on the stale table with a WARNING and do **not** cache
   it as `rs_rating_<today>.csv` (a rerun re-fetches). Any failure of the
-  check itself (no Price column, yfinance down) → skipped, old behavior (use
-  + cache). The cloud 3M job passes `wait_for_fresh=False` (it only needs
-  the universe; the poll ate its 60-min GH timeout → decisions 2026-11-12).
+  check itself (no Session column — a cached rs-log file —, yfinance down)
+  → skipped, old behavior (use + cache).
   **The `run_eod.sh` watchdog (`EOD_TIMEOUT`, 5400s) must stay
   above this 60-min wait plus a full run** and logs an `[ERROR] [watchdog]`
   line when it fires; change `_STALE_MAX_WAIT_SEC` and `EOD_TIMEOUT`

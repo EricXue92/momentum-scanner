@@ -14,7 +14,7 @@ min_adr_percent = 4.0
 adr_days = 20
 
 # 美股 IBD RS 闸门 (0-99 百分位, vs SPY)
-# 数据源: Fred6725/rs-log/output/rs_stocks.csv (工作日 ~01:30 UTC 刷新)。
+# 数据源: 本仓库云端任务发布的 data/us_rs_12m/<日期>.csv (us_rs_12m.py; 2026-11-14 前为 Fred6725/rs-log)。
 # 表中没有的票 (新 IPO / 外国挂牌) 保留不删。任一阈值设 0 关闭该层
 # (12M 两个都为 0 才跳过 GitHub 拉取; 3M 设 0 跳过 yfinance batch)。
 # 作用范围 (12M ∩ 3M 双闸):

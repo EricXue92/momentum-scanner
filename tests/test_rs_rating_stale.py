@@ -1,11 +1,10 @@
 """12M RS table staleness: detect a table one session behind, poll for the
 fresh one, and never cache a stale table as today's.
 
-rs-log publishes `rs_stocks.csv` between ~01:30Z and ~04:00Z; us-eod fetches
-at ~02:00Z, so in 2026-10 it got the previous session's table on 14/19 days
-(CART 2026-10-27: gated on 10-23 data at 90 while the 10-26 table said 94).
-The CSV has no date column; its `Price` column is the session close, which
-is matched against yfinance closes of a few mega caps.
+The published table carries the `Session` its closes belong to. us-eod can
+run before today's file is published (cloud job late or failed), in which
+case the walk-back serves the previous file — CART 2026-10-27 was gated on
+10-23 data at 90 while the 10-26 table said 94 (then with rs-log as source).
 """
 
 from __future__ import annotations
@@ -21,7 +20,7 @@ import rs_rating
 
 _ET = ZoneInfo("America/New_York")
 
-# Raw closes of the reference tickers (yfinance auto_adjust=False).
+# Closes of the reference tickers (only the dates matter).
 _CLOSES = pd.DataFrame(
     {
         "AAPL": [348.22, 347.73, 343.91],
@@ -35,13 +34,12 @@ _CLOSES = pd.DataFrame(
 
 
 def _csv(session: str) -> str:
-    """rs_stocks.csv slice whose Price column is `session`'s close."""
-    row = _CLOSES.loc[session]
-    lines = ["Rank,Ticker,Percentile,Price"]
+    """Published-table slice for `session`."""
+    lines = ["Ticker,Relative Strength,Percentile,Session"]
     for i, t in enumerate(_CLOSES.columns):
-        lines.append(f"{i + 1},{t},{90 + i},{row[t]}")
+        lines.append(f"{t},{150 - i},{90 + i},{session}")
     pct = 94 if session == "2026-10-26" else 90
-    lines.append(f"99,CART,{pct},1.0")
+    lines.append(f"CART,120.5,{pct},{session}")
     return "\n".join(lines) + "\n"
 
 
@@ -103,20 +101,18 @@ def _serve(monkeypatch: pytest.MonkeyPatch, bodies: list[str]) -> list[int]:
 # --- table_data_session -------------------------------------------------------
 
 
-def test_data_session_is_the_date_whose_closes_match_price() -> None:
-    assert rs_rating.table_data_session(_STALE, _CLOSES) == date(2026, 10, 23)
-    assert rs_rating.table_data_session(_FRESH, _CLOSES) == date(2026, 10, 26)
+def test_data_session_is_the_session_column() -> None:
+    assert rs_rating.table_data_session(_STALE) == date(2026, 10, 23)
+    assert rs_rating.table_data_session(_FRESH) == date(2026, 10, 26)
 
 
-def test_data_session_none_without_price_column() -> None:
-    assert rs_rating.table_data_session("Ticker,Percentile\nAAPL,95\n", _CLOSES) is None
+def test_data_session_none_without_session_column() -> None:
+    """A cached rs-log file from before the switch has no Session."""
+    assert rs_rating.table_data_session("Ticker,Percentile\nAAPL,95\n") is None
 
 
-def test_data_session_none_when_no_close_matches() -> None:
-    off = _STALE.replace("347.73", "1.0").replace("524.51", "1.0").replace(
-        "210.96", "1.0"
-    ).replace("248.0", "1.0").replace("320.21", "1.0")
-    assert rs_rating.table_data_session(off, _CLOSES) is None
+def test_data_session_none_when_unparseable() -> None:
+    assert rs_rating.table_data_session("Ticker,Percentile,Session\nAAPL,95,soon\n") is None
 
 
 # --- completed sessions -------------------------------------------------------
@@ -154,7 +150,6 @@ def test_stale_table_is_polled_until_fresh(
 def test_wait_for_fresh_false_skips_the_poll(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, clock: _Clock
 ) -> None:
-    """The cloud 3M job only needs the universe: no poll, no sleep."""
     monkeypatch.setattr(rs_rating, "_fetch_reference_closes", lambda: _CLOSES)
     calls = _serve(monkeypatch, [_STALE, _FRESH])
 
@@ -204,10 +199,10 @@ def test_unavailable_reference_closes_skip_the_check(
     assert (tmp_path / "state" / "rs_rating_2026_10_27.csv").exists()
 
 
-def test_table_without_reference_prices_skips_yfinance(
+def test_table_without_session_skips_yfinance(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, clock: _Clock
 ) -> None:
-    """Nothing to match → don't pay for (or depend on) a yfinance call."""
+    """Nothing to compare → don't pay for (or depend on) a yfinance call."""
 
     fetched = []
     monkeypatch.setattr(
@@ -252,3 +247,77 @@ def test_refetch_failure_while_polling_keeps_the_stale_table(
     table = rs_rating.fetch_rs_table(tmp_path, "2026_10_27")
     assert table is not None and table["CART"] == 90
     assert not (tmp_path / "state" / "rs_rating_2026_10_27.csv").exists()
+
+
+# --- dated files: walk back when today's is not published -------------------
+
+
+def _serve_by_date(monkeypatch: pytest.MonkeyPatch, published: dict[str, str]) -> list[str]:
+    """urlopen serves `published[<YYYY-MM-DD>]`, 404 for any other date.
+    Returns the list of requested dates."""
+    from urllib.error import HTTPError
+
+    asked: list[str] = []
+
+    def _urlopen(req, *_a, **_k):
+        day = req.full_url.rsplit("/", 1)[1].removesuffix(".csv")
+        asked.append(day)
+        if day not in published:
+            raise HTTPError(req.full_url, 404, "Not Found", None, None)
+        return _Resp(published[day])
+
+    monkeypatch.setattr(rs_rating, "urlopen", _urlopen)
+    return asked
+
+
+def test_url_is_this_repos_dated_12m_file() -> None:
+    url = rs_rating.RS_CSV_URL_TEMPLATE.format(date="2026-10-27")
+    assert url.endswith("EricXue92/momentum-scanner/main/data/us_rs_12m/2026-10-27.csv")
+
+
+def test_missing_todays_file_walks_back_without_retry_sleeps(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, clock: _Clock
+) -> None:
+    """A holiday: nothing published today, yesterday's file IS the latest
+    session → used and cached, no poll, and a 404 is not retried."""
+    monkeypatch.setattr(rs_rating, "_fetch_reference_closes", lambda: _CLOSES)
+    asked = _serve_by_date(monkeypatch, {"2026-10-27": _FRESH})
+
+    table = rs_rating.fetch_rs_table(tmp_path, "2026_10_28")
+
+    assert table is not None and table["CART"] == 94
+    assert asked == ["2026-10-28", "2026-10-27"]
+    assert clock.sleeps == []
+    assert (tmp_path / "state" / "rs_rating_2026_10_28.csv").exists()
+
+
+def test_late_publication_is_picked_up_by_the_poll(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, clock: _Clock
+) -> None:
+    monkeypatch.setattr(rs_rating, "_fetch_reference_closes", lambda: _CLOSES)
+    published = {"2026-10-26": _STALE}
+    _serve_by_date(monkeypatch, published)
+    real_sleep = clock.sleep
+
+    def _sleep_then_publish(s: float) -> None:
+        real_sleep(s)
+        published["2026-10-27"] = _FRESH
+
+    monkeypatch.setattr(rs_rating.time, "sleep", _sleep_then_publish)
+
+    table = rs_rating.fetch_rs_table(tmp_path, "2026_10_27")
+
+    assert table is not None and table["CART"] == 94
+    assert clock.sleeps == [rs_rating._STALE_POLL_SEC]
+
+
+def test_nothing_published_in_window_falls_back_to_local_cache(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, clock: _Clock
+) -> None:
+    state = tmp_path / "state"
+    state.mkdir()
+    (state / "rs_rating_2026_10_26.csv").write_text("Ticker,Percentile\nAAPL,95\n")
+    asked = _serve_by_date(monkeypatch, {})
+
+    assert rs_rating.fetch_rs_table(tmp_path, "2026_10_27") == {"AAPL": 95}
+    assert len(asked) == rs_rating._PUBLISHED_MAX_AGE_DAYS + 1

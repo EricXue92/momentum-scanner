@@ -2512,7 +2512,7 @@ def main() -> int:
     # each falling back to min_rs_percentile_longs when unset.
     # min_rs_percentile_3m adds a 3M layer on Leaders / RS group / Shorts
     # (double gate). Any knob = 0 disables that tier.
-    # 12M source: Fred6725/rs-log (refreshed weekday ~01:30 UTC).
+    # 12M source: data/us_rs_12m/<date>.csv, published by this repo's cloud job.
     min_rs_percentile = settings.get("min_rs_percentile", 0)
     min_rs_percentile_longs = settings.get("min_rs_percentile_longs", 0)
     min_rs_percentile_rs = settings.get("min_rs_percentile_rs", min_rs_percentile_longs)
@@ -2652,7 +2652,7 @@ def main() -> int:
 
         # --- IBD-style 3M RS table (local, vs SPY) ---
         # Built once per run. Triggered only when the 3M knob is non-zero.
-        # Universe = Fred6725 12M table's tickers (~6100). Cached to
+        # Universe = the cloud job's nasdaqtrader list (~5900). Cached to
         # state/rs_rating_3m_<date>.csv with raw_score column for IPO
         # ladder out-of-universe percentile lookup.
         import us_rs_3m  # local import: us_rs_3m imports main._yf_download_with_retry

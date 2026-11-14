@@ -1,12 +1,12 @@
 # US 3M Relative Strength — Published Tables
 
-Daily IBD-style 3-month RS percentiles for the US universe (~5878 tickers), published by `.github/workflows/update_us_rs_3m.yml` every weekday at 01:00 UTC.
+Daily IBD-style 3-month RS percentiles for the US universe (~5900 tickers), published by `.github/workflows/update_us_rs_3m.yml` every weekday at 01:00 UTC. The same job publishes the 12-month table to `data/us_rs_12m/`.
 
 ## Why this directory exists
 
 Computing the full 3M RS table locally on a home IP gets throttled by Yahoo Finance after ~2000 tickers (rolling IP-cumulative limit, not solvable by `curl_cffi` browser fingerprinting alone). GitHub Actions runners get fresh Azure-pool IPs per run, so the compute runs reliably there.
 
-This mirrors how we already consume Fred6725's 12-month RS CSV — local pipeline reads, cloud pipeline writes.
+Local pipeline reads, cloud pipeline writes. The job downloads ~18 months once (for the 12M table) and scores this table on the last 6 months.
 
 ## Schema
 

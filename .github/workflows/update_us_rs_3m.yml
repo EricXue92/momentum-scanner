@@ -1,4 +1,4 @@
-name: Update US 3M RS Table
+name: Update US RS Tables (3M + 12M)
 
 on:
   schedule:
@@ -11,7 +11,7 @@ permissions:
 jobs:
   build-3m-table:
     runs-on: ubuntu-latest
-    timeout-minutes: 60        # Fred6725 budget is 90 for 6800; ours is ~5900
+    timeout-minutes: 60        # ~5900 tickers x 18mo; a lagging SPY adds <= 15 min of retries
 
     steps:
       - uses: actions/checkout@v4
@@ -27,22 +27,25 @@ jobs:
       - name: Verify curl_cffi active
         run: uv run python -c "import curl_cffi; import yfinance; print('curl_cffi', curl_cffi.__version__, '/ yfinance', yfinance.__version__)"
 
-      - name: Compute 3M RS table
+      - name: Compute 3M + 12M RS tables
         run: uv run python scripts/compute_us_rs_3m_cloud.py
 
       - name: Prune old CSVs (keep last 4 days)
-        run: uv run python scripts/prune_old_data.py data/us_rs_3m --keep 4
+        run: |
+          uv run python scripts/prune_old_data.py data/us_rs_3m --keep 4
+          mkdir -p data/us_rs_12m
+          uv run python scripts/prune_old_data.py data/us_rs_12m --keep 4
 
       - name: Commit and push
         run: |
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git config user.name "github-actions[bot]"
-          git add data/us_rs_3m/
+          git add data/us_rs_3m/ data/us_rs_12m/
           if git diff --staged --quiet; then
             echo "Nothing to commit (script failed or produced no new file)"
             exit 0
           fi
-          git commit -m "chore(us_rs_3m): publish $(date -u +%Y-%m-%d) table"
+          git commit -m "chore(us_rs): publish $(date -u +%Y-%m-%d) tables"
           # Retry with rebase if main moved during our ~14-min compute window.
           # A concurrent run (the launchd self-trigger + the GH cron kept as
           # belt-and-suspenders) may have already published today's dated CSV,

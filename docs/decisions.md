@@ -272,6 +272,33 @@ The three items first left open were done the same day:
   for the names at the price / dollar-volume floors (`_yf_caps_fallback`,
   ≤ 400 names); otherwise an ERROR that says the lists will be empty.
 
+### 2026-11-14 — US 12M RS computed here, not taken from Fred6725/rs-log
+rs-log had become the least reliable input: it published later every month
+(→ 2026-11-07), 7 of its last 45 publications were a session behind, on 09-18
+about half the universe was on the new close and half on the old, and on
+11-14 its table still held the 11-10 close. → the 3M cloud job now downloads
+~18 months once and publishes `data/us_rs_12m/<date>.csv` too
+(`us_rs_12m.py`); `rs_rating.py` reads that. Formula unchanged
+(0.4/0.2/0.2/0.2 over 63/126/189/252 sessions, `(1+stock)/(1+SPY)×100`,
+`qcut(100)`, drop < 120 bars and RS ≥ 590): on 290 sampled tickers cut to
+upstream's 11-10 session the RS values are identical to 2 dp.
+Upstream traps avoided: (1) `yf.download(end=date.today())` is exclusive →
+a relative `period="18mo"`; (2) Yahoo sometimes lacks the latest bar → SPY
+must end on `expected_session()` (small NYSE holiday calendar; 3 retries × 5
+min), stale tickers are re-fetched once, > 10% still stale → nothing is
+published, and the CSV carries a `Session` column that replaces the local
+Price-matching check; (3) tail-position alignment → every stock is reindexed
+onto SPY's dates (gaps carry the previous close; a name > 5 sessions behind
+is not ranked). Universe: nasdaqtrader `nasdaqtraded.txt`, non-ETF, alpha-only
+symbols, then a **security-name filter** instead of upstream's "sector and
+industry both missing" rule (user decision): that rule needs a Yahoo `.info`
+call per ticker and, measured on the 11-14 list, was not what it claimed — it
+kept ~360 SPAC units / preferreds and dropped real stocks (FISV, LION). The
+name filter leaves ~5900 of 6929; percentiles therefore differ slightly from
+upstream's. The 3M table moved to the same universe and is still scored on
+the last 6 months. Not done: BRK.B-style class shares stay out (upstream's
+alpha-only rule; kept-as-missing by the gate). — RS gating.
+
 ### 2026-10-31 — per-ETF strongest-holdings line
 `etf_holdings_rs.py`: stockanalysis free tier gives the top 25 holdings
 ("Showing 25 of 78 holdings"), accepted as the source with yfinance top-10 as

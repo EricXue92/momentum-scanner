@@ -43,8 +43,8 @@
 | Finviz                   | 美股選股 discovery(所有掃描都加 `ind_stocksonly`,不含 ETF/ETN)                                                |
 | yfinance                 | 日線——dollar volume、ADR%、Rel Vol、SMA、漲幅;港股 k 線 + HSI 歷史;ETF 排名                                   |
 | Futu OpenD               | Morning Gap 快照(美股 + 港股)、精確市值、HSI 當日漲跌、自選分組同步                                           |
-| GitHub Actions → `data/` | RS 百分位表(美股 3M、港股 12M+3M)與港股 metrics frame——家用 IP 跑 yfinance 會被限流,所以放雲端計算,本地只拉取 |
-| Fred6725/rs-log          | 美股 12M IBD 式 RS 百分位                                                                                     |
+| GitHub Actions → `data/` | RS 百分位表(美股 12M+3M、港股 12M+3M)與港股 metrics frame——家用 IP 跑 yfinance 會被限流,所以放雲端計算,本地只拉取 |
+| nasdaqtrader.com         | 美股 RS 股票池(`nasdaqtraded.txt`,按證券名稱過濾出普通股)                                                  |
 | HKEX 股票名單            | 港股主板 universe(約 2,400 隻)                                                                                |
 
 結果寫成帶日期的 `.txt` 自選列表(TradingView 用逗號分隔,Webull 用換行分隔),並自動同步到 Futu 分組;TradingView 列表同步為可選項。LLM 研究報告可按需手動生成([每日自動生成已關閉](#llm-報告))。
@@ -265,8 +265,8 @@ Kullamägi 的拋物線衝頂做空 setup。每天重新檢出(不參與任何�
 
 | 表       | 公式                                               | 基準 | 發佈位置                                                                            |
 | -------- | -------------------------------------------------- | ---- | ----------------------------------------------------------------------------------- |
-| 美股 12M | `0.4·P3 + 0.2·P6 + 0.2·P9 + 0.2·P12`               | SPY  | [Fred6725/rs-log](https://github.com/Fred6725/relative-strength)(工作日 ~01:30 UTC) |
-| 美股 3M  | `0.5·R21 + 0.3·R42 + 0.2·R63`,universe 約 6,100 隻 | SPY  | `data/us_rs_3m/<date>.csv`(GitHub Actions)                                          |
+| 美股 12M | `0.4·P3 + 0.2·P6 + 0.2·P9 + 0.2·P12`               | SPY  | `data/us_rs_12m/<date>.csv`(GitHub Actions,與 3M 同一任務)                         |
+| 美股 3M  | `0.5·R21 + 0.3·R42 + 0.2·R63`,universe 約 5,900 隻 | SPY  | `data/us_rs_3m/<date>.csv`(GitHub Actions)                                          |
 | 港股     | 兩條公式都算,在港股主板內部排名                    | HSI  | `data/hk_rs/<date>.csv`(GitHub Actions)                                             |
 
 本地流水線只拉取這些 CSV(緩存在 `output/state/`,拉不到就回退最多 3 天)。GitHub 自帶的 cron 不可靠,所以由 launchd 在每次 EOD 前 75 分鐘主動觸發 workflow——見[自動化](#自動化)。

@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """IBD-style Relative Strength Rating fetcher.
 
-Pulls the daily-published RS percentile table from Fred6725/rs-log
-(itself the GitHub-Actions output of Fred6725/relative-strength) and
-exposes a filter helper for the EOD pipeline.
+Pulls the daily 12M RS percentile table this repo's own GitHub Actions job
+publishes (`data/us_rs_12m/<date>.csv`, computed by `us_rs_12m.py` in
+`.github/workflows/update_us_rs_3m.yml`; until 2026-11-14 the source was
+Fred6725/rs-log) and exposes a filter helper for the EOD pipeline.
 
 The .txt files remain the primary artifact — RS is an extra screen on
 top of Finviz output. If the CSV cannot be fetched, every filter call
@@ -17,16 +18,23 @@ import http.client
 import io
 import logging
 import time
-from collections import Counter
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
-from urllib.error import URLError
+from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo
 
 logger = logging.getLogger(__name__)
 
-RS_CSV_URL = "https://raw.githubusercontent.com/Fred6725/rs-log/main/output/rs_stocks.csv"
+# Cloud-published CSV, one file per run date (UTC date of the GH runner,
+# which is the HKT date of the us-eod that consumes it). Columns: Ticker,
+# Relative Strength, Percentile, Session.
+RS_CSV_URL_TEMPLATE = (
+    "https://raw.githubusercontent.com/EricXue92/momentum-scanner/main/"
+    "data/us_rs_12m/{date}.csv"
+)
+# Today's file not published yet (job late / failed / holiday) → walk back.
+_PUBLISHED_MAX_AGE_DAYS = 3
 
 # Retry schedule for the HTTPS GET. The launchd run fires shortly after a
 # pmset-driven wake, where Wi-Fi / DNS sometimes isn't ready for the first
@@ -40,15 +48,14 @@ _FETCH_RETRY_DELAYS = (10.0, 30.0)
 # "no gate" more honest than "wrong gate".
 _FALLBACK_MAX_AGE_DAYS = 3
 
-# Staleness check. rs-log publishes between ~01:30Z and ~04:00Z and us-eod
-# fetches at ~02:00Z, so in 2026-10 it got the previous session's table on
-# 14/19 days. The CSV has no date column; its `Price` is the session close,
-# matched against these mega caps' raw yfinance closes. A table behind the
-# latest completed session is re-fetched every _STALE_POLL_SEC (also rides
-# out raw.githubusercontent's ~5 min CDN cache) for up to _STALE_MAX_WAIT_SEC,
-# then used anyway with a WARNING but never cached as today's.
+# Staleness check. The table carries the `Session` its closes belong to;
+# that is compared with the latest completed session seen in these mega
+# caps' yfinance closes. A table behind it (today's file not published yet,
+# so the walk-back served an older one) is re-fetched every _STALE_POLL_SEC
+# (also rides out raw.githubusercontent's ~5 min CDN cache) for up to
+# _STALE_MAX_WAIT_SEC, then used anyway with a WARNING but never cached as
+# today's.
 _REFERENCE_TICKERS = ("AAPL", "MSFT", "NVDA", "AMZN", "GOOGL")
-_PRICE_MATCH_REL_TOL = 0.001
 _STALE_POLL_SEC = 300.0
 _STALE_MAX_WAIT_SEC = 3600.0
 _ET = ZoneInfo("America/New_York")
@@ -98,9 +105,8 @@ def _find_fallback_cache(
 
 
 def _fetch_reference_closes():
-    """Raw daily closes (auto_adjust=False — the table's Price is unadjusted)
-    of _REFERENCE_TICKERS over the last ~10 days, or None. Indirection so
-    tests can monkeypatch it."""
+    """Daily closes of _REFERENCE_TICKERS over the last ~10 days (only the
+    dates are used), or None. Indirection so tests can monkeypatch it."""
     from main import _yf_download_with_retry  # lazy: main imports rs_rating
 
     data = _yf_download_with_retry(
@@ -122,66 +128,82 @@ def latest_completed_session(closes, now_et: datetime | None = None) -> date | N
     return max(dates) if dates else None
 
 
-def _reference_prices(csv_text: str) -> dict[str, float]:
-    """{ticker: Price} of the _REFERENCE_TICKERS rows; empty when the table
-    has no usable Price column."""
-    prices: dict[str, float] = {}
+def table_data_session(csv_text: str) -> date | None:
+    """The session the table's closes belong to (its `Session` column), or
+    None when undeterminable (a pre-2026-11-14 rs-log cache has no such
+    column)."""
+    sessions: set[date] = set()
     try:
         for row in csv.DictReader(io.StringIO(csv_text)):
-            t = (row.get("Ticker") or "").strip().upper()
-            if t in _REFERENCE_TICKERS:
-                try:
-                    prices[t] = float(row.get("Price") or "")
-                except ValueError:
-                    continue
+            raw = (row.get("Session") or "").strip()
+            if not raw:
+                return None
+            try:
+                sessions.add(date.fromisoformat(raw))
+            except ValueError:
+                return None
     except csv.Error:
-        return {}
-    return prices
-
-
-def table_data_session(csv_text: str, closes) -> date | None:
-    """Session whose reference closes match the table's `Price` column
-    (majority vote over _REFERENCE_TICKERS), or None when undeterminable."""
-    prices = _reference_prices(csv_text)
-    votes: Counter[date] = Counter()
-    for t, price in prices.items():
-        if t not in closes.columns:
-            continue
-        for ts, close in closes[t].dropna().items():
-            if abs(close - price) <= _PRICE_MATCH_REL_TOL * close:
-                votes[ts.date()] += 1
-    if not votes:
         return None
-    session, n = votes.most_common(1)[0]
-    return session if n * 2 > len(prices) else None
+    return max(sessions) if sessions else None
 
 
-def _download_csv(timeout: float, retry_delays: tuple[float, ...]) -> str:
-    """GET RS_CSV_URL with retries; raises the last error on failure."""
-    req = Request(RS_CSV_URL, headers={"User-Agent": "momentum-scanner/1.0"})
+def _get(url: str, timeout: float, retry_delays: tuple[float, ...]) -> str | None:
+    """GET one URL with retries. None on 404 (not published); raises the
+    last error otherwise."""
+    req = Request(url, headers={"User-Agent": "momentum-scanner/1.0"})
     attempts = len(retry_delays) + 1
     for i in range(attempts):
         try:
             with urlopen(req, timeout=timeout) as resp:
                 return resp.read().decode("utf-8")
+        except HTTPError as e:
+            if e.code == 404:
+                return None
+            if i == attempts - 1:
+                raise
+            err: Exception = e
         except _FETCH_ERRORS as e:
             if i == attempts - 1:
                 raise
-            delay = retry_delays[i]
-            logger.warning(
-                f"[RS Rating] Fetch attempt {i + 1}/{attempts} failed "
-                f"({e}); retrying in {delay:.0f}s"
-            )
-            time.sleep(delay)
+            err = e
+        delay = retry_delays[i]
+        logger.warning(
+            f"[RS Rating] Fetch attempt {i + 1}/{attempts} failed "
+            f"({err}); retrying in {delay:.0f}s"
+        )
+        time.sleep(delay)
     raise AssertionError("unreachable")
 
 
-def _wait_for_fresh_table(csv_text: str, timeout: float) -> tuple[str, bool]:
+def _download_csv(today: str, timeout: float, retry_delays: tuple[float, ...]) -> str:
+    """Newest published table: `today`'s file (YYYY_MM_DD), else walk back
+    up to _PUBLISHED_MAX_AGE_DAYS. Raises on a network failure or when no
+    file is published in that window."""
+    day = datetime.strptime(today, "%Y_%m_%d").date()
+    for delta in range(_PUBLISHED_MAX_AGE_DAYS + 1):
+        target = day - timedelta(days=delta)
+        text = _get(RS_CSV_URL_TEMPLATE.format(date=target.isoformat()), timeout, retry_delays)
+        if text is None:
+            continue
+        if delta:
+            logger.info(
+                f"[RS Rating] No table published for {day.isoformat()} yet; "
+                f"got {target.isoformat()}"
+            )
+        return text
+    raise URLError(
+        f"no 12M table published within {_PUBLISHED_MAX_AGE_DAYS} days of {day.isoformat()} "
+        "(check https://github.com/EricXue92/momentum-scanner/actions)"
+    )
+
+
+def _wait_for_fresh_table(csv_text: str, today: str, timeout: float) -> tuple[str, bool]:
     """Return (csv_text, cacheable). Polls while the table is behind the
     latest completed session; cacheable is False only when it never caught
     up. Any failure of the check itself → (csv_text, True), as before."""
-    if not _reference_prices(csv_text):
-        logger.warning("[RS Rating] Freshness check skipped (no reference prices in table)")
+    session = table_data_session(csv_text)
+    if session is None:
+        logger.warning("[RS Rating] Freshness check skipped (table has no Session column)")
         return csv_text, True
     try:
         closes = _fetch_reference_closes()
@@ -192,12 +214,8 @@ def _wait_for_fresh_table(csv_text: str, timeout: float) -> tuple[str, bool]:
         logger.warning("[RS Rating] Freshness check skipped (no reference closes)")
         return csv_text, True
     latest = latest_completed_session(closes)
-    session = table_data_session(csv_text, closes)
-    if latest is None or session is None:
-        logger.warning(
-            f"[RS Rating] Freshness check skipped (table session={session}, "
-            f"latest session={latest})"
-        )
+    if latest is None:
+        logger.warning("[RS Rating] Freshness check skipped (no completed session in closes)")
         return csv_text, True
     if session >= latest:
         logger.info(f"[RS Rating] Table is current (session {session})")
@@ -212,11 +230,11 @@ def _wait_for_fresh_table(csv_text: str, timeout: float) -> tuple[str, bool]:
     while time.monotonic() - start + _STALE_POLL_SEC <= _STALE_MAX_WAIT_SEC:
         time.sleep(_STALE_POLL_SEC)
         try:
-            text = _download_csv(timeout, ())
+            text = _download_csv(today, timeout, ())
         except _FETCH_ERRORS as e:
             logger.warning(f"[RS Rating] Re-fetch failed ({e}); still waiting")
             continue
-        new_session = table_data_session(text, closes)
+        new_session = table_data_session(text)
         if new_session is not None and new_session >= latest:
             waited = (time.monotonic() - start) / 60
             logger.info(
@@ -237,12 +255,11 @@ def fetch_rs_table(
     *,
     wait_for_fresh: bool = True,
 ) -> dict[str, int] | None:
-    """Download rs_stocks.csv and return {ticker: percentile (0-99)}.
+    """Download the published 12M table and return {ticker: percentile (0-99)}.
 
     A table behind the latest completed US session is polled for up to
     _STALE_MAX_WAIT_SEC (`_wait_for_fresh_table`). `wait_for_fresh=False`
-    skips that poll for callers that only need the ticker universe (the
-    cloud 3M job: the wait ate its whole 60-min GH timeout). Same-day re-runs are
+    skips that poll. Same-day re-runs are
     offline (cached at output/state/rs_rating_<today>.csv; a table that
     stayed stale is not cached). Returns None on any failure
     (network, parse, missing columns) so callers can degrade gracefully.
@@ -261,8 +278,8 @@ def fetch_rs_table(
         attempts = len(_FETCH_RETRY_DELAYS) + 1
         last_err: Exception | None = None
         try:
-            csv_text = _download_csv(timeout, _FETCH_RETRY_DELAYS)
-        except _FETCH_ERRORS as e:
+            csv_text = _download_csv(today, timeout, _FETCH_RETRY_DELAYS)
+        except (*_FETCH_ERRORS, ValueError) as e:  # ValueError: unparseable `today`
             last_err = e
         if csv_text is None:
             logger.warning(
@@ -294,7 +311,7 @@ def fetch_rs_table(
         else:
             cacheable = True
             if wait_for_fresh:
-                csv_text, cacheable = _wait_for_fresh_table(csv_text, timeout)
+                csv_text, cacheable = _wait_for_fresh_table(csv_text, today, timeout)
             if cacheable:
                 try:
                     cache_path.parent.mkdir(parents=True, exist_ok=True)

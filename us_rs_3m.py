@@ -1,8 +1,9 @@
 """Local IBD-style Relative Strength percentile for the US universe (3-month).
 
-Complements `rs_rating.py` (Fred6725-CSV-based 12-month RS) with a locally
-computed short-window layer benchmarked against SPY. Universe is the same
-~6100 tickers as `rs_rating.py` (Fred6725 CSV); SPY k-line comes from yfinance.
+Complements the 12-month table (`us_rs_12m.py`, read via `rs_rating.py`) with
+a short-window layer benchmarked against SPY. Both are computed by the same
+cloud job on the same universe (~5900 nasdaqtrader common-equity tickers,
+`us_rs_12m.fetch_universe`); SPY k-line comes from yfinance.
 
 The 3M table is consumed twice:
   1. Long-side 3M gate on Leaders / conditional RS / Shorts
@@ -107,7 +108,7 @@ def compute_us_rs_3m_table(
     Tickers without enough history (< max lookback + 1 rows; 64 for 3M) are
     excluded. ``raw_score`` is retained alongside the percentile so the US
     IPO ladder can score out-of-universe candidates against the same
-    Fred6725 distribution.
+    distribution.
     """
     if weights_bars is None:
         weights_bars = _months_to_bars(WEIGHTS_3M)
@@ -417,18 +418,6 @@ def _fetch_us_batches(
             else:
                 time.sleep(5)
     return lost
-
-
-def fetch_universe_from_rs_csv(rs_table_12m: dict[str, int] | None) -> list[str]:
-    """Return the ticker list from the Fred6725 12M table.
-
-    We piggyback on the existing 12M fetch (already done at top of EOD)
-    instead of re-downloading the CSV. ``rs_table_12m`` is the dict
-    returned by ``rs_rating.fetch_rs_table``.
-    """
-    if not rs_table_12m:
-        return []
-    return sorted(rs_table_12m.keys())
 
 
 def _fetch_spy_kline(period: str = "6mo") -> pd.DataFrame | None:

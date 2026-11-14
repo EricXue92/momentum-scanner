@@ -43,8 +43,8 @@ A scheduled momentum scanner for US and HK stocks. Every day it screens long and
 | Finviz                   | US screener discovery (all scans add `ind_stocksonly`, so no ETFs/ETNs)                                                                          |
 | yfinance                 | daily bars — dollar volume, ADR%, Rel Vol, SMA, performance; HK k-lines + HSI history; the ETF ranking                                           |
 | Futu OpenD               | morning-gap snapshots (US + HK), exact market caps, HSI day change, watchlist-group sync                                                         |
-| GitHub Actions → `data/` | RS percentile tables (US 3M, HK 12M+3M) and the HK metrics frame — computed in the cloud because yfinance throttles home IPs; local only fetches |
-| Fred6725/rs-log          | US 12M IBD-style RS percentile                                                                                                                   |
+| GitHub Actions → `data/` | RS percentile tables (US 12M+3M, HK 12M+3M) and the HK metrics frame — computed in the cloud because yfinance throttles home IPs; local only fetches |
+| nasdaqtrader.com         | US RS universe (`nasdaqtraded.txt`, filtered to common equity by security name)                                                                  |
 | HKEX stock list          | HK main-board universe (~2,400 names)                                                                                                            |
 
 Results are written as dated `.txt` watchlists (TradingView comma-separated, Webull newline-separated) and auto-synced to Futu groups; TradingView list sync is optional. LLM research reports are available on demand ([daily generation is off](#llm-reports)).
@@ -265,13 +265,13 @@ Post-open only (Futu has no HK pre-market data): 6 scans at +10…+60 min after 
 
 | Table  | Formula                                                 | Benchmark | Published to                                                                           |
 | ------ | ------------------------------------------------------- | --------- | -------------------------------------------------------------------------------------- |
-| US 12M | `0.4·P3 + 0.2·P6 + 0.2·P9 + 0.2·P12`                    | SPY       | [Fred6725/rs-log](https://github.com/Fred6725/relative-strength) (Tue–Sat, see below)  |
-| US 3M  | `0.5·R21 + 0.3·R42 + 0.2·R63`, universe ≈ 6,000 tickers | SPY       | `data/us_rs_3m/<date>.csv` (GitHub Actions)                                            |
+| US 12M | `0.4·P3 + 0.2·P6 + 0.2·P9 + 0.2·P12`                    | SPY       | `data/us_rs_12m/<date>.csv` (GitHub Actions, same job as 3M)                           |
+| US 3M  | `0.5·R21 + 0.3·R42 + 0.2·R63`, universe ≈ 5,900 tickers | SPY       | `data/us_rs_3m/<date>.csv` (GitHub Actions)                                            |
 | HK     | both formulas, ranked within the HK main board          | HSI       | `data/hk_rs/<date>.csv` (GitHub Actions)                                               |
 
 The local pipeline only fetches these CSVs (cached in `output/state/`, walking back ≤ 3 days on a miss). Because GitHub's own cron is unreliable, launchd dispatches the workflows ahead of each EOD — see [Automation](#automation).
 
-**12M table timing.** The upstream commit is labelled with its *run* date and holds the previous US session's close; as of November 2026 it lands around 11:00–12:00 HKT, occasionally later (it has drifted later through the year: ~08:00 in August, 10:00–11:20 in October). The CSV carries no date, so `us-eod` matches its `Price` column against the raw closes of five mega caps: a table one session behind is re-fetched every 5 minutes for up to 60 minutes, after which the run gates on the stale table with a WARNING (a manual rerun later picks up the fresh one). Only the Longs event groups use the 12M table, so a stale day shifts names near the RS 90 line and nothing else. The US 3M cloud job takes its ticker universe from the same CSV but does not wait for a fresh one, and publishes nothing if the SPY benchmark fetch fails (the local run then walks back to the previous table).
+**US 12M table.** Computed by the same cloud job as the 3M table from one ~18-month download (`us_rs_12m.py`; until 2026-11-14 it came from Fred6725/rs-log, whose formula it keeps). The file is named by its *run* date and carries a `Session` column with the trading day its closes belong to. The job publishes nothing — neither table — unless SPY's latest bar is the last completed session and at most 10% of the universe still lacks that bar after one re-fetch; `us-eod` then walks back to the previous file. Locally, a table whose `Session` is behind the latest completed session is re-fetched every 5 minutes for up to 60 minutes, after which the run gates on the stale table with a WARNING (a manual rerun later picks up the fresh one). Only the Longs event groups use the 12M table, so a stale day shifts names near the RS 90 line and nothing else.
 
 ### RS-Line Annotation
 
