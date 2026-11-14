@@ -31,7 +31,7 @@ A scheduled momentum scanner for US and HK stocks. Every day it screens long and
 
 | Run            | Schedule                         | Produces                                                                                            |
 | -------------- | -------------------------------- | --------------------------------------------------------------------------------------------------- |
-| US EOD         | Tue–Sat 12:00                    | Longs (6 groups), Leaders, conditional RS, Shorts, IPO, Repeat, **ETF strength ranking**, RS top-10 |
+| US EOD         | Tue–Sat 10:00                    | Longs (6 groups), Leaders, conditional RS, Shorts, IPO, Repeat, **ETF strength ranking**, RS top-10 |
 | HK EOD         | Mon–Fri 20:00                    | EarningsGap / HighVolume / GapUp / Leaders / conditional RS, Shorts, IPO, RS top-10                 |
 | US Morning Gap | 9 scans around the 09:30 ET open | pre-market gappers (−20/−10/−5 min) and volume-confirmed post-open gappers (+5…+30 min), ntfy push  |
 | HK Morning Gap | 6 scans after the 09:30 HKT open | post-open gappers (+10…+60 min), ntfy push                                                          |
@@ -63,7 +63,7 @@ uv run main.py --mode report --market us             # CANSLIM report for today'
 uv run pytest tests/ -v                              # tests
 ```
 
-`--mode eod` still runs US + HK together, but the schedule uses the per-market modes — at 12:00 HKT the HK daily bar is incomplete.
+`--mode eod` still runs US + HK together, but the schedule uses the per-market modes — at 10:00 HKT the HK daily bar is incomplete.
 
 ## US Screeners
 
@@ -411,7 +411,7 @@ macOS launchd + pmset; all times HKT. Plists live in `~/Library/LaunchAgents/` (
 
 | Slot            | Trigger                               | Runs                            | Plist (`com.xue.finviz-to-tv.*`) |
 | --------------- | ------------------------------------- | ------------------------------- | -------------------------------- |
-| US EOD          | Tue–Sat 12:00                         | `scripts/run_eod.sh`            | `plist`                          |
+| US EOD          | Tue–Sat 10:00                         | `scripts/run_eod.sh`            | `plist`                          |
 | HK EOD          | Mon–Fri 20:00                         | `scripts/run_hk_eod.sh`         | `hk-eod.plist`                   |
 | US Morning Gap  | 90 entries/week (9 offsets × EDT/EST) | `--mode morning-gap`            | `morning-gap.plist`              |
 | HK Morning Gap  | Mon–Fri × 6 offsets (09:40–10:30)     | `--mode hk-morning-gap`         | `hk-morning-gap.plist`           |
@@ -424,10 +424,10 @@ macOS launchd + pmset; all times HKT. Plists live in `~/Library/LaunchAgents/` (
 - Morning-gap runs **self-validate their time window and clean-exit outside it**, so extra or missed wakes are harmless.
 - Before a run starts, a network gate waits (≤ 300 s) for the hosts that mode actually uses: morning-gap probes Yahoo only, `hk-eod` GitHub raw + Yahoo, `us-eod` adds finviz.com — a Finviz blip no longer costs the HK run or a gap-scan window.
 - The RS triggers dispatch the cloud workflows ahead of each EOD (US 08:45, HK 18:45) because GitHub's scheduled cron can be hours late or skipped; the workflow commit is idempotent, so a double-fire is harmless. A failed run pushes an ntfy alert and the EOD falls back to the previous day's table.
-- 12:00 lands after the US close (EDT and EST) and, on most days, after the upstream 12M RS commit (around 11:00–12:00 HKT, occasionally later — see [Cloud RS Tables](#cloud-rs-tables)); 20:00 leaves 4 hours after the HK close for data to settle.
+- 10:00 lands after the US close (EDT and EST) and after the 08:45 cloud job that publishes both US RS tables (about 10 minutes — see [Cloud RS Tables](#cloud-rs-tables)). 20:00 leaves 4 hours after the HK close for data to settle.
 
 ```bash
-sudo pmset repeat wakeorpoweron TWRFS 11:59:00       # wake for the US slot ("wakeorpoweron" on macOS 26+)
+sudo pmset repeat wakeorpoweron TWRFS 09:59:00       # wake for the US slot ("wakeorpoweron" on macOS 26+)
 launchctl load ~/Library/LaunchAgents/com.xue.finviz-to-tv.plist
 launchctl load ~/Library/LaunchAgents/com.xue.finviz-to-tv.hk-eod.plist
 launchctl load ~/Library/LaunchAgents/com.xue.finviz-to-tv.morning-gap.plist

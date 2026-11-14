@@ -63,7 +63,7 @@ uv run main.py --mode report --market us             # 为当天美股个股生�
 uv run pytest tests/ -v                              # 测试
 ```
 
-`--mode eod` 仍可同时跑美股 + 港股,但定时任务用分市场的模式——12:00 HKT 时港股日线尚未走完。
+`--mode eod` 仍可同时跑美股 + 港股,但定时任务用分市场的模式——10:00 HKT 时港股日线尚未走完。
 
 ## 美股筛选器
 
@@ -269,7 +269,9 @@ Kullamägi 的抛物线冲顶做空 setup。每天重新检出(不参与任何�
 | 美股 3M  | `0.5·R21 + 0.3·R42 + 0.2·R63`,universe 约 5,900 只 | SPY  | `data/us_rs_3m/<date>.csv`(GitHub Actions)                                          |
 | 港股     | 两条公式都算,在港股主板内部排名                    | HSI  | `data/hk_rs/<date>.csv`(GitHub Actions)                                             |
 
-本地流水线只拉取这些 CSV(缓存在 `output/state/`,拉不到就回退最多 3 天)。GitHub 自带的 cron 不可靠,所以由 launchd 在每次 EOD 前 75 分钟主动触发 workflow——见[自动化](#自动化)。
+本地流水线只拉取这些 CSV(缓存在 `output/state/`,拉不到就回退最多 3 天)。GitHub 自带的 cron 不可靠,所以由 launchd 在每次 EOD 之前主动触发 workflow——见[自动化](#自动化)。
+
+**美股 12M 表。** 与 3M 表由同一个云端任务计算,只下载一次约 18 个月的日线(`us_rs_12m.py`;2026-11-14 之前取自 Fred6725/rs-log,公式沿用)。文件按*运行*日期命名,另有 `Session` 列记录收盘价所属的交易日。只有当 SPY 的最新 K 线是最近一个已收盘交易日、且重拉一次后缺这根 K 线的股票不超过 10% 时才发布;否则两张表都不发布,`us-eod` 回退到前一份文件。本地读到 `Session` 落后于最近已收盘交易日的表时,每 5 分钟重拉一次、最多 60 分钟,之后带 WARNING 用旧表过闸(之后手动重跑会拿到新表)。只有 Longs 事件组使用 12M 表,所以旧表只影响 RS 90 线附近的票。
 
 ### RS-line 标注
 
@@ -395,13 +397,13 @@ macOS launchd + pmset;时间均为 HKT。plist 放在 `~/Library/LaunchAgents/`(
 | ntfy 订阅器      | 常驻(KeepAlive)                       | ntfy → 通知中心                 | `ntfy-subscriber.plist`         |
 | 唤醒重排         | 周日 18:00(root LaunchDaemon)         | `schedule_morning_gap_wakes.py` | `schedule-wakes.plist`          |
 
-- 每个 EOD wrapper 先跑 EOD 扫描(watchdog:美股 30 分钟 / 港股 45 分钟),再以 soft 步骤跑 `--dry-run` rs-line 审计;退出码只反映 EOD 扫描。
+- 每个 EOD wrapper 先跑 EOD 扫描(watchdog:美股 90 分钟——要覆盖 12M 表最长 60 分钟的新鲜度等待加一次完整运行——/ 港股 45 分钟),再以 soft 步骤跑 `--dry-run` rs-line 审计;退出码只反映 EOD 扫描。
 - Morning Gap **每次触发都自检时间窗口,窗口外干净退出**,所以多触发或漏唤醒都无害。
-- RS 触发器在每次 EOD 前 75 分钟主动触发云端 workflow,因为 GitHub 的定时 cron 可能晚几小时甚至直接不跑;workflow 的 commit 步骤幂等,重复触发无害。
-- 10:00 落在美股收盘(EDT 与 EST 都覆盖)和上游 12M RS 提交之后;20:00 距港股收盘留了 4 小时让数据稳定。
+- RS 触发器在每次 EOD 之前(美股 08:45、港股 18:45)主动触发云端 workflow,因为 GitHub 的定时 cron 可能晚几小时甚至直接不跑;workflow 的 commit 步骤幂等,重复触发无害。
+- 10:00 落在美股收盘(EDT 与 EST 都覆盖)之后,也晚于 08:45 发布两张美股 RS 表的云端任务(约 10 分钟);20:00 距港股收盘留了 4 小时让数据稳定。
 
 ```bash
-sudo pmset repeat wakeorpoweron TWRFS 11:59:00       # 为美股槽唤醒 (macOS 26+ 关键字是 "wakeorpoweron")
+sudo pmset repeat wakeorpoweron TWRFS 09:59:00       # 为美股槽唤醒 (macOS 26+ 关键字是 "wakeorpoweron")
 launchctl load ~/Library/LaunchAgents/com.xue.finviz-to-tv.plist
 launchctl load ~/Library/LaunchAgents/com.xue.finviz-to-tv.hk-eod.plist
 launchctl load ~/Library/LaunchAgents/com.xue.finviz-to-tv.morning-gap.plist

@@ -16,7 +16,7 @@ Current floors (long-side, IPO and morning-gap; Shorts share the US ones):
 
 ```bash
 uv sync
-uv run main.py --mode us-eod         # US EOD (Longs/Leaders/Shorts/RS/IPO) — 12:00 HKT
+uv run main.py --mode us-eod         # US EOD (Longs/Leaders/Shorts/RS/IPO) — 10:00 HKT
 uv run main.py --mode hk-eod         # HK EOD (Shorts + Longs/Leaders/RS)   — 20:00 HKT
 uv run main.py --mode morning-gap    # US intraday gap scan; clean-exits outside ET window
 uv run main.py --mode hk-morning-gap # HK intraday gap scan (post-open only)
@@ -252,7 +252,7 @@ and must never be aged out.
 
 ## Scheduling (launchd, HKT)
 
-- US EOD Tue-Sat 12:00 (→ decisions 2026-11-07); HK EOD Mon-Fri 20:00; morning-gap modes fire many entries
+- US EOD Tue-Sat 10:00 (→ decisions 2026-11-14); HK EOD Mon-Fri 20:00; morning-gap modes fire many entries
   and **self-validate their window, clean-exiting outside it — do not add a hard
   error path** (missed wakes are silent by design). The window is checked
   once **before** the network gate (`_morning_gap_in_window`) and again in

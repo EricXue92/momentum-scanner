@@ -299,6 +299,16 @@ upstream's. The 3M table moved to the same universe and is still scored on
 the last 6 months. Not done: BRK.B-style class shares stay out (upstream's
 alpha-only rule; kept-as-missing by the gate). — RS gating.
 
+### 2026-11-14 — us-eod back to 10:00 HKT
+The 12:00 slot (→ 2026-11-07) existed only to wait for rs-log. Both US RS
+tables now come from our own job, dispatched at 08:45 and done in ~10 min
+(first full run: 9 min, 3/5906 tickers without the session bar), so the
+slot went back to 10:00 (user decision) and the pmset repeat wake to 09:59
+Tue-Sat. The 60-min freshness wait and `EOD_TIMEOUT` are unchanged: they now
+cover a late or failed cloud job. Same change: `etf_rs_page.yml` listens for
+the RS workflow **by name** and the rename in the 12M commit had cut that
+trigger — fixed, with a comment on both sides. — Scheduling section.
+
 ### 2026-10-31 — per-ETF strongest-holdings line
 `etf_holdings_rs.py`: stockanalysis free tier gives the top 25 holdings
 ("Showing 25 of 78 holdings"), accepted as the source with yfinance top-10 as

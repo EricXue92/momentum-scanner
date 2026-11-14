@@ -1,14 +1,14 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  US EOD slot: Tue-Sat 12:00 HKT (after US close in both EDT/EST and after
-  the upstream RS Rating commit). Runs scripts/run_eod.sh which rotates and
+  US EOD slot: Tue-Sat 10:00 HKT (after US close in both EDT/EST and after
+  the 08:45 cloud job that publishes both US RS tables). Runs scripts/run_eod.sh which rotates and
   owns the log (output/launchd_US.log) itself — deliberately NO
   StandardOutPath/StandardErrorPath here: launchd would hold an append-mode
   fd open through the wrapper's in-process truncate, leaving a NUL-padded
   hole at the start of each new day's log.
 
   Requires a pmset wake so the Mac is awake at the slot:
-    sudo pmset repeat wakeorpoweron TWRFS 11:59:00
+    sudo pmset repeat wakeorpoweron TWRFS 09:59:00
   (keyword is `wakeorpoweron` on macOS 26+; the old `wakepoweron` no longer
   parses.)
 
@@ -30,12 +30,12 @@
 
     <key>StartCalendarInterval</key>
     <array>
-        <!-- Tue-Sat 12:00 HKT (Weekday: 0=Sun .. 6=Sat) -->
-        <dict><key>Weekday</key><integer>2</integer><key>Hour</key><integer>12</integer><key>Minute</key><integer>0</integer></dict>
-        <dict><key>Weekday</key><integer>3</integer><key>Hour</key><integer>12</integer><key>Minute</key><integer>0</integer></dict>
-        <dict><key>Weekday</key><integer>4</integer><key>Hour</key><integer>12</integer><key>Minute</key><integer>0</integer></dict>
-        <dict><key>Weekday</key><integer>5</integer><key>Hour</key><integer>12</integer><key>Minute</key><integer>0</integer></dict>
-        <dict><key>Weekday</key><integer>6</integer><key>Hour</key><integer>12</integer><key>Minute</key><integer>0</integer></dict>
+        <!-- Tue-Sat 10:00 HKT (Weekday: 0=Sun .. 6=Sat) -->
+        <dict><key>Weekday</key><integer>2</integer><key>Hour</key><integer>10</integer><key>Minute</key><integer>0</integer></dict>
+        <dict><key>Weekday</key><integer>3</integer><key>Hour</key><integer>10</integer><key>Minute</key><integer>0</integer></dict>
+        <dict><key>Weekday</key><integer>4</integer><key>Hour</key><integer>10</integer><key>Minute</key><integer>0</integer></dict>
+        <dict><key>Weekday</key><integer>5</integer><key>Hour</key><integer>10</integer><key>Minute</key><integer>0</integer></dict>
+        <dict><key>Weekday</key><integer>6</integer><key>Hour</key><integer>10</integer><key>Minute</key><integer>0</integer></dict>
     </array>
 
     <key>RunAtLoad</key>

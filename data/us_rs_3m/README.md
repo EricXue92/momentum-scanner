@@ -31,7 +31,7 @@ The workflow prunes files older than 14 days on every run. To extend or shorten,
 ## Consumed by
 
 - `us_rs_3m.build_3m_table` (local fetcher, via `raw.githubusercontent.com`)
-- `main.py` (US EOD pipeline, 12:00 HKT launchd run)
+- `main.py` (US EOD pipeline, 10:00 HKT launchd run)
 
 ## Manual trigger
 

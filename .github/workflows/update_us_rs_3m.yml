@@ -1,8 +1,9 @@
+# etf_rs_page.yml listens for this name (workflow_run) — rename both together.
 name: Update US RS Tables (3M + 12M)
 
 on:
   schedule:
-    - cron: '0 1 * * 1-5'      # 01:00 UTC Mon-Fri = 09:00 HKT (~1h before local 12:00 launchd run)
+    - cron: '0 1 * * 1-5'      # 01:00 UTC Mon-Fri = 09:00 HKT (~1h before local 10:00 launchd run)
   workflow_dispatch:           # manual trigger for debugging + first seed
 
 permissions:

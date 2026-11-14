@@ -66,7 +66,7 @@ def test_saturday_us_trigger_and_past_skipped():
 )
 def test_every_plist_slot_has_a_wake_one_min_before(plist):
     # us-eod (com.xue.finviz-to-tv.plist) is covered by the repeating
-    # `pmset repeat wakeorpoweron` 11:59 Tue-Sat event instead.
+    # `pmset repeat wakeorpoweron` 09:59 Tue-Sat event instead.
     wakes = dict(WAKES)
     slots = plistlib.loads((SCRIPTS / plist).read_bytes())["StartCalendarInterval"]
     if isinstance(slots, dict):
