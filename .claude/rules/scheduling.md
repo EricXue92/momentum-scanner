@@ -32,12 +32,13 @@ window rule and the caffeinate prohibition stay in the root file.
   the trigger script polls `gh run view` status/conclusion for up to ~20 min
   before alerting — `completed`+non-success → "failed", never confirmed →
   "unconfirmed" (default priority, exit 2). A **failed** run is
-  re-dispatched up to 3 times, 15 min apart (`RERUN_TRIES` / `RERUN_GAP`;
-  → decisions 2026-11-17): one push at the first failure, one with the
-  outcome ("recovered", default priority, or "failed after N attempts").
-  The budget is sized so the last re-run still ends inside us-eod's 60-min
-  freshness wait / before hk-eod — change it together with
-  `_STALE_MAX_WAIT_SEC`. An unconfirmed run is never re-dispatched.
+  re-dispatched 15 min apart, up to 5 times for US / 3 for HK
+  (`RERUN_TRIES` / `RERUN_GAP`; → decisions 2026-11-17): one push at the
+  first failure, one with the outcome ("recovered", default priority, or
+  "failed after N attempts"). The budget is sized so the last re-run still
+  ends inside us-eod's 120-min freshness wait / before hk-eod — change the
+  US one together with `_STALE_MAX_WAIT_SEC`. An unconfirmed run is never
+  re-dispatched.
   `TRIGGER_*` env overrides exist
   only for `tests/test_trigger_rs_workflow.py`. The US morning-gap plist
   runs `run_morning_gap.sh` (log rotated daily like the other wrappers).

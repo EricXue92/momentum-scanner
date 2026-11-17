@@ -88,11 +88,19 @@ POLL_GAP="${TRIGGER_POLL_GAP:-30}"
 # row with NaN Close; the cloud job waited 15 min for SPY, failed and
 # published nothing, and this script alerted and exited — nothing would have
 # published even if Yahoo had recovered while us-eod was still polling for a
-# fresh table (rs_rating._STALE_MAX_WAIT_SEC, 60 min from 10:00). 3 re-runs
-# 15 min apart: with a 15-min failing run each, the last one still finishes
-# before 11:00 (US, trigger 08:45) / 20:00 (HK, trigger 18:45, ~5-min runs).
+# fresh table (rs_rating._STALE_MAX_WAIT_SEC, 120 min from 10:00). Re-runs
+# are 15 min apart and sized per market so the last one can still help:
+#   US (trigger 08:45): 5 — six 15-min failing runs end ~11:30, a late
+#       success ~11:45, inside the wait that ends 12:00.
+#   HK (trigger 18:45, ~5-min runs): 3 — hk-eod at 20:00 does not wait.
+# Change the US budget together with _STALE_MAX_WAIT_SEC.
 # An unconfirmed outcome is NOT re-dispatched (the first run may be alive).
-RERUN_TRIES="${TRIGGER_RERUN_TRIES:-3}"
+if [[ "$MARKET" == "US" ]]; then
+    DEFAULT_RERUN_TRIES=5
+else
+    DEFAULT_RERUN_TRIES=3
+fi
+RERUN_TRIES="${TRIGGER_RERUN_TRIES:-$DEFAULT_RERUN_TRIES}"
 RERUN_GAP="${TRIGGER_RERUN_GAP:-900}"
 ATTEMPTS=$((RERUN_TRIES + 1))
 

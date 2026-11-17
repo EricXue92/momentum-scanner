@@ -46,9 +46,10 @@ UV=/Users/xue/.local/bin/uv
 PROJECT=/Users/xue/momentum-scanner
 
 # Hard wall-clock cap for the EOD step. A real run is ~3-5 min, but us-eod
-# may legitimately WAIT up to 60 min for a fresh 12M RS table
+# may legitimately WAIT up to 120 min for a fresh 12M RS table
 # (rs_rating._STALE_MAX_WAIT_SEC, polling every 5 min) before it does any
-# work, so the cap MUST exceed that wait plus a full run: 90 min. The old
+# work, so the cap MUST exceed that wait plus a full run: 150 min
+# (tests/test_rs_rating_stale.py enforces wait + 30 min). The old
 # 30 min cap killed the 2026-10-28 run at 10:30:06 while it was still polling
 # (rs-log published at 10:42); SIGTERM leaves no trace in the python log, so
 # the day looked like "ran, wrote nothing". The finviz lib's SSL hang
@@ -59,7 +60,7 @@ PROJECT=/Users/xue/momentum-scanner
 # puts the backgrounded job in its own process group, then a watchdog logs
 # one line and sends SIGTERM (escalates to SIGKILL) to the whole group so
 # uv's python grandchild dies with its parent instead of leaking.
-EOD_TIMEOUT=${EOD_TIMEOUT:-5400}
+EOD_TIMEOUT=${EOD_TIMEOUT:-9000}
 set +e
 set -m
 "$UV" run --directory "$PROJECT" main.py --mode us-eod &

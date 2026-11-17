@@ -318,6 +318,43 @@ def test_late_publication_is_picked_up_by_the_poll(
     assert clock.sleeps == [rs_rating._STALE_POLL_SEC]
 
 
+def test_table_published_100_minutes_late_is_still_used(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, clock: _Clock
+) -> None:
+    """2026-11-17: Yahoo got its closes back ~95 min after the 08:45
+    dispatch, minutes short of the old 60-min wait from 10:00. The wait is
+    120 min so a day like that still gates on the fresh table."""
+    monkeypatch.setattr(rs_rating, "_expected_session", lambda: _LATEST)
+    published = {"2026-10-26": _STALE}
+    _serve_by_date(monkeypatch, published)
+    real_sleep = clock.sleep
+
+    def _sleep_then_maybe_publish(s: float) -> None:
+        real_sleep(s)
+        if clock.now >= 100 * 60:
+            published["2026-10-27"] = _FRESH
+
+    monkeypatch.setattr(rs_rating.time, "sleep", _sleep_then_maybe_publish)
+
+    table = rs_rating.fetch_rs_table(tmp_path, "2026_10_27")
+
+    assert table is not None and table["CART"] == 94
+    assert clock.now == 100 * 60
+    assert (tmp_path / "state" / "rs_rating_2026_10_27.csv").exists()
+
+
+def test_us_eod_watchdog_outlasts_the_freshness_wait() -> None:
+    """run_eod.sh's EOD_TIMEOUT must exceed the wait plus a full run (30 min
+    of margin): a watchdog SIGTERM mid-poll leaves a day with no output and
+    no trace in the python log (2026-10-28). Change the two together."""
+    import re
+
+    script = (Path(__file__).resolve().parents[1] / "scripts" / "run_eod.sh").read_text()
+    m = re.search(r"^EOD_TIMEOUT=\$\{EOD_TIMEOUT:-(\d+)\}", script, re.M)
+    assert m, "EOD_TIMEOUT default not found in run_eod.sh"
+    assert int(m.group(1)) >= rs_rating._STALE_MAX_WAIT_SEC + 1800
+
+
 def test_nothing_published_in_window_falls_back_to_local_cache(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, clock: _Clock
 ) -> None:

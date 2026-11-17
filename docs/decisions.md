@@ -319,10 +319,15 @@ took "latest completed session" from the same Yahoo closes. → (1) the
 reference is the NYSE calendar (`us_rs_12m.expected_session`), so the table
 is fresh iff its `Session` is what the cloud job would publish now; the
 yfinance reference fetch is gone. (2) `trigger_rs_workflow.sh` re-dispatches
-a failed run (3 × 15 min apart, sized to end inside the 60-min wait).
-Consequence, accepted: when Yahoo stays broken past the window, us-eod now
-waits the full 60 min and then gates on the stale table with a WARNING —
-an hour later, but visible and not cached. Not done: filling the missing
+a failed run (15 min apart, sized to end inside the wait). (3) Same day,
+user decision: the wait went from 60 to **120 min** (`EOD_TIMEOUT` 5400 →
+9000s, US re-runs 3 → 5; HK stays at 3 — hk-eod does not wait). Yahoo had
+its closes back at ~10:33 HKT; replayed against the 60-min wait the fresh
+table would have landed ~10:48 with the deadline at 11:00 — too thin. The
+schedule itself stays at 10:00: a normal day is not delayed, a bad day
+waits. Consequence, accepted: when Yahoo stays broken past the window,
+us-eod now waits the full 120 min and then gates on the stale table with a
+WARNING — two hours later, but visible and not cached. Not done: filling the missing
 Close from intraday bars in the cloud job (~5900 tickers), which is what
 would actually produce a table on such a day. Also seen: the GH-side cron
 (01:00 UTC) has been firing at ~07:45 UTC, so it re-publishes after us-eod

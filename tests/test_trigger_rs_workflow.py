@@ -66,7 +66,7 @@ def harness(tmp_path: Path):
     log = tmp_path / "trigger.log"
 
     def run(view_seq: list[str], *, watch_exit: int = 1, poll_tries: int = 5,
-            rerun_tries: int = 0):
+            rerun_tries: int | None = 0, market: str = "US"):
         seq.write_text("\n".join(view_seq) + "\n")
         env = {
             **os.environ,
@@ -77,7 +77,6 @@ def harness(tmp_path: Path):
             "TRIGGER_POLL_GAP": "0",
             "TRIGGER_POLL_TRIES": str(poll_tries),
             "TRIGGER_DISPATCH_GAP": "0",
-            "TRIGGER_RERUN_TRIES": str(rerun_tries),
             "TRIGGER_RERUN_GAP": "0",
             "TRIGGER_ENV_FILE": "/dev/null",
             "NTFY_TOPIC": "test-topic",
@@ -87,8 +86,11 @@ def harness(tmp_path: Path):
             "FAKE_GH_WATCH_EXIT": str(watch_exit),
             "FAKE_CURL_CALLS": str(curl_calls),
         }
+        env.pop("TRIGGER_RERUN_TRIES", None)
+        if rerun_tries is not None:   # None = the script's own per-market default
+            env["TRIGGER_RERUN_TRIES"] = str(rerun_tries)
         proc = subprocess.run(
-            ["/bin/bash", str(SCRIPT), "update_us_rs_3m.yml", "US"],
+            ["/bin/bash", str(SCRIPT), "update_us_rs_3m.yml", market],
             env=env, capture_output=True, text=True, timeout=60,
         )
         return proc, log.read_text(), (
@@ -177,3 +179,13 @@ def test_unconfirmed_outcome_is_not_redispatched(harness) -> None:
     assert proc.returncode == 2
     assert gh_calls.count(" workflow run ") == 1
     assert "unconfirmed" in curl_calls
+
+
+@pytest.mark.parametrize("market, dispatches", [("US", 6), ("HK", 4)])
+def test_default_rerun_budget_fits_each_markets_window(harness, market, dispatches) -> None:
+    """US: 08:45 + 6 x (15-min failing run + 15-min gap) ends ~11:30, inside
+    us-eod's 120-min freshness wait (10:00-12:00). HK: hk-eod at 20:00 does
+    not wait, so 4 x ~20 min from 18:45 is all that can still help."""
+    proc, _, _, gh_calls = harness(["completed failure"], rerun_tries=None, market=market)
+    assert proc.returncode == 1
+    assert gh_calls.count(" workflow run ") == dispatches

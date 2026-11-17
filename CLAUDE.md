@@ -190,14 +190,15 @@ k-line fetch.
   (→ decisions 2026-11-17). `_download_csv` serves today's file or walks
   back ≤ 3 days (a 404 is not retried), so a late or failed cloud job shows
   up as an older `Session`. Behind the expected session → re-fetch every
-  5 min for ≤ 60 min, then gate on the stale table with a WARNING and do
+  5 min for ≤ 120 min, then gate on the stale table with a WARNING and do
   **not** cache it as `rs_rating_<today>.csv` (a rerun re-fetches). No
   Session column (a cached rs-log file) or the calendar raising → check
   skipped, old behavior (use + cache).
-  **The `run_eod.sh` watchdog (`EOD_TIMEOUT`, 5400s) must stay
-  above this 60-min wait plus a full run** and logs an `[ERROR] [watchdog]`
-  line when it fires; change `_STALE_MAX_WAIT_SEC` and `EOD_TIMEOUT`
-  together (→ decisions 2026-10-27).
+  **The `run_eod.sh` watchdog (`EOD_TIMEOUT`, 9000s) must stay
+  above this 120-min wait plus a full run** (a test enforces wait + 30 min)
+  and logs an `[ERROR] [watchdog]` line when it fires; change
+  `_STALE_MAX_WAIT_SEC`, `EOD_TIMEOUT` and the trigger's US re-run budget
+  together (→ decisions 2026-10-27, 2026-11-17).
 - **RS-line trend + `rs-line-audit` + daily strongest-RS snapshot:**
   details in `.claude/rules/rs-line.md` (path-scoped to `rs_line.py` /
   `rs_line_audit.py`). The parts that must hold everywhere: EOD only

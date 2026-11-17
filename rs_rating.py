@@ -58,7 +58,7 @@ _FALLBACK_MAX_AGE_DAYS = 3
 # raw.githubusercontent's ~5 min CDN cache) for up to _STALE_MAX_WAIT_SEC,
 # then used anyway with a WARNING but never cached as today's.
 _STALE_POLL_SEC = 300.0
-_STALE_MAX_WAIT_SEC = 3600.0
+_STALE_MAX_WAIT_SEC = 7200.0
 
 # IncompleteRead (truncated body) is an HTTPException, not an OSError; a
 # garbage body raises UnicodeDecodeError. Both used to escape and abort

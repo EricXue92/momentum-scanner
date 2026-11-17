@@ -420,7 +420,7 @@ macOS launchd + pmset; all times HKT. Plists live in `~/Library/LaunchAgents/` (
 | ntfy subscriber | resident (KeepAlive)                  | ntfy → Notification Center      | `ntfy-subscriber.plist`          |
 | Wake reschedule | Sundays 18:00 (root LaunchDaemon)     | `schedule_morning_gap_wakes.py` | `schedule-wakes.plist`           |
 
-- Each EOD wrapper runs the EOD scan (watchdog: 90 min US — it must outlast the 60-minute 12M freshness wait plus a full run — / 45 min HK; a watchdog kill logs an `[ERROR] [watchdog]` line), then the `--dry-run` rs-line audit as a soft step; the exit code reflects only the EOD scan.
+- Each EOD wrapper runs the EOD scan (watchdog: 150 min US — it must outlast the 120-minute 12M freshness wait plus a full run — / 45 min HK; a watchdog kill logs an `[ERROR] [watchdog]` line), then the `--dry-run` rs-line audit as a soft step; the exit code reflects only the EOD scan.
 - Morning-gap runs **self-validate their time window and clean-exit outside it**, so extra or missed wakes are harmless.
 - Before a run starts, a network gate waits (≤ 300 s) for the hosts that mode actually uses: morning-gap probes Yahoo only, `hk-eod` GitHub raw + Yahoo, `us-eod` adds finviz.com — a Finviz blip no longer costs the HK run or a gap-scan window.
 - The RS triggers dispatch the cloud workflows ahead of each EOD (US 08:45, HK 18:45) because GitHub's scheduled cron can be hours late or skipped; the workflow commit is idempotent, so a double-fire is harmless. A failed run pushes an ntfy alert and the EOD falls back to the previous day's table.
