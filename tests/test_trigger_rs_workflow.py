@@ -65,7 +65,8 @@ def harness(tmp_path: Path):
     seq = tmp_path / "view_seq.txt"
     log = tmp_path / "trigger.log"
 
-    def run(view_seq: list[str], *, watch_exit: int = 1, poll_tries: int = 5):
+    def run(view_seq: list[str], *, watch_exit: int = 1, poll_tries: int = 5,
+            rerun_tries: int = 0):
         seq.write_text("\n".join(view_seq) + "\n")
         env = {
             **os.environ,
@@ -76,6 +77,8 @@ def harness(tmp_path: Path):
             "TRIGGER_POLL_GAP": "0",
             "TRIGGER_POLL_TRIES": str(poll_tries),
             "TRIGGER_DISPATCH_GAP": "0",
+            "TRIGGER_RERUN_TRIES": str(rerun_tries),
+            "TRIGGER_RERUN_GAP": "0",
             "TRIGGER_ENV_FILE": "/dev/null",
             "NTFY_TOPIC": "test-topic",
             "FAKE_GH_CALLS": str(calls),
@@ -137,3 +140,40 @@ def test_unconfirmed_after_window_alerts_as_unconfirmed(harness) -> None:
     assert "unconfirmed" in curl_calls
     assert "workflow failed" not in curl_calls
     assert "could not confirm" in log
+
+
+# --- a failed run is re-dispatched ------------------------------------------
+#
+# 2026-11-17: Yahoo served the latest daily row with NaN Close; the cloud job
+# waited 15 min for SPY, failed and published nothing. The trigger alerted
+# and exited, so nothing would have published even if Yahoo had recovered
+# while us-eod was still polling for a fresh table (<= 60 min).
+
+
+def test_failed_run_is_redispatched_and_recovery_is_reported(harness) -> None:
+    proc, log, curl_calls, gh_calls = harness(
+        ["completed failure", "completed success"], rerun_tries=3
+    )
+    assert proc.returncode == 0
+    assert gh_calls.count(" workflow run ") == 2
+    assert "re-dispatching (attempt 2/4)" in log
+    # one push when it first failed, one when it recovered
+    assert curl_calls.count("ntfy.sh") == 2
+    assert "US RS workflow failed" in curl_calls
+    assert "US RS workflow recovered" in curl_calls
+
+
+def test_reruns_exhausted_alert_at_first_failure_and_at_the_end(harness) -> None:
+    proc, log, curl_calls, gh_calls = harness(["completed failure"], rerun_tries=2)
+    assert proc.returncode == 1
+    assert gh_calls.count(" workflow run ") == 3
+    assert curl_calls.count("ntfy.sh") == 2
+    assert "EOD will use stale fallback" in log
+
+
+def test_unconfirmed_outcome_is_not_redispatched(harness) -> None:
+    """Unknown outcome != failure: a second run could race the first."""
+    proc, _, curl_calls, gh_calls = harness(["ERR"], poll_tries=2, rerun_tries=3)
+    assert proc.returncode == 2
+    assert gh_calls.count(" workflow run ") == 1
+    assert "unconfirmed" in curl_calls

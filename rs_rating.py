@@ -22,7 +22,6 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
-from zoneinfo import ZoneInfo
 
 logger = logging.getLogger(__name__)
 
@@ -49,17 +48,17 @@ _FETCH_RETRY_DELAYS = (10.0, 30.0)
 _FALLBACK_MAX_AGE_DAYS = 3
 
 # Staleness check. The table carries the `Session` its closes belong to;
-# that is compared with the latest completed session seen in these mega
-# caps' yfinance closes. A table behind it (today's file not published yet,
-# so the walk-back served an older one) is re-fetched every _STALE_POLL_SEC
-# (also rides out raw.githubusercontent's ~5 min CDN cache) for up to
-# _STALE_MAX_WAIT_SEC, then used anyway with a WARNING but never cached as
-# today's.
-_REFERENCE_TICKERS = ("AAPL", "MSFT", "NVDA", "AMZN", "GOOGL")
+# that is compared with the latest US session whose close has passed, taken
+# from the NYSE calendar (`us_rs_12m.expected_session`, the cloud job's own
+# publish criterion). NOT from Yahoo closes: 2026-11-17 Yahoo served the
+# latest daily row with NaN Close, the cloud job published nothing, and a
+# Yahoo-derived reference agreed that the old table was current. A table
+# behind it (today's file not published yet, so the walk-back served an
+# older one) is re-fetched every _STALE_POLL_SEC (also rides out
+# raw.githubusercontent's ~5 min CDN cache) for up to _STALE_MAX_WAIT_SEC,
+# then used anyway with a WARNING but never cached as today's.
 _STALE_POLL_SEC = 300.0
 _STALE_MAX_WAIT_SEC = 3600.0
-_ET = ZoneInfo("America/New_York")
-_US_CLOSE_HOUR = 16
 
 # IncompleteRead (truncated body) is an HTTPException, not an OSError; a
 # garbage body raises UnicodeDecodeError. Both used to escape and abort
@@ -104,28 +103,12 @@ def _find_fallback_cache(
     return best
 
 
-def _fetch_reference_closes():
-    """Daily closes of _REFERENCE_TICKERS over the last ~10 days (only the
-    dates are used), or None. Indirection so tests can monkeypatch it."""
-    from main import _yf_download_with_retry  # lazy: main imports rs_rating
+def _expected_session() -> date:
+    """Latest US session whose close has passed, per the NYSE calendar.
+    Indirection so tests can monkeypatch it."""
+    from us_rs_12m import expected_session  # lazy: pandas holiday calendar
 
-    data = _yf_download_with_retry(
-        list(_REFERENCE_TICKERS), period="10d", interval="1d",
-        auto_adjust=False, progress=False, threads=True,
-    )
-    if data is None or data.empty or "Close" not in data.columns.get_level_values(0):
-        return None
-    return data["Close"]
-
-
-def latest_completed_session(closes, now_et: datetime | None = None) -> date | None:
-    """Latest date with any reference close, excluding the bar of a US
-    session still in progress (a manual run during US hours)."""
-    now_et = now_et or datetime.now(_ET)
-    dates = [ts.date() for ts in closes.dropna(how="all").index]
-    if now_et.hour < _US_CLOSE_HOUR:
-        dates = [d for d in dates if d != now_et.date()]
-    return max(dates) if dates else None
+    return expected_session()
 
 
 def table_data_session(csv_text: str) -> date | None:
@@ -199,23 +182,17 @@ def _download_csv(today: str, timeout: float, retry_delays: tuple[float, ...]) -
 
 def _wait_for_fresh_table(csv_text: str, today: str, timeout: float) -> tuple[str, bool]:
     """Return (csv_text, cacheable). Polls while the table is behind the
-    latest completed session; cacheable is False only when it never caught
-    up. Any failure of the check itself → (csv_text, True), as before."""
+    latest completed session (NYSE calendar); cacheable is False only when
+    it never caught up. No Session column, or the calendar raising →
+    (csv_text, True): use + cache, as before the check existed."""
     session = table_data_session(csv_text)
     if session is None:
         logger.warning("[RS Rating] Freshness check skipped (table has no Session column)")
         return csv_text, True
     try:
-        closes = _fetch_reference_closes()
-    except Exception as e:  # yfinance raises a zoo of types
+        latest = _expected_session()
+    except Exception as e:  # the calendar must never abort the RS gate
         logger.warning(f"[RS Rating] Freshness check skipped ({e})")
-        return csv_text, True
-    if closes is None:
-        logger.warning("[RS Rating] Freshness check skipped (no reference closes)")
-        return csv_text, True
-    latest = latest_completed_session(closes)
-    if latest is None:
-        logger.warning("[RS Rating] Freshness check skipped (no completed session in closes)")
         return csv_text, True
     if session >= latest:
         logger.info(f"[RS Rating] Table is current (session {session})")

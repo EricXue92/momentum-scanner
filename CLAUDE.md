@@ -183,15 +183,17 @@ k-line fetch.
   relative `period` — never `end=today` (exclusive, drops the day's close).
   The file is named by run date; the `Session` column is the data day.
 - **12M table freshness** (`rs_rating._wait_for_fresh_table`): the table's
-  `Session` column (`table_data_session`) is compared with the latest
-  completed session in the yfinance closes of 5 mega caps. `_download_csv`
-  serves today's file or walks back ≤ 3 days (a 404 is not retried), so a
-  late cloud job shows up as an older `Session`. Behind the latest completed session (a
-  partial bar during US hours doesn't count) → re-fetch every 5 min for ≤
-  60 min, then gate on the stale table with a WARNING and do **not** cache
-  it as `rs_rating_<today>.csv` (a rerun re-fetches). Any failure of the
-  check itself (no Session column — a cached rs-log file —, yfinance down)
-  → skipped, old behavior (use + cache).
+  `Session` column (`table_data_session`) is compared with the latest US
+  session whose close has passed per the **NYSE calendar**
+  (`us_rs_12m.expected_session`, the cloud job's own publish criterion) —
+  never with Yahoo closes, which can lag together with the cloud job
+  (→ decisions 2026-11-17). `_download_csv` serves today's file or walks
+  back ≤ 3 days (a 404 is not retried), so a late or failed cloud job shows
+  up as an older `Session`. Behind the expected session → re-fetch every
+  5 min for ≤ 60 min, then gate on the stale table with a WARNING and do
+  **not** cache it as `rs_rating_<today>.csv` (a rerun re-fetches). No
+  Session column (a cached rs-log file) or the calendar raising → check
+  skipped, old behavior (use + cache).
   **The `run_eod.sh` watchdog (`EOD_TIMEOUT`, 5400s) must stay
   above this 60-min wait plus a full run** and logs an `[ERROR] [watchdog]`
   line when it fires; change `_STALE_MAX_WAIT_SEC` and `EOD_TIMEOUT`

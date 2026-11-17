@@ -309,6 +309,25 @@ cover a late or failed cloud job. Same change: `etf_rs_page.yml` listens for
 the RS workflow **by name** and the rename in the 12M commit had cut that
 trigger — fixed, with a comment on both sides. — Scheduling section.
 
+### 2026-11-17 — Yahoo's NaN Close blinded both RS freshness guards
+Yahoo served the 11-16 daily row with NaN Close for hours (same shape as
+2026-09-22). 09:02 the cloud job saw SPY "behind", retried 15 min, failed
+and published nothing; the trigger alerted and exited. 10:00 us-eod logged
+`Table is current (session 2026-11-13)` and gated Longs (12M) and Leaders /
+RS / Shorts (3M) on Friday's tables without a warning: the freshness check
+took "latest completed session" from the same Yahoo closes. → (1) the
+reference is the NYSE calendar (`us_rs_12m.expected_session`), so the table
+is fresh iff its `Session` is what the cloud job would publish now; the
+yfinance reference fetch is gone. (2) `trigger_rs_workflow.sh` re-dispatches
+a failed run (3 × 15 min apart, sized to end inside the 60-min wait).
+Consequence, accepted: when Yahoo stays broken past the window, us-eod now
+waits the full 60 min and then gates on the stale table with a WARNING —
+an hour later, but visible and not cached. Not done: filling the missing
+Close from intraday bars in the cloud job (~5900 tickers), which is what
+would actually produce a table on such a day. Also seen: the GH-side cron
+(01:00 UTC) has been firing at ~07:45 UTC, so it re-publishes after us-eod
+and is no backstop for it. — RS gating / scheduling rules.
+
 ### 2026-10-31 — per-ETF strongest-holdings line
 `etf_holdings_rs.py`: stockanalysis free tier gives the top 25 holdings
 ("Showing 25 of 78 holdings"), accepted as the source with yfinance top-10 as
