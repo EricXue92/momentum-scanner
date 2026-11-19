@@ -376,7 +376,8 @@ Enable `[notify]`, put the topic in `.env` as `NTFY_TOPIC=<long random string>` 
 | **SKIPPED** (high)    | a scheduled scan exits because the network never came up                                            |
 | RS workflow failure   | a launchd RS-workflow trigger fails, or the cloud run it dispatched fails / is cancelled            |
 | **OpenD down** (high) | Futu OpenD is unreachable at the start of an EOD run or an in-window morning-gap scan; once per day |
-| **On battery** (high) | a scheduled run starts on battery power (scans are unreliable there); once per day                  |
+| **Battery low** (high) | a scheduled run starts on battery below 20% (a plain battery run with the lid open is fine and silent); once per day |
+| Scan delayed          | a run was frozen ≥ 3 min by system sleep — on battery a closed lid stops every scheduled scan until it is opened |
 | **Finviz broken** (high) | a US EOD run's Finviz screens all return 0 rows or a filter code is rejected; once per day       |
 | Catalyst Report Ready | the pre-market catalyst report is written (only when that report is enabled)                        |
 

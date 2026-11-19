@@ -333,6 +333,28 @@ would actually produce a table on such a day. Also seen: the GH-side cron
 (01:00 UTC) has been firing at ~07:45 UTC, so it re-publishes after us-eod
 and is no backstop for it. — RS gating / scheduling rules.
 
+### 2026-11-19 — "running on battery" push fired on healthy runs
+The 10-17 push fired on every battery run, but `pmset -g log` for 11-12 …
+11-19 shows battery alone is harmless: battery + lid closed → 22/22
+scheduled wakes were 5–19s DarkWakes (hk-eod was launched inside the 20:05
+one, its `caffeinate` assertion was created and ignored, and it resumed at
+20:23 when the lid opened); battery + lid open → a full wake and the scan
+runs (2 of 3; the third was a 0s DarkWake). So the 11-12 push
+(hk-morning-gap, 80%, lid open) asked for a charger that run did not need,
+and in the closed-lid case the push can only go out once the lid is open
+again. → `main._alert_if_on_battery` pushes on two things only (user
+decision): battery < 20% (`_LOW_BATTERY_PERCENT`, once per HKT day, high),
+or the run was frozen ≥ 3 min by system sleep (`_STALL_ALERT_SEC`; per run,
+default priority, "Scan delayed N min"). The freeze is measured as the
+growth of `CLOCK_MONOTONIC_RAW − CLOCK_UPTIME_RAW` since process start
+(`power.asleep_seconds`), not against the launchd slot: no slot table, and a
+manual rerun on battery is not "late". Known gaps, accepted: a job that
+launchd only starts at lid-open (no DarkWake in between, ≤ ~17 min late) is
+not reported; a freeze after the check (lid closed mid-run) is not reported
+either. Not done: `sudo pmset -b disablesleep 1`, the only way to run with
+the lid closed on battery (the Mac then never sleeps in a bag). —
+Scheduling rules.
+
 ### 2026-10-31 — per-ETF strongest-holdings line
 `etf_holdings_rs.py`: stockanalysis free tier gives the top 25 holdings
 ("Showing 25 of 78 holdings"), accepted as the source with yfinance top-10 as

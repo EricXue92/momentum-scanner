@@ -43,8 +43,9 @@ from notify import (
     notify_morning_gap,
     notify_on_battery,
     notify_opend_down,
+    notify_scan_stalled,
 )
-from power import power_status
+from power import asleep_seconds, power_status
 from rs_rating import fetch_rs_table, filter_by_rs
 
 logger = logging.getLogger(__name__)
@@ -124,27 +125,60 @@ def _alert_if_opend_down(
         logger.warning(f"[Notify] OpenD-down check failed: {e}")
 
 
+# Power alerts (→ decisions 2026-11-19). Battery alone is healthy — only a low
+# charge or a run actually frozen by sleep is worth a push.
+_LOW_BATTERY_PERCENT = 20
+_STALL_ALERT_SEC = 180.0
+_ASLEEP_AT_START = asleep_seconds()
+
+
+def _slept_since_start() -> float:
+    """Seconds this process has been frozen by system sleep (0 if unknown)."""
+    now = asleep_seconds()
+    if _ASLEEP_AT_START is None or now is None:
+        return 0.0
+    return max(0.0, now - _ASLEEP_AT_START)
+
+
 def _alert_if_on_battery(
     mode: str, config: dict, output_dir: Path, today: str
 ) -> None:
-    """Probe the power source once and ntfy (once per day) when on battery.
+    """ntfy when the run was frozen by sleep or starts on a low battery.
 
-    Pure side-effect, never raises, never changes the run. Scheduled scans
-    assume AC: on battery the Mac idle-sleeps minutes after the pmset wake
-    (`sleep 1`) and the scan only advances inside DarkWake slivers with no
-    network (2026-10-17 — see notify.notify_on_battery). Called at the same
-    sites as `_alert_if_opend_down`, so out-of-window fires stay silent."""
+    Pure side-effect, never raises, never changes the run. A battery run
+    with the lid open is healthy (full wake, caffeinate holds) and stays
+    silent. Battery + closed lid is what breaks the schedule: the wake is a
+    seconds-long DarkWake, so a run launched inside one is frozen until the
+    lid opens — detected here as time asleep since process start
+    (≥ `_STALL_ALERT_SEC`, one push per frozen run, whatever the power
+    source is by now). Below `_LOW_BATTERY_PERCENT` on battery → the
+    once-per-day low-battery push. Called at the same sites as
+    `_alert_if_opend_down`, so out-of-window fires stay silent."""
     try:
         status = power_status()
+        slept = _slept_since_start()
+        if slept >= _STALL_ALERT_SEC:
+            minutes = round(slept / 60)
+            logger.warning(
+                f"[power] Run was frozen {minutes} min by system sleep "
+                "(battery + closed lid?) — continuing late"
+            )
+            notify_scan_stalled(mode, minutes, status, config)
         if status is None or not status.on_battery:
             return
+        if status.percent is None or status.percent >= _LOW_BATTERY_PERCENT:
+            logger.info(
+                f"[power] Running on battery ({status.percent}%) — fine while "
+                "the lid stays open"
+            )
+            return
         logger.warning(
-            f"[power] Running on battery ({status.percent}%) — scheduled "
-            "scans expect AC power; the run may stall or lose network"
+            f"[power] Running on a low battery ({status.percent}%) — plug in; "
+            "an empty battery or a closed lid stops the scans"
         )
         notify_on_battery(mode, status.percent, config, output_dir, today)
     except Exception as e:
-        logger.warning(f"[Notify] on-battery check failed: {e}")
+        logger.warning(f"[Notify] power check failed: {e}")
 
 
 _NETWORK_ERROR_MARKERS = ("Too many requests",)

@@ -23,10 +23,17 @@ window rule and the caffeinate prohibition stay in the root file.
   run …`; the detached catalyst subprocess prepends its own
   `/usr/bin/caffeinate -i -s`, `main._CAFFEINATE_BIN`). Do not remove. `-i`
   works on battery, `-s` is AC-only; a lid-close by the user still sleeps
-  the Mac (→ decisions 2026-10-17). Belt-and-suspenders: EOD/in-window
-  morning-gap runs probe `pmset -g batt` (`power.py`,
-  `main._alert_if_on_battery`) and ntfy once per HKT day
-  (`state/on_battery_alerted_<date>.txt`, 2-day cleanup); the conditional
+  the Mac (→ decisions 2026-10-17). **Battery + lid open is healthy;
+  battery + lid closed runs nothing** — the pmset wake is a 5–19s DarkWake
+  that ignores the assertion, and a job launched inside one is frozen until
+  the lid opens (→ decisions 2026-11-19). Belt-and-suspenders: EOD/in-window
+  morning-gap runs call `main._alert_if_on_battery` (`power.py`), which
+  pushes only when (a) the run was frozen ≥ 3 min by system sleep since
+  process start (`asleep_seconds` delta ≥ `_STALL_ALERT_SEC`; per run,
+  default priority, any power source) or (b) it is on battery below
+  `_LOW_BATTERY_PERCENT` = 20 (high, once per HKT day,
+  `state/on_battery_alerted_<date>.txt`, 2-day cleanup) — a plain battery
+  run stays silent, do not bring the blanket push back; the conditional
   RS group retries network errors (`_retry_on_network_error`: wait for
   finviz reachable ≤ 180s, 3 attempts; non-network errors propagate); and
   the trigger script polls `gh run view` status/conclusion for up to ~20 min

@@ -247,17 +247,15 @@ def notify_opend_down(
 def notify_on_battery(
     mode: str, percent: int | None, config: dict, output_dir: Path, today: str
 ) -> None:
-    """Push a high-priority ntfy warning when a scheduled run starts on battery.
+    """Push a high-priority ntfy warning when a run starts on a low battery.
 
-    2026-10-17: us-eod ran on battery (12%) with the lid closed. `sleep 1`
-    on battery put the Mac to sleep 3 minutes in; the run only advanced in
-    5-15s DarkWake windows with no Wi-Fi/DNS — 55 minutes, yfinance empty,
-    Futu 网络中断, and the conditional RS group (SPY -1.1% / QQQ -2.5%) lost
-    to NameResolutionError. The caffeinate wrapper now prevents the idle
-    sleep, but a battery run is still degraded, so the first run of the day
-    on battery says so. Fires **once per day** across all modes — marker
-    `state/on_battery_alerted_<today>.txt`, written only after a successful
-    POST so a failed push is retried by the next run.
+    Battery alone is fine: with the lid open a scheduled wake is a full wake
+    and caffeinate holds the scan (→ decisions 2026-11-19), so the caller
+    only gets here below `main._LOW_BATTERY_PERCENT`. What it warns about is
+    the charge running out — or the lid being closed, which on battery stops
+    every scheduled scan (see `notify_scan_stalled`). Fires **once per day**
+    across all modes — marker `state/on_battery_alerted_<today>.txt`, written
+    only after a successful POST so a failed push is retried by the next run.
     """
     notify_cfg = config.get("notify") or {}
     if not notify_cfg.get("enabled", False):
@@ -265,7 +263,7 @@ def notify_on_battery(
 
     topic = _topic(notify_cfg)
     if not topic:
-        logger.warning("[Notify] ntfy_topic missing for on-battery alert")
+        logger.warning("[Notify] ntfy_topic missing for low-battery alert")
         return
 
     marker = output_dir / "state" / f"on_battery_alerted_{today}.txt"
@@ -276,12 +274,12 @@ def notify_on_battery(
         pass
 
     server = notify_cfg.get("ntfy_server", "https://ntfy.sh").rstrip("/")
-    title = "Scanner running on battery: plug in the Mac"
+    title = "Scanner battery low: plug in the Mac"
     pct = f"{percent}%" if percent is not None else "unknown %"
     body = (
-        f"{mode}: Mac is on battery ({pct}). Scheduled scans need AC power — "
-        "on battery the Mac sleeps minutes after the wake and the scan stalls "
-        "or fails on network errors (2026-10-17: RS list lost)."
+        f"{mode}: Mac is on battery ({pct}). Scans keep running on battery "
+        "only while the lid is open and the charge lasts - a closed lid or an "
+        "empty battery stops them."
     )
     if not _ntfy_post(server, topic, title, body, priority="high"):
         return
@@ -290,6 +288,43 @@ def notify_on_battery(
         marker.write_text(f"{mode}\n")
     except OSError as e:
         logger.warning(f"[Notify] could not write {marker.name}: {e}")
+
+
+def notify_scan_stalled(mode: str, minutes: int, status, config: dict) -> None:
+    """Push an ntfy note when a run was frozen by system sleep.
+
+    2026-11-19: on battery with the lid closed a scheduled wake is only a
+    5-19s DarkWake that ignores the caffeinate assertion; hk-eod was launched
+    inside one at 20:05 and resumed at 20:23 when the lid opened. The run
+    carries on afterwards, so this is default priority and says how late it
+    is. Per run — no once-per-day marker: each frozen run is its own fact.
+    `status` is the current `power.PowerStatus` (None = unknown); the Mac may
+    have been plugged in since.
+    """
+    notify_cfg = config.get("notify") or {}
+    if not notify_cfg.get("enabled", False):
+        return
+
+    topic = _topic(notify_cfg)
+    if not topic:
+        logger.warning("[Notify] ntfy_topic missing for scan-stalled alert")
+        return
+
+    if status is None:
+        power = "power source unknown"
+    else:
+        pct = f" ({status.percent}%)" if status.percent is not None else ""
+        power = ("on battery" if status.on_battery else "on AC power") + pct
+
+    server = notify_cfg.get("ntfy_server", "https://ntfy.sh").rstrip("/")
+    title = f"Scan delayed {minutes} min: Mac was asleep"
+    body = (
+        f"{mode}: this run was frozen {minutes} min by system sleep and is "
+        "continuing now. On battery a closed lid sleeps the Mac and no "
+        "scheduled scan runs until the lid is opened or the Mac is plugged "
+        f"in. Now {power}."
+    )
+    _ntfy_post(server, topic, title, body, priority="default")
 
 
 def notify_finviz_broken(

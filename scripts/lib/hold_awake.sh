@@ -7,7 +7,9 @@
 # process then only advanced inside 5-15s DarkWake windows with no Wi-Fi/DNS
 # (55 min, yfinance empty, Futu 网络中断, conditional RS lost). -i prevents
 # idle sleep (works on battery), -s system sleep (AC only); a lid-close by
-# the user still sleeps the Mac. -w $$ releases the assertion when the
+# the user still sleeps the Mac, and on battery with the lid already closed
+# the wake is a seconds-long DarkWake that ignores both (2026-11-19: only
+# lid-open battery runs work). -w $$ releases the assertion when the
 # caller exits; a watchdog's process-group kill does not reach it
 # (caffeinate stays in the wrapper's group). Logs the power source once.
 hold_awake() {
