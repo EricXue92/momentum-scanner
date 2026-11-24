@@ -366,3 +366,11 @@ def test_run_charts_exactly_the_ranked_tickers(tmp_path, monkeypatch):
     assert "NEW" not in ranked
     chart = tmp_path / "Reports" / "ETF" / "etf_rs_trend.html"
     assert [s["t"] for s in _payload(chart.read_text())["series"]] == ranked
+
+
+def test_range_control_offers_only_the_3m_and_12m_spans():
+    html = etf_rs_chart._TEMPLATE
+    assert "const RANGES = [['近 3 月', 63], ['近 12 月', 252]];" in html
+    assert "[63, 252].includes(store.get('range', 63))" in html   # a saved 21 / 126 / 0 falls back to 3M
+    for gone in ("近 1 月", "近 6 月", "全部历史"):
+        assert gone not in html, gone

@@ -155,6 +155,8 @@ file keeps the cross-cutting pieces: the undated-file exceptions under
   64-252 bars keeps its 3M line with null 12M; `run_etf_rs` passes the
   ranked tickers only. The diff view is **12M rank − 3M rank** (positive =
   3M ahead of 12M = 走强, which also needs a positive 3M excess; else 止跌).
+  The span control offers only 近 3 月 (63) / 近 12 月 (252, clamped to the
+  page's days) — user decision 2026-11-24, do not re-add 1M / 6M / all.
   The holdings line is embedded verbatim as `strong` per series (`extras=`) and rendered
   under the holdings row of the side list (tooltip untouched). Soft inside
   `run_etf_rs`: a render failure never costs the `.txt`.

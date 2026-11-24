@@ -428,7 +428,8 @@ svg.dim .lab:not(.is-hover) { opacity: 0.4; }
   const SLOTS = 8, NS = 'http://www.w3.org/2000/svg';
   const HINT = '点击线条或右侧列表可固定颜色(最多 ' + SLOTS + ' 只);悬停查看持仓';
   const WINS = [['3 个月 RS', '3m'], ['12 个月 RS', '12m']];
-  const RANGES = [['近 1 月', 21], ['近 3 月', 63], ['近 6 月', 126], ['全部历史', 0]];
+  // the two spans match the two RS windows; 252 is clamped to the days the page carries (~250)
+  const RANGES = [['近 3 月', 63], ['近 12 月', 252]];
   const MODES = [['RS 评分', 'rs'], ['名次', 'rank'], ['超额收益 %', 'score'], ['3 个月 vs 12 个月 名次差', 'diff']];
   const SORTS = [['按名次', 'rank'], ['按名次差', 'diff']];
   const RS_LINE = 90;
@@ -469,7 +470,7 @@ svg.dim .lab:not(.is-hover) { opacity: 0.4; }
   const state = {
     win: ['3m', '12m'].includes(store.get('win', '3m')) ? store.get('win', '3m') : '3m',
     sort: ['rank', 'diff'].includes(store.get('sort', 'rank')) ? store.get('sort', 'rank') : 'rank',
-    range: [21, 63, 126, 0].includes(store.get('range', 63)) ? store.get('range', 63) : 63,
+    range: [63, 252].includes(store.get('range', 63)) ? store.get('range', 63) : 63,
     mode: ['rs', 'rank', 'score', 'diff'].includes(store.get('mode', 'rs')) ? store.get('mode', 'rs') : 'rs',
     clip: store.get('clip', true) !== false,   // score mode: keep one runaway ETF from flattening the rest
     pins: loadPins(),   // slot index = color; a slot stays with its ETF until unpinned
