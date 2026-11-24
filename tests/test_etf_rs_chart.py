@@ -18,12 +18,12 @@ import pytest
 
 @pytest.fixture(autouse=True)
 def _no_holdings_rs_network(monkeypatch):
-    """run_etf_rs now runs the holdings 1M step, whose default path goes
+    """run_etf_rs now runs the holdings 3M step, whose default path goes
     online; stub it to "nothing" unless a test installs its own fake."""
     monkeypatch.setattr(etf_holdings_rs, "compute_extras", lambda *a, **k: {})
     import etf_rs_leaders
     monkeypatch.setattr(etf_rs_leaders, "_fetch_daily_bars", lambda tickers: None)
-    monkeypatch.setattr(etf_rs_leaders, "_fetch_rs_1m_table", lambda output_dir, today: None)
+    monkeypatch.setattr(etf_rs_leaders, "_fetch_rs_3m_table", lambda output_dir, today: None)
 import etf_rs_chart
 
 _END = "2026-09-11"
@@ -175,7 +175,7 @@ def test_render_embeds_series_in_given_order_with_names_holdings_and_percent_sco
         "t": "AAA", "name": "甲", "holdings": "X、Y",
         "s": [round(v * 100, 2) for v in hist["AAA"]],
         "p": [int(v) for v in etf_rs_chart.percentile_history(hist)["AAA"]],
-        "s1": [None] * len(hist), "p1": [None] * len(hist),  # no 1M history given
+        "s12": [None] * len(hist), "p12": [None] * len(hist),  # no 12M history given
         "strong": "",  # no extras given
     }
     assert data["series"][0]["holdings"] == ""
@@ -185,10 +185,10 @@ def test_render_embeds_the_strongest_holdings_line_per_series():
     hist = etf_rs_chart.score_history(_klines(), ["BBB", "AAA"], "SPY")
     html = etf_rs_chart.render_html(
         hist, {}, {}, "SPY", date(2026, 9, 12),
-        extras={"AAA": "1M强: X > Y > Z", "ZZZ": "1M强: ignored"},
+        extras={"AAA": "3M强: X > Y > Z", "ZZZ": "3M强: ignored"},
     )
     data = _payload(html)
-    assert [s["strong"] for s in data["series"]] == ["", "1M强: X > Y > Z"]
+    assert [s["strong"] for s in data["series"]] == ["", "3M强: X > Y > Z"]
     # the ranking list renders it under the holdings of each row, set off
     # from the holdings by a rule above it
     assert "S[k].strong" in html
@@ -233,10 +233,10 @@ def test_write_trend_chart_overwrites_one_undated_file(tmp_path):
 def test_write_trend_chart_passes_extras_through(tmp_path):
     out = etf_rs_chart.write_trend_chart(
         _klines(), ["AAA", "BBB"], "SPY", {}, {}, tmp_path, date(2026, 9, 12),
-        extras={"BBB": "1M强: Q (前十大)"},
+        extras={"BBB": "3M强: Q (前十大)"},
     )
     data = _payload(out.read_text())
-    assert {s["t"]: s["strong"] for s in data["series"]} == {"AAA": "", "BBB": "1M强: Q (前十大)"}
+    assert {s["t"]: s["strong"] for s in data["series"]} == {"AAA": "", "BBB": "3M强: Q (前十大)"}
 
 
 def test_write_trend_chart_without_history_writes_nothing(tmp_path):
@@ -267,11 +267,11 @@ def test_run_writes_chart_in_ranking_order(tmp_path, monkeypatch):
 def test_run_passes_the_holdings_line_to_the_chart(tmp_path, monkeypatch):
     monkeypatch.setattr(etf_rs, "_fetch_klines", lambda *a, **k: _klines())
     monkeypatch.setattr(etf_holdings_rs, "compute_extras",
-                        lambda *a, **k: {"AAA": "1M强: X > Y"})
+                        lambda *a, **k: {"AAA": "3M强: X > Y"})
     etf_rs.run_etf_rs(_cfg(), tmp_path, date(2026, 9, 12))
     chart = tmp_path / "Reports" / "ETF" / "etf_rs_trend.html"
     strong = {s["t"]: s["strong"] for s in _payload(chart.read_text())["series"]}
-    assert strong["AAA"] == "1M强: X > Y" and strong["BBB"] == ""
+    assert strong["AAA"] == "3M强: X > Y" and strong["BBB"] == ""
 
 
 def test_run_chart_failure_does_not_lose_the_ranking(tmp_path, monkeypatch):
@@ -285,52 +285,84 @@ def test_run_chart_failure_does_not_lose_the_ranking(tmp_path, monkeypatch):
     assert out is not None and out.exists()
 
 
-# --- 1M window alongside 3M ---
+# --- 12M window alongside 3M (replaced the 1M weekly ladder 2026-11-24) ---
 
 
-def test_history_1m_uses_weekly_ladder_and_is_scorable_from_bar_21():
-    from us_rs_3m import WEIGHTS_1M_BARS
-    klines = {"AAA": _walk(1), "SPY": _walk(9)}
-    h1 = etf_rs_chart.score_history(klines, ["AAA"], "SPY", weights_bars=WEIGHTS_1M_BARS)
+def test_12m_ladder_is_the_ibd_quarter_ladder_in_bars():
+    assert etf_rs_chart.WEIGHTS_12M_BARS == [(63, 0.4), (126, 0.2), (189, 0.2), (252, 0.2)]
+
+
+def test_history_12m_is_scorable_from_bar_253_and_matches_the_ranking_arithmetic():
+    klines = {"AAA": _walk(1, n=300), "SPY": _walk(9, n=300)}
+    h12 = etf_rs_chart.score_history(klines, ["AAA"], "SPY", weights_bars=etf_rs_chart.WEIGHTS_12M_BARS)
     h3 = etf_rs_chart.score_history(klines, ["AAA"], "SPY")
-    assert len(h1) == 120 - 20 and len(h3) == 120 - 63
-    day = h1.index[-1]
+    assert len(h12) == 300 - 252 and len(h3) == 300 - 63
+    day = h12.index[-1]
     expected = etf_rs.rank_etfs(_truncate(klines, day), ["AAA"], "SPY",
-                                weights_bars=WEIGHTS_1M_BARS).loc["AAA", "raw_score"]
-    assert math.isclose(h1.loc[day, "AAA"], expected)
+                                weights_bars=etf_rs_chart.WEIGHTS_12M_BARS).loc["AAA", "raw_score"]
+    assert math.isclose(h12.loc[day, "AAA"], expected)
 
 
-def test_render_embeds_1m_series_aligned_to_the_3m_calendar():
-    from us_rs_3m import WEIGHTS_1M_BARS
-    klines = _klines()
+def test_render_embeds_12m_series_aligned_to_the_3m_calendar():
+    klines = {"AAA": _walk(1, n=300), "BBB": _walk(2, n=300), "SPY": _walk(9, n=300)}
     h3 = etf_rs_chart.score_history(klines, ["AAA", "BBB"], "SPY")
-    h1 = etf_rs_chart.score_history(klines, ["AAA", "BBB"], "SPY", weights_bars=WEIGHTS_1M_BARS)
-    data = _payload(etf_rs_chart.render_html(h3, {}, {}, "SPY", date(2026, 9, 12), history_1m=h1))
+    h12 = etf_rs_chart.score_history(klines, ["AAA", "BBB"], "SPY",
+                                     weights_bars=etf_rs_chart.WEIGHTS_12M_BARS)
+    data = _payload(etf_rs_chart.render_html(h3, {}, {}, "SPY", date(2026, 9, 12), history_12m=h12))
     aaa = data["series"][0]
-    assert len(aaa["s1"]) == len(data["dates"]) == len(h3)
-    assert aaa["s1"][-1] == round(float(h1["AAA"].iloc[-1]) * 100, 2)
-    assert aaa["p1"][-1] == int(etf_rs_chart.percentile_history(h1)["AAA"].iloc[-1])
+    assert len(aaa["s12"]) == len(data["dates"]) == len(h3)
+    assert aaa["s12"][0] is None                      # 3M calendar starts 189 days before 12M does
+    assert aaa["s12"][-1] == round(float(h12["AAA"].iloc[-1]) * 100, 2)
+    assert aaa["p12"][-1] == int(etf_rs_chart.percentile_history(h12)["AAA"].iloc[-1])
 
 
-def test_write_trend_chart_keeps_1m_only_tickers_with_null_3m(tmp_path):
-    klines = _klines()
-    klines["NEW"] = _walk(4, n=40)   # 40 bars: 1M scorable, 3M not
+def test_write_trend_chart_starts_where_12m_does_and_keeps_3m_only_tickers(tmp_path):
+    klines = {"AAA": _walk(1, n=300), "BBB": _walk(2, n=300), "SPY": _walk(9, n=300)}
+    klines["NEW"] = _walk(4, n=150)   # 150 bars: 3M scorable, 12M not
     out = etf_rs_chart.write_trend_chart(
         klines, ["AAA", "BBB", "NEW"], "SPY", {}, {}, tmp_path, date(2026, 9, 12))
     data = _payload(out.read_text())
     assert [s["t"] for s in data["series"]] == ["AAA", "BBB", "NEW"]
-    new = data["series"][2]
-    assert all(v is None for v in new["s"]) and new["s1"][-1] is not None
-    assert len(data["dates"]) == 120 - 63   # calendar stays the 3M one
+    assert len(data["dates"]) == 300 - 252            # both windows cover the same span
+    aaa, new = data["series"][0], data["series"][2]
+    assert None not in aaa["s"] and None not in aaa["s12"]
+    assert new["s"][-1] is not None and all(v is None for v in new["s12"])
 
 
-def test_run_passes_3m_unscored_tickers_to_the_chart(tmp_path, monkeypatch):
+def test_write_trend_chart_without_a_year_of_history_falls_back_to_the_3m_calendar(tmp_path):
+    out = etf_rs_chart.write_trend_chart(
+        _klines(), ["AAA", "BBB"], "SPY", {}, {}, tmp_path, date(2026, 9, 12))
+    data = _payload(out.read_text())
+    assert len(data["dates"]) == 120 - 63
+    assert all(v is None for s in data["series"] for v in s["s12"])
+
+
+def test_page_has_a_12m_window_and_nothing_left_of_the_1m_one():
+    html = etf_rs_chart.render_html(
+        etf_rs_chart.score_history(_klines(), ["AAA", "BBB"], "SPY"), {}, {}, "SPY", date(2026, 9, 12))
+    for series in _payload(html)["series"]:
+        assert set(series) == {"t", "name", "holdings", "strong", "s", "p", "s12", "p12"}
+    for there in ("['12 个月 RS', '12m']", "3 个月 vs 12 个月 名次差", "0.4·R63 + 0.2·R126 + 0.2·R189 + 0.2·R252"):
+        assert there in html, there
+    for gone in ("1 个月", "1M", "'1m'", "ranks1[", ".s1[", ".p1[", "R5 "):
+        assert gone not in html.replace("12 个月", "").replace("12M", ""), gone
+
+
+def test_diff_view_reads_3m_ahead_of_12m_as_gaining():
+    # rank difference = 12M rank − 3M rank (positive = the 3M ladder ranks it
+    # higher); the 走强 group additionally needs a positive 3M excess.
+    html = etf_rs_chart._TEMPLATE
+    assert "ranks12[k][i] - ranks3[k][i]" in html
+    assert "return S[k].s[i] > 0 ? 0 : 1;" in html
+
+
+def test_run_charts_exactly_the_ranked_tickers(tmp_path, monkeypatch):
     klines = _klines()
-    klines["NEW"] = _walk(4, n=40)
+    klines["NEW"] = _walk(4, n=40)   # below the 3M ladder's 64 bars: no line on either window
     monkeypatch.setattr(etf_rs, "_fetch_klines", lambda *a, **k: klines)
     cfg = _cfg(); cfg["tickers"]["NEW"] = "新"
     out = etf_rs.run_etf_rs(cfg, tmp_path, date(2026, 9, 12))
     ranked = [line.split()[1] for line in out.read_text().splitlines()]
     assert "NEW" not in ranked
     chart = tmp_path / "Reports" / "ETF" / "etf_rs_trend.html"
-    assert [s["t"] for s in _payload(chart.read_text())["series"]] == ranked + ["NEW"]
+    assert [s["t"] for s in _payload(chart.read_text())["series"]] == ranked

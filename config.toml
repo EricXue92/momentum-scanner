@@ -99,11 +99,11 @@ delisted_after_sessions = 10
 # 写 output/TV/US/<date>_ETF_rs_3m.txt: 每行一只 `TICKER - 中文名`, 最强在最上面。
 # 排名快照: 同日重跑覆盖, 不进 eod_seen 去重, 不镜像 Webull, 不同步 Futu/TV。
 # 带分数的完整表在 EOD 日志里。手动重跑: `uv run main.py --mode etf-rs`。
-# 同一步再按 1M 周阶梯 (最近 1/2/3/4 周累计收益, 即回看 5/10/15/20 根, 权重 0.4/0.2/0.2/0.2,
-# 至少 21 根) 排一次, 写 output/TV/US/<date>_ETF_rs_1m.txt, 格式相同, 涨跌标记只和前一天的 _1m 文件比。
+# 1M 周阶梯 (<date>_ETF_rs_1m.txt / "1M强" 行 / 走势页的 1M 窗口) 已于 2026-11-24 全部停用: 排名文件只有 3M。
 # 同一步还会生成走势页 output/Reports/ETF/etf_rs_trend.html (单文件, 每次覆盖):
-# 用同一批 K 线重算每个交易日的 RS 评分 / 名次 / 超额收益, 当日前 chart_top_n 画粗线;
-# 页面可切换 3M / 1M 窗口, 并有 "1M−3M 名次差" 视图 (正 = 1M 名次领先 3M, 正在走强)。
+# 用同一批 K 线 (2 年) 重算每个交易日的 RS 评分 / 名次 / 超额收益, 当日前 chart_top_n 画粗线;
+# 页面可切换 3M / 12M 窗口 (12M = 0.4·R63 + 0.2·R126 + 0.2·R189 + 0.2·R252, 至少 253 根, 上市不满一年的没有 12M 线),
+# 并有 "3M vs 12M 名次差" 视图 (正 = 3M 名次领先 12M, 正在走强)。
 # 名单在 [etf_rs.tickers] 表里维护: 左边 ticker, 右边中文名 (增删改这里即可)。
 # 中文名完全相同的几只视为同一品种, 文件里只显示排名最高的那一只
 # (如 GDXU / NUGT 同为"黄金矿业 杠杆做多"); 想让两只都显示就把名字写得不同。
@@ -112,13 +112,13 @@ enabled = true
 benchmark = "SPY"
 chart_top_n = 20          # 走势页里画粗线的名次数 (按最新一天排名)
 
-# 成分股 1M 强势前 5 (etf_holdings_rs.py): 每只 ETF 行下缩进一行 "1M强: A > B > C > D > E"
-# (3M / 1M 两个文件都有, 同一次计算结果)。
+# 成分股 3M 强势前 5 (etf_holdings_rs.py): 每只 ETF 行下缩进一行 "3M强: A > B > C > D > E"。
 # 成分股来源链: 当日缓存 → stockanalysis.com holdings 页 (免费版只给权重前 25)
 # → ≤ cache_max_age_days 天内旧缓存 → yfinance 前十大 (行尾标 "(前十大)") → 放弃 (不写该行)。
 # 只算美股上市的成分股: 以页面 Symbol 单元格链到 /stocks/<sym>/ 为准 (海外 / 现金 / 期货行跳过),
 # 兜底来源没有这个标记时退回正则 (1-5 个大写字母, 可带 .B 类后缀; 5 字母以 X 结尾的基金代码排除)。
-# 1M 算法与上面的 _1m 文件相同 (对 SPY 超额), 只在该 ETF 内部排序。
+# 3M 算法与上面的排名文件相同 (0.5·R1M + 0.3·R2M + 0.2·R3M, 对 SPY 超额), 只在该 ETF 内部排序;
+# 上市不足 64 根日线的成分股没有 3M 分数, 不参与。
 # 连续 3 次在线抓取失败 (超时 / 403 / 5xx; 404 不算) 后本次不再上网, 只走缓存 / 前十大。
 # 缓存 output/state/etf_holdings_<date>.json (只存 stockanalysis 结果, 8 天清理); 同日重跑读缓存不上网。
 # 软步骤: 失败只少这一行, 排名文件照常。GitHub Pages 云端构建不跑这一步 (页面不显示)。
@@ -128,7 +128,7 @@ top_n = 5                   # 每只 ETF 下面列几只
 cache_max_age_days = 7      # stockanalysis 抓取失败时最多走回几天缓存
 request_delay_sec = 0.8     # 相邻两次 stockanalysis 请求的间隔 (秒)
 
-# 龙头累积名单 (etf_rs_leaders.py): 每天取 1M 文件前 top_etfs 只 ETF 的 "1M强" 股票,
+# 龙头累积名单 (etf_rs_leaders.py): 每天取 3M 排名文件前 top_etfs 只 ETF 的 "3M强" 股票,
 # 合并进 TV/US/ETF_rs_leaders.txt (不带日期、只增不减、逗号分隔可直接导入 TradingView;
 # 删除即重置), 当天新进的名字另写 TV/US/<date>_ETF_rs_new.txt (无新增不写, 同日重跑保留首次)。
 # 主表每天也会裁剪 (加完当天新名字之后): 收盘连续 ≥ 2 个交易日低于 SMA50, 且最新收盘
@@ -146,9 +146,9 @@ min_price = 20.0
 min_dollar_volume = 100_000_000
 min_adr_percent = 3.5
 # 只卡新进名字 (已在名单里的仍只走上面的下限 + SMA50 首破): 收盘价严格高于这些均线,
-# 且全美股 1M RS 百分位 >= 阈值 (云端 data/us_rs_3m 的 rs_percentile_1m)。[] / 0 = 关。
+# 且全美股 3M RS 百分位 >= 阈值 (云端 data/us_rs_3m 的 rs_percentile)。[] / 0 = 关。
 entry_above_sma = [50, 200]
-entry_min_rs_percentile_1m = 90
+entry_min_rs_percentile_3m = 90
 
 [etf_rs.tickers]
 # --- 美股行业 / 主题 ---

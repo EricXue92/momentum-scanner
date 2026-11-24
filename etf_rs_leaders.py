@@ -1,9 +1,9 @@
 """Cumulative TradingView watchlist of the strongest constituents of the
 strongest ETFs (``[etf_rs.leaders]``).
 
-Every run, after ``etf_rs`` has written ``<date>_ETF_rs_1m.txt``, the top
+Every run, after ``etf_rs`` has written ``<date>_ETF_rs_3m.txt``, the top
 ``top_etfs`` (10) rows of THAT file are read back and the symbols of their
-``   1M强: A > B > …`` continuation lines (``etf_holdings_rs``) are merged,
+``   3M强: A > B > …`` continuation lines (``etf_holdings_rs``) are merged,
 in rank order, into one candidate list (≤ 10 × 5 names; an ETF without a
 line — IBIT, a 404, a fetch failure — contributes nothing and is not
 back-filled from rank 11). The file, not the in-memory tables, is the
@@ -38,12 +38,13 @@ added, like every other gate's pass-through) and to the **existing master** in
 the same prune pass below. One 1y batch for master ∪ today's candidates serves
 both (``run_leaders``).
 
-**Entry-only gates** (``entry_above_sma`` [50, 200] / ``entry_min_rs_percentile_1m``
+**Entry-only gates** (``entry_above_sma`` [50, 200] / ``entry_min_rs_percentile_3m``
 90; ``[]`` / 0 = off): a NEW name also needs its latest close strictly above
-both SMAs (a period longer than its history is not judged) and a market-wide 1M
-RS percentile ≥ 90 (``rs_percentile_1m`` in the cloud US RS table; no table, no
-column, or a ticker absent from it → not judged). They are NOT retention rules:
-once on the list, a name leaves only through the floors or the prune below, so
+both SMAs (a period longer than its history is not judged) and a market-wide 3M
+RS percentile ≥ 90 (``rs_percentile`` in the cloud US 3M RS table; no table, no
+column, or a ticker absent from it → not judged). Both the source file and
+this gate were on the 1M ladder until 2026-11-24 (→ decisions). They are NOT
+retention rules: once on the list, a name leaves only through the floors or the prune below, so
 the first-break rule keeps its meaning.
 
 **Prune rule** (``find_break_drops``, after today's names were added, over
@@ -64,8 +65,8 @@ the EOD master holds it (``run_leaders``, before the download; logged, not in
 the pruned file). It can come back once the EOD master has dropped it. No EOD
 master file (the cloud Pages build) → no dedup.
 
-Soft step: ``run_etf_rs`` wraps it; a failure costs neither ranking file nor
-the trend page. No ntfy, no Webull mirror, no Futu/TV sync.
+Soft step: ``run_etf_rs`` wraps it; a failure costs neither the ranking file
+nor the trend page. No ntfy, no Webull mirror, no Futu/TV sync.
 """
 
 from __future__ import annotations
@@ -80,6 +81,7 @@ from typing import NamedTuple
 import pandas as pd
 
 import us_rs_3m
+from etf_holdings_rs import EXTRA_PREFIX as _EXTRA_PREFIX
 
 logger = logging.getLogger("momentum_scanner")
 
@@ -95,8 +97,8 @@ DOLLAR_VOLUME_WINDOW = 20
 DEFAULT_MIN_ADR_PERCENT = 3.5
 ADR_WINDOW = 20
 DEFAULT_ENTRY_ABOVE_SMA = (50, 200)
-DEFAULT_ENTRY_MIN_RS_1M = 90
-RS_1M_COLUMN = "rs_percentile_1m"
+DEFAULT_ENTRY_MIN_RS_3M = 90
+RS_3M_COLUMN = "rs_percentile"   # market-wide 3M percentile of the cloud US RS table
 _UNSET = object()
 
 
@@ -107,14 +109,13 @@ class Bars(NamedTuple):
     volumes: dict[str, pd.Series]
     highs: dict[str, pd.Series]
 
-_EXTRA_PREFIX = "1M强:"
 _EXTRA_SUFFIX_RE = re.compile(r"\s*\([^()]*\)\s*$")       # " (前十大)"
 _ROW_RE = re.compile(r"^(\d+)\.\s+(\S+)")                  # "12. XLV 🟢↑2 - …"
 _SPLIT_RE = re.compile(r"[,\s]+")
 
 
 def parse_extra(line: str) -> list[str]:
-    """Inverse of ``etf_holdings_rs.format_extra``: ``"   1M强: A > B (前十大)"``
+    """Inverse of ``etf_holdings_rs.format_extra``: ``"   3M强: A > B (前十大)"``
     → ``["A", "B"]``. Anything that is not such a line → ``[]``."""
     text = line.strip()
     if not text.startswith(_EXTRA_PREFIX):
@@ -125,7 +126,7 @@ def parse_extra(line: str) -> list[str]:
 
 def parse_ranking(text: str) -> list[tuple[str, list[str]]]:
     """``[(etf, strongest_constituents)]`` in file order, one entry per
-    ``N. TICKER …`` row; the constituents come from the indented ``1M强:``
+    ``N. TICKER …`` row; the constituents come from the indented ``3M强:``
     line right under the row (``[]`` when the row has none)."""
     entries: list[tuple[str, list[str]]] = []
     for line in text.splitlines():
@@ -176,7 +177,7 @@ def _write_csv(path: Path, symbols: list[str]) -> None:
 
 def _canon(symbol: str) -> str:
     """Comparison key across the two masters: Finviz writes ``BRK-B`` into the
-    EOD master, the ETF 1M line displays ``BRK.B``."""
+    EOD master, the ETF holdings line displays ``BRK.B``."""
     return symbol.replace("-", ".")
 
 
@@ -209,7 +210,7 @@ def _todays_new(cfg: dict, output_dir: Path, ranking_path: Path | None) -> tuple
         logger.info(f"[{_LABEL}] disabled in config; skipping")
         return [], []
     if ranking_path is None or not Path(ranking_path).is_file():
-        logger.warning(f"[{_LABEL}] no 1M ranking file to read; skipping")
+        logger.warning(f"[{_LABEL}] no ranking file to read; skipping")
         return [], []
     top_etfs = int(cfg.get("top_etfs", DEFAULT_TOP_ETFS))
     entries = parse_ranking(Path(ranking_path).read_text(encoding="utf-8"))
@@ -247,18 +248,18 @@ def _entry_sma_periods(cfg: dict) -> list[int]:
 
 
 def _entry_rs_threshold(cfg: dict) -> float:
-    return float(cfg.get("entry_min_rs_percentile_1m", DEFAULT_ENTRY_MIN_RS_1M))
+    return float(cfg.get("entry_min_rs_percentile_3m", DEFAULT_ENTRY_MIN_RS_3M))
 
 
 def update_leaders(cfg: dict, output_dir: Path, today: date, ranking_path: Path | None,
                    bars: Bars | None = None,
                    plan: tuple[list[str], list[str]] | None = None,
                    rs_table: pd.DataFrame | None = None) -> list[str]:
-    """Grow the master from today's 1M ranking file; returns the names added
+    """Grow the master from today's ranking file; returns the names added
     today (``[]`` when disabled, no file, or nothing new). With ``bars``,
     candidates under the price / dollar-volume / ADR% floors or not above the
     entry SMAs are not added (a candidate with no bars passes through); with
-    ``rs_table``, neither are those under the market-wide 1M RS threshold.
+    ``rs_table``, neither are those under the market-wide 3M RS threshold.
     ``plan`` is ``_todays_new``'s result when the caller already computed it.
     Writes ``<date>_ETF_rs_new.txt`` only when there is something new AND the
     day has no such file yet."""
@@ -272,7 +273,7 @@ def update_leaders(cfg: dict, output_dir: Path, today: date, ranking_path: Path 
         gates.append((f"close > SMA{_entry_sma_periods(cfg)}",
                       find_below_sma_drops(new_closes, _entry_sma_periods(cfg))))
     threshold = _entry_rs_threshold(cfg)
-    gates.append((f"1M RS ≥ {threshold:g}", find_rs_1m_drops(new, rs_table, threshold)))
+    gates.append((f"3M RS ≥ {threshold:g}", find_rs_3m_drops(new, rs_table, threshold)))
     for label, rejected in gates:
         hit = sorted(r for r in rejected if r in new)
         if hit:
@@ -308,7 +309,7 @@ def _fetch_daily_bars(tickers: list[str]) -> Bars | None:
     from main import _yf_download_with_retry  # local import: main imports etf_rs
     from sma50_prune import drop_stale_series, fill_missing_last_close
 
-    # The master / 1M line carry the display form (`BRK.B`); Yahoo only knows
+    # The master / holdings line carry the display form (`BRK.B`); Yahoo only knows
     # `BRK-B`. Unconverted, a class share came back with no bars and so
     # passed every gate and was never pruned ("no bars → kept").
     yf_of = {t: to_yf_symbol(t) for t in tickers}
@@ -342,20 +343,20 @@ def _fetch_daily_bars(tickers: list[str]) -> Bars | None:
                 {t: highs[t] for t in closes if t in highs})
 
 
-def _fetch_rs_1m_table(output_dir: Path, today: date) -> pd.DataFrame | None:
-    """The cloud-published US RS table, when it carries the market-wide 1M
-    percentile. None (gate waived, WARNING) when it is unreachable or was
-    published before the column existed. Monkeypatched in tests."""
+def _fetch_rs_3m_table(output_dir: Path, today: date) -> pd.DataFrame | None:
+    """The cloud-published US 3M RS table (market-wide ``rs_percentile``).
+    None (gate waived, WARNING) when it is unreachable or lacks the column.
+    Monkeypatched in tests."""
     try:
         table = us_rs_3m.build_3m_table(output_dir, today)
     except Exception as e:
-        logger.warning(f"[{_LABEL}] 1M RS table failed to load ({e}); 1M RS gate waived")
+        logger.warning(f"[{_LABEL}] 3M RS table failed to load ({e}); 3M RS gate waived")
         return None
     if table is None:
-        logger.warning(f"[{_LABEL}] no cloud RS table; 1M RS gate waived")
+        logger.warning(f"[{_LABEL}] no cloud RS table; 3M RS gate waived")
         return None
-    if RS_1M_COLUMN not in table.columns:
-        logger.warning(f"[{_LABEL}] cloud RS table has no {RS_1M_COLUMN} column; 1M RS gate waived")
+    if RS_3M_COLUMN not in table.columns:
+        logger.warning(f"[{_LABEL}] cloud RS table has no {RS_3M_COLUMN} column; 3M RS gate waived")
         return None
     return table
 
@@ -372,15 +373,15 @@ def find_below_sma_drops(closes: dict[str, pd.Series], periods) -> list[str]:
     return sorted(drops)
 
 
-def find_rs_1m_drops(names: list[str], table: pd.DataFrame | None, threshold: float) -> list[str]:
-    """Names whose market-wide 1M RS percentile is below ``threshold``. A
+def find_rs_3m_drops(names: list[str], table: pd.DataFrame | None, threshold: float) -> list[str]:
+    """Names whose market-wide 3M RS percentile is below ``threshold``. A
     missing table or column, an absent ticker, or a blank value is not judged
     (the RS gates' missing → kept policy); ``threshold`` ≤ 0 is off."""
-    if threshold <= 0 or table is None or RS_1M_COLUMN not in table.columns:
+    if threshold <= 0 or table is None or RS_3M_COLUMN not in table.columns:
         return []
     drops: list[str] = []
     for t in names:
-        if t in table.index and pd.notna(table.at[t, RS_1M_COLUMN]) and float(table.at[t, RS_1M_COLUMN]) < threshold:
+        if t in table.index and pd.notna(table.at[t, RS_3M_COLUMN]) and float(table.at[t, RS_3M_COLUMN]) < threshold:
             drops.append(t)
     return sorted(drops)
 
@@ -538,6 +539,6 @@ def run_leaders(cfg: dict, output_dir: Path, today: date, ranking_path: Path | N
         bars = _fetch_daily_bars(master + new)
         if bars is None:
             logger.warning(f"[{_LABEL}] bar download failed; price gates waived, prune skipped")
-    rs_table = _fetch_rs_1m_table(output_dir, today) if new and _entry_rs_threshold(cfg) > 0 else None
+    rs_table = _fetch_rs_3m_table(output_dir, today) if new and _entry_rs_threshold(cfg) > 0 else None
     update_leaders(cfg, output_dir, today, ranking_path, bars=bars, plan=(master, new), rs_table=rs_table)
     prune_master(cfg, output_dir, today, bars=bars)

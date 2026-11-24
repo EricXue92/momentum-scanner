@@ -1,4 +1,4 @@
-"""Trend page for the daily ETF 3M RS ranking (``etf_rs``).
+"""Trend page for the daily ETF RS ranking (``etf_rs``): 3M + 12M windows.
 
 The dated ``TV/US/<date>_ETF_rs_3m.txt`` snapshots age out after 5 days and carry
 no scores, so they cannot show how the ranking evolved. This module instead
@@ -21,6 +21,11 @@ History is recomputed with *today's* ticker list and split/dividend-adjusted
 closes, so a past day can sit a place or two off that day's ``.txt``; the last
 day matches today's ranking exactly (same klines, same algorithm).
 
+Two windows on one page: the **3M** ladder of the ``.txt`` and a **12M**
+ladder (``WEIGHTS_12M_BARS`` — the IBD quarters of ``us_rs_12m``, 253 bars
+minimum), plus a "3M vs 12M rank difference" view (3M ahead of 12M = gaining).
+The 12M window replaced the 1M weekly ladder on 2026-11-24 (→ decisions).
+
 Soft-fail by design: ``run_etf_rs`` wraps the call, a failure only warns.
 """
 
@@ -34,6 +39,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+import us_rs_12m
 import us_rs_3m
 
 logger = logging.getLogger("momentum_scanner")
@@ -43,6 +49,15 @@ _SUBDIR = Path("Reports") / "ETF"
 _FILENAME = "etf_rs_trend.html"
 _DATA_SLOT = "__ETF_RS_DATA__"
 
+#: 12M ladder in bars: 0.4·R63 + 0.2·R126 + 0.2·R189 + 0.2·R252 — the quarter
+#: weights of the stock-universe 12M table (``us_rs_12m.WEIGHTS_12M``), scored
+#: here like the 3M ladder (weighted return minus the benchmark's, 253 bars
+#: minimum — an ETF listed for less than a year has no 12M value, where the
+#: cloud table would measure it from its first bar). Within one day the order
+#: is the same as the cloud's (1 + s) / (1 + s_SPY) ratio.
+WEIGHTS_12M_BARS: list[tuple[int, float]] = [
+    (q * us_rs_12m.BARS_PER_QUARTER, w) for q, w in us_rs_12m.WEIGHTS_12M]
+
 
 def _ticker_scores(df: pd.DataFrame | None,
                    weights_bars: list[tuple[int, float]] | None = None) -> pd.Series:
@@ -50,8 +65,8 @@ def _ticker_scores(df: pd.DataFrame | None,
 
     Same arithmetic as ``us_rs_3m._score_from_kline_bars`` applied to the
     kline truncated at each bar: offsets count the ticker's **own** rows, NaN
-    before the (max lag + 1)th bar (64 for the default 3M ladder, 21 for
-    ``WEIGHTS_1M_BARS``) and wherever a close involved is non-positive."""
+    before the (max lag + 1)th bar (64 for the default 3M ladder, 253 for
+    ``WEIGHTS_12M_BARS``) and wherever a close involved is non-positive."""
     if weights_bars is None:
         weights_bars = us_rs_3m._months_to_bars(us_rs_3m.WEIGHTS_3M)
     if df is None or df.empty:
@@ -85,7 +100,7 @@ def score_history(
     """Benchmark-relative score per trading day (index) and ticker (columns,
     in ``tickers`` order) — each row is what ``etf_rs.rank_etfs`` would have
     scored on klines truncated to that day. ``weights_bars`` None = the 3M
-    ladder; ``us_rs_3m.WEIGHTS_1M_BARS`` = the 1M weekly ladder.
+    ladder; ``WEIGHTS_12M_BARS`` = the 12M quarter ladder.
 
     The calendar is the benchmark's scorable days. A ticker with no bar on a
     day carries its latest earlier bar (the daily run scores whatever its last
@@ -124,25 +139,25 @@ def render_html(
     benchmark: str,
     today: date,
     top_n: int = 20,
-    history_1m: pd.DataFrame | None = None,
+    history_12m: pd.DataFrame | None = None,
     extras: dict[str, str] | None = None,
 ) -> str:
     """The self-contained page. Series keep ``history``'s column order (the
     caller passes today's ranking order, strongest first); per day it embeds
     the 0-99 RS percentile (``p``) and the raw relative score in percent
-    (``s``) of the 3M ladder, plus the same for the 1M ladder (``p1`` /
-    ``s1``, from ``history_1m`` aligned to ``history``'s calendar and
+    (``s``) of the 3M ladder, plus the same for the 12M ladder (``p12`` /
+    ``s12``, from ``history_12m`` aligned to ``history``'s calendar and
     columns), unscored days as null. ``extras`` is the per-ETF
-    ``1M强: A > B …`` line of the ``.txt`` (``etf_holdings_rs``), embedded
+    ``3M强: A > B …`` line of the ``.txt`` (``etf_holdings_rs``), embedded
     verbatim as ``strong`` ("" when absent) and shown under the holdings
     in the ranking list."""
     pct = percentile_history(history)
-    if history_1m is None or history_1m.empty:
-        h1 = pd.DataFrame(index=history.index, columns=history.columns, dtype=float)
-        p1 = h1
+    if history_12m is None or history_12m.empty:
+        h12 = pd.DataFrame(index=history.index, columns=history.columns, dtype=float)
+        p12 = h12
     else:
-        p1 = percentile_history(history_1m).reindex(index=history.index, columns=history.columns)
-        h1 = history_1m.reindex(index=history.index, columns=history.columns)
+        p12 = percentile_history(history_12m).reindex(index=history.index, columns=history.columns)
+        h12 = history_12m.reindex(index=history.index, columns=history.columns)
     payload = {
         "generated": today.isoformat(),
         "benchmark": benchmark,
@@ -156,8 +171,8 @@ def render_html(
                 "strong": (extras or {}).get(t, ""),
                 "s": [None if pd.isna(v) else round(float(v) * 100, 2) for v in history[t]],
                 "p": [None if pd.isna(v) else int(v) for v in pct[t]],
-                "s1": [None if pd.isna(v) else round(float(v) * 100, 2) for v in h1[t]],
-                "p1": [None if pd.isna(v) else int(v) for v in p1[t]],
+                "s12": [None if pd.isna(v) else round(float(v) * 100, 2) for v in h12[t]],
+                "p12": [None if pd.isna(v) else int(v) for v in p12[t]],
             }
             for t in history.columns
         ],
@@ -179,23 +194,27 @@ def write_trend_chart(
     extras: dict[str, str] | None = None,
 ) -> Path | None:
     """Write ``Reports/ETF/etf_rs_trend.html`` (overwritten every run) for
-    ``tickers`` in the given order — 3M history plus the 1M weekly-ladder
-    history on the same calendar. A ticker scorable only on 1M (21-63 bars)
-    keeps its column with null 3M values. No scorable history → no file,
+    ``tickers`` in the given order — 3M history plus the 12M ladder's on
+    the same calendar. The page starts on the first day the 12M ladder is
+    scorable (the benchmark's 253rd bar), so both windows cover the same
+    span; with too little history for any 12M score it falls back to the
+    whole 3M calendar and the 12M values are null. A ticker with 64-252
+    bars keeps its 3M line with null 12M values. No 3M history → no file,
     None."""
     history = score_history(klines, tickers, benchmark)
-    history_1m = score_history(klines, tickers, benchmark, weights_bars=us_rs_3m.WEIGHTS_1M_BARS)
-    if history.empty and history_1m.empty:
+    if history.empty:
         logger.warning(f"[{_LABEL}] no score history; trend chart not written")
         return None
-    calendar = history.index if not history.empty else history_1m.index
-    cols = [t for t in tickers if t in history.columns or t in history_1m.columns]
-    history = history.reindex(index=calendar, columns=cols)
-    history_1m = history_1m.reindex(index=calendar, columns=cols)
+    history_12m = score_history(klines, tickers, benchmark, weights_bars=WEIGHTS_12M_BARS)
+    if not history_12m.empty:
+        trimmed = history.loc[history_12m.index[0]:].dropna(axis=1, how="all")
+        if not trimmed.empty:
+            history = trimmed
+    history_12m = history_12m.reindex(index=history.index, columns=history.columns)
     target = output_dir / _SUBDIR
     target.mkdir(parents=True, exist_ok=True)
     out = target / _FILENAME
-    out.write_text(render_html(history, names, holdings, benchmark, today, top_n, history_1m,
+    out.write_text(render_html(history, names, holdings, benchmark, today, top_n, history_12m,
                                extras=extras),
                    encoding="utf-8")
     logger.info(
@@ -210,7 +229,7 @@ _TEMPLATE = r"""<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>ETF RS 走势(3 个月 / 1 个月)</title>
+<title>ETF RS 走势(3 个月 / 12 个月)</title>
 <style>
 :root {
   color-scheme: light;
@@ -287,7 +306,7 @@ button:focus-visible { outline: 2px solid var(--s1); outline-offset: -2px; }
 .ln.top { stroke: var(--top); stroke-width: 2.25; opacity: 0.5; }
 .ln.pin { stroke-width: 2.75; }
 .ln.hov { stroke-width: 3.5; }
-/* diff mode: unpinned lines tinted by today's 1M−3M sign (green = 1M ahead = gaining) */
+/* diff mode: unpinned lines tinted by today's 3M-vs-12M sign (green = 3M ahead = gaining) */
 .ln.gain { stroke: var(--up); }
 .ln.mend { stroke: var(--mend); }
 .ln.loss { stroke: var(--down); }
@@ -361,13 +380,13 @@ svg.dim .lab:not(.is-hover) { opacity: 0.4; }
 </head>
 <body>
 <div class="wrap">
-  <h1>ETF 相对强度走势(3 个月 / 1 个月 RS)</h1>
+  <h1>ETF 相对强度走势(3 个月 / 12 个月 RS)</h1>
   <p class="sub" id="sub"></p>
   <div class="filters">
     <div class="fg">
       <div class="lbl">RS 计算周期</div>
       <span class="seg" id="win"></span>
-      <div class="fh">评分回看多长时间:3 个月 = 0.5·R21 + 0.3·R42 + 0.2·R63;1 个月 = 0.4·R5 + 0.2·R10 + 0.2·R15 + 0.2·R20,更灵敏</div>
+      <div class="fh">评分回看多长时间:3 个月 = 0.5·R21 + 0.3·R42 + 0.2·R63;12 个月 = 0.4·R63 + 0.2·R126 + 0.2·R189 + 0.2·R252,看长期趋势</div>
     </div>
     <div class="fg">
       <div class="lbl">图表显示跨度</div>
@@ -377,7 +396,7 @@ svg.dim .lab:not(.is-hover) { opacity: 0.4; }
     <div class="fg">
       <div class="lbl">纵轴画什么</div>
       <span class="seg" id="mode"></span>
-      <div class="fh">RS 评分 = 名单内 0–99 百分位;名次 = 1 最强;超额收益 = 相对 SPY 的原始分数;名次差 = 两个周期的名次相减,看谁在近 1 个月上升</div>
+      <div class="fh">RS 评分 = 名单内 0–99 百分位;名次 = 1 最强;超额收益 = 相对 SPY 的原始分数;名次差 = 12 个月名次 − 3 个月名次,看谁在近 3 个月上升</div>
     </div>
     <div class="fg">
       <div class="lbl">&nbsp;</div>
@@ -408,9 +427,9 @@ svg.dim .lab:not(.is-hover) { opacity: 0.4; }
   const TOP = Math.min(D.top_n, N);
   const SLOTS = 8, NS = 'http://www.w3.org/2000/svg';
   const HINT = '点击线条或右侧列表可固定颜色(最多 ' + SLOTS + ' 只);悬停查看持仓';
-  const WINS = [['3 个月 RS', '3m'], ['1 个月 RS', '1m']];
+  const WINS = [['3 个月 RS', '3m'], ['12 个月 RS', '12m']];
   const RANGES = [['近 1 月', 21], ['近 3 月', 63], ['近 6 月', 126], ['全部历史', 0]];
-  const MODES = [['RS 评分', 'rs'], ['名次', 'rank'], ['超额收益 %', 'score'], ['1 个月 vs 3 个月 名次差', 'diff']];
+  const MODES = [['RS 评分', 'rs'], ['名次', 'rank'], ['超额收益 %', 'score'], ['3 个月 vs 12 个月 名次差', 'diff']];
   const SORTS = [['按名次', 'rank'], ['按名次差', 'diff']];
   const RS_LINE = 90;
   const WEEK = ['日', '一', '二', '三', '四', '五', '六'];
@@ -427,7 +446,7 @@ svg.dim .lab:not(.is-hover) { opacity: 0.4; }
     }
     return R;
   }
-  const ranks3 = rankTable('s'), ranks1 = rankTable('s1');
+  const ranks3 = rankTable('s'), ranks12 = rankTable('s12');
 
   const store = {
     get(key, dflt) {
@@ -448,7 +467,7 @@ svg.dim .lab:not(.is-hover) { opacity: 0.4; }
     return pins;
   }
   const state = {
-    win: ['3m', '1m'].includes(store.get('win', '3m')) ? store.get('win', '3m') : '3m',
+    win: ['3m', '12m'].includes(store.get('win', '3m')) ? store.get('win', '3m') : '3m',
     sort: ['rank', 'diff'].includes(store.get('sort', 'rank')) ? store.get('sort', 'rank') : 'rank',
     range: [21, 63, 126, 0].includes(store.get('range', 63)) ? store.get('range', 63) : 63,
     mode: ['rs', 'rank', 'score', 'diff'].includes(store.get('mode', 'rs')) ? store.get('mode', 'rs') : 'rs',
@@ -477,15 +496,15 @@ svg.dim .lab:not(.is-hover) { opacity: 0.4; }
   const colorOf = k => { const s = slotOf(k); return s < 0 ? null : 'var(--s' + (s + 1) + ')'; };
   const fmtScore = v => v == null ? '–' : (v > 0 ? '+' : '') + v.toFixed(1) + '%';
   // active window accessors: score key, percentile key, rank table, label
-  const SK = () => state.win === '1m' ? 's1' : 's';
-  const PK = () => state.win === '1m' ? 'p1' : 'p';
-  const R = () => state.win === '1m' ? ranks1 : ranks3;
-  const WL = () => state.win === '1m' ? '1 个月' : '3 个月';
-  // 3M rank − 1M rank: positive = the 1M ladder ranks it higher = gaining
-  const diffOf = (k, i) => (ranks3[k][i] == null || ranks1[k][i] == null) ? null : ranks3[k][i] - ranks1[k][i];
+  const SK = () => state.win === '12m' ? 's12' : 's';
+  const PK = () => state.win === '12m' ? 'p12' : 'p';
+  const R = () => state.win === '12m' ? ranks12 : ranks3;
+  const WL = () => state.win === '12m' ? '12 个月' : '3 个月';
+  // 12M rank − 3M rank: positive = the 3M ladder ranks it higher than the 12M one = gaining
+  const diffOf = (k, i) => (ranks12[k][i] == null || ranks3[k][i] == null) ? null : ranks12[k][i] - ranks3[k][i];
   const fmtDiff = v => v == null ? '–' : v > 0 ? '▲' + v : v < 0 ? '▼' + (-v) : '=';
-  // diff group on day i: 0 走强 (1M ahead of 3M AND beating the benchmark on 1M),
-  // 1 止跌 (ahead of 3M but still trailing the benchmark — "less bad", not strong),
+  // diff group on day i: 0 走强 (3M ahead of 12M AND beating the benchmark on 3M),
+  // 1 止跌 (ahead of 12M but still trailing the benchmark on 3M — "less bad", not strong),
   // 2 持平, 3 走弱, 4 only one window scored
   const GROUPS = ['gain', 'mend', 'flat', 'loss', null];
   const GROUP_WORD = ['走强', '止跌', '', '走弱', ''];
@@ -494,15 +513,15 @@ svg.dim .lab:not(.is-hover) { opacity: 0.4; }
     if (d == null) return 4;
     if (d === 0) return 2;
     if (d < 0) return 3;
-    return S[k].s1[i] > 0 ? 0 : 1;
+    return S[k].s[i] > 0 ? 0 : 1;
   }
   const diffCls = (k, i) => ({ gain: 'up', mend: 'mend', flat: 'flat', loss: 'down' })[GROUPS[diffGroup(k, i)]] || 'flat';
   // today's top band (thick lines, end labels): the active window's top TOP,
-  // or in diff mode the TOP largest 1M−3M differences (same order as the
+  // or in diff mode the TOP largest 3M-vs-12M differences (same order as the
   // list's diff sort), so the chart highlights the same names the list leads with
-  // 走强 first, then 止跌 / 持平 / 走弱; within a group by the difference, then 1M rank
+  // 走强 first, then 止跌 / 持平 / 走弱; within a group by the difference, then 3M rank
   const byDiff = (a, b) => (diffGroup(a, n - 1) - diffGroup(b, n - 1))
-    || (diffOf(b, n - 1) - diffOf(a, n - 1)) || (ranks1[a][n - 1] - ranks1[b][n - 1]) || (a - b);
+    || (diffOf(b, n - 1) - diffOf(a, n - 1)) || (ranks3[a][n - 1] - ranks3[b][n - 1]) || (a - b);
   let topSet = new Set();
   function computeTop() {
     topSet = new Set();
@@ -556,7 +575,7 @@ svg.dim .lab:not(.is-hover) { opacity: 0.4; }
     $('chart-title').textContent = state.mode === 'rs'
       ? wl + ' RS 评分走势(名单内 0–99 百分位;横线 = RS ' + RS_LINE + thick
       : state.mode === 'rank' ? wl + ' RS 名次走势(1 = 最强' + thick
-      : state.mode === 'diff' ? '名次差走势(3 个月 RS 名次 − 1 个月 RS 名次;上 = 走强组,下 = 止跌组,按当日分组;粗线 = 当日前 ' + TOP + ';走弱 / 持平只在列表里)'
+      : state.mode === 'diff' ? '名次差走势(12 个月 RS 名次 − 3 个月 RS 名次;上 = 走强组,下 = 止跌组,按当日分组;粗线 = 当日前 ' + TOP + ';走弱 / 持平只在列表里)'
       : wl + ' 加权超额收益(相对 ' + D.benchmark + ',%;RS 评分的原始分数' + thick;
   }
   let hintTimer = 0;
@@ -623,8 +642,8 @@ svg.dim .lab:not(.is-hover) { opacity: 0.4; }
       drawn = k => grp(k) <= 1;
       const gapH = 30, topH = Math.round(ph * 0.62);
       const panels = [
-        { g: 0, y: m.t + 14, h: topH - 14, title: '走强:1 个月 RS 名次领先 3 个月,且 1 个月跑赢 ' + D.benchmark },
-        { g: 1, y: m.t + topH + gapH, h: ph - topH - gapH, title: '止跌:1 个月名次领先 3 个月,但 1 个月仍落后 ' + D.benchmark + '(跌得少了,还不算强)' },
+        { g: 0, y: m.t + 14, h: topH - 14, title: '走强:3 个月 RS 名次领先 12 个月,且 3 个月跑赢 ' + D.benchmark },
+        { g: 1, y: m.t + topH + gapH, h: ph - topH - gapH, title: '止跌:3 个月名次领先 12 个月,但 3 个月仍落后 ' + D.benchmark + '(跌得少了,还不算强)' },
       ];
       panels.forEach(p => {
         let lo = 0, hi = 0, cnt = 0;
@@ -694,7 +713,7 @@ svg.dim .lab:not(.is-hover) { opacity: 0.4; }
         el('line', { class: v === 0 ? 'zero' : 'gridl', x1: m.l, x2: m.l + pw, y1: Y(v), y2: Y(v) }, svg);
         el('text', { class: 'tick', x: m.l - 8, y: Y(v) + 4, 'text-anchor': 'end' }, svg).textContent = v;
       });
-      note = { x: m.l + 6, y: Y(0) - 5, text: diffMode ? '0 = 两窗口名次相同;上方 = 1M 领先 3M(走强)' : '0 = ' + D.benchmark };
+      note = { x: m.l + 6, y: Y(0) - 5, text: diffMode ? '0 = 两窗口名次相同;上方 = 3M 领先 12M(走强)' : '0 = ' + D.benchmark };
     }
 
     // x ticks: weeks for short ranges, months otherwise
@@ -846,7 +865,7 @@ svg.dim .lab:not(.is-hover) { opacity: 0.4; }
       key.style.marginRight = '6px';
       who.appendChild(document.createTextNode(S[k].t));
       if (S[k].name) h('span', 'n', S[k].name, who);
-      for (const [wl, sk, pk, RR] of [['3 个月', 's', 'p', ranks3], ['1 个月', 's1', 'p1', ranks1]]) {
+      for (const [wl, sk, pk, RR] of [['3 个月', 's', 'p', ranks3], ['12 个月', 's12', 'p12', ranks12]]) {
         const valEl = h('div', 'val', null, main);
         h('span', 't', wl + ' ', valEl).style.color = 'var(--muted)';
         if (S[k][sk][i] == null) { h('span', 'flat', '无评分(历史不足)', valEl); continue; }
@@ -859,7 +878,7 @@ svg.dim .lab:not(.is-hover) { opacity: 0.4; }
       const dv = diffOf(k, i);
       if (dv != null) {
         const dEl = h('div', 'val', null, main);
-        dEl.appendChild(document.createTextNode('名次差(3 个月 − 1 个月)'));
+        dEl.appendChild(document.createTextNode('名次差(12 个月 − 3 个月)'));
         const w = GROUP_WORD[diffGroup(k, i)];
         h('b', diffCls(k, i), fmtDiff(dv) + (w ? ' ' + w : ''), dEl);
       }
@@ -902,7 +921,7 @@ svg.dim .lab:not(.is-hover) { opacity: 0.4; }
     rowsEl.replaceChildren();
     const last = n - 1, RR = R(), sk = SK(), pk = PK(), diffSort = state.sort === 'diff';
     $('list-title').textContent = diffSort
-      ? '名次差 · ' + dates[last] + '(3 个月名次 − 1 个月名次;差值大 = 近 1 个月上升快)'
+      ? '名次差 · ' + dates[last] + '(12 个月名次 − 3 个月名次;差值大 = 近 3 个月上升快)'
       : WL() + ' RS 当日排名 · ' + dates[last] + '(RS / 超额)';
     const byRank = (a, b) => (RR[a][last] == null) - (RR[b][last] == null) || (RR[a][last] - RR[b][last]) || (a - b);
     const order = S.map((_, k) => k).sort(diffSort ? byDiff : byRank);
@@ -914,10 +933,10 @@ svg.dim .lab:not(.is-hover) { opacity: 0.4; }
         const ph = diffGroup(k, last);
         if (ph !== phase) {
           phase = ph;
-          split(['走强:1 个月 RS 名次领先 3 个月,且 1 个月跑赢 ' + D.benchmark + '(差值越大上升越快)',
-                 '止跌:1 个月名次领先 3 个月,但 1 个月仍落后 ' + D.benchmark + '(跌得少了,还不算强)',
-                 '两个周期名次相同', '走弱:1 个月名次落后 3 个月',
-                 '仅一个周期有评分(上市不足 64 天)'][ph]);
+          split(['走强:3 个月 RS 名次领先 12 个月,且 3 个月跑赢 ' + D.benchmark + '(差值越大上升越快)',
+                 '止跌:3 个月名次领先 12 个月,但 3 个月仍落后 ' + D.benchmark + '(跌得少了,还不算强)',
+                 '两个周期名次相同', '走弱:3 个月名次落后 12 个月',
+                 '仅 3 个月有评分(历史不足 12 个月)'][ph]);
         }
       } else {
         if (phase < 0 && pos > 0 && !(S[k][pk][last] >= RS_LINE)) { phase = 0; split('RS ' + RS_LINE + ' 以下'); }
@@ -940,12 +959,12 @@ svg.dim .lab:not(.is-hover) { opacity: 0.4; }
       h('b', '', S[k][pk][last] == null ? '–' : S[k][pk][last], sc);
       sc.appendChild(document.createTextNode(fmtScore(S[k][sk][last])));
       const df = h('span', 'df', null, row);
-      const r3 = ranks3[k][last], r1 = ranks1[k][last], dv = diffOf(k, last);
-      df.appendChild(document.createTextNode('3 个月 第 ' + (r3 == null ? '–' : r3) + ' 名 · 1 个月 第 ' + (r1 == null ? '–' : r1) + ' 名 · '));
+      const r3 = ranks3[k][last], r12 = ranks12[k][last], dv = diffOf(k, last);
+      df.appendChild(document.createTextNode('3 个月 第 ' + (r3 == null ? '–' : r3) + ' 名 · 12 个月 第 ' + (r12 == null ? '–' : r12) + ' 名 · '));
       const gw = GROUP_WORD[diffGroup(k, last)];
       h('b', diffCls(k, last), fmtDiff(dv) + (gw ? ' ' + gw : ''), df);
       if (S[k].holdings) h('span', 'hd', S[k].holdings, row);
-      // per-ETF strongest US constituents on the 1M ladder (etf_holdings_rs), same text as the .txt
+      // per-ETF strongest US constituents on the 3M ladder (etf_holdings_rs), same text as the .txt
       if (S[k].strong) h('span', 'st', S[k].strong, row);
       row.addEventListener('pointerenter', () => setHover(k, null));
       row.addEventListener('pointerleave', () => setHover(null, null));
@@ -958,7 +977,7 @@ svg.dim .lab:not(.is-hover) { opacity: 0.4; }
   // ---------- boot ----------
   $('sub').textContent = '数据截至 ' + dates[n - 1] + ' · 相对 ' + D.benchmark + ' · ' + N + ' 只 ETF · '
     + n + ' 个交易日 · RS 评分为名单内百分位(非全市场)· 3 个月 RS = 0.5·R21 + 0.3·R42 + 0.2·R63,'
-    + '1 个月 RS = 0.4·R5 + 0.2·R10 + 0.2·R15 + 0.2·R20(更灵敏)· 生成于 ' + D.generated;
+    + '12 个月 RS = 0.4·R63 + 0.2·R126 + 0.2·R189 + 0.2·R252(看长期趋势)· 生成于 ' + D.generated;
   $('hint').textContent = HINT;
   segmented($('win'), WINS, 'win');
   segmented($('range'), RANGES, 'range');

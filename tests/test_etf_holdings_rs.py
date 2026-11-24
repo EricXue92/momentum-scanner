@@ -1,4 +1,4 @@
-"""Tests for etf_holdings_rs — per-ETF 1M strongest-holdings line.
+"""Tests for etf_holdings_rs — per-ETF 3M strongest-holdings line.
 
 No network: the stockanalysis page fetch and yfinance calls are injected /
 monkeypatched. The HTML fixture is the real XLF holdings page (2026-10-31)
@@ -162,12 +162,12 @@ def test_sleep_between_live_requests_only(tmp_path):
     assert slept == [0.8]   # one pause between two live requests, none before the first
 
 
-# --- Task 3: 1M ranking within each ETF + continuation-line formatting ---
+# --- Task 3: 3M ranking within each ETF + continuation-line formatting ---
 
 
-def _kline(ret_pct: float, n: int = 40) -> pd.DataFrame:
-    """Flat series that jumps by ``ret_pct`` on the last bar, so the 1M score
-    is exactly (0.4+0.2+0.2+0.2) * return (same trick as tests/test_etf_rs.py)."""
+def _kline(ret_pct: float, n: int = 90) -> pd.DataFrame:
+    """Flat series that jumps by ``ret_pct`` on the last bar, so the 3M score
+    is exactly (0.5+0.3+0.2) * return (same trick as tests/test_etf_rs.py)."""
     closes = [100.0] * (n - 1) + [100.0 * (1 + ret_pct / 100)]
     return pd.DataFrame({
         "time_key": pd.bdate_range(end="2026-10-30", periods=n),
@@ -191,8 +191,31 @@ def test_rank_holdings_fewer_than_top_n_lists_what_exists():
 
 def test_rank_holdings_short_history_and_missing_klines_excluded():
     cons = {"XLK": C(["A", "B", "Z"], "stockanalysis")}
-    out = etf_holdings_rs.rank_holdings(cons, {"A": _kline(1), "B": _kline(9, n=15)}, _kline(0), 5)
+    # 63 bars: one short of the 3M ladder's 64 (the retired 1M ladder took 21)
+    out = etf_holdings_rs.rank_holdings(cons, {"A": _kline(1), "B": _kline(9, n=63)}, _kline(0), 5)
     assert out == {"XLK": ["A"]}
+    out = etf_holdings_rs.rank_holdings(cons, {"A": _kline(1), "B": _kline(9, n=64)}, _kline(0), 5)
+    assert out == {"XLK": ["B", "A"]}
+
+
+def test_rank_holdings_uses_the_3m_ladder_not_the_last_month():
+    # OLD: +40% two months ago, flat since. HOT: +8% in the last week only.
+    # 3M ladder (R21/R42/R63): OLD = 0.5·0 + 0.3·40% + 0.2·40% = 20% > HOT = 8%.
+    # The retired 1M weekly ladder (R5..R20) scored OLD 0 and put HOT first.
+    days = pd.bdate_range(end="2026-10-30", periods=90)
+    old = pd.DataFrame({"time_key": days, "close": [100.0] * 55 + [140.0] * 35})
+    hot = pd.DataFrame({"time_key": days, "close": [100.0] * 87 + [108.0] * 3})
+    cons = {"XLK": C(["HOT", "OLD"], "stockanalysis")}
+    out = etf_holdings_rs.rank_holdings(cons, {"HOT": hot, "OLD": old}, _kline(0), 5)
+    assert out == {"XLK": ["OLD", "HOT"]}
+
+
+def test_fetch_klines_asks_for_enough_history_for_the_3m_ladder(monkeypatch):
+    seen = {}
+    monkeypatch.setattr(etf_holdings_rs.us_rs_3m, "fetch_us_klines_yf",
+                        lambda syms, **kw: seen.update(kw) or {})
+    etf_holdings_rs._fetch_klines(["MU"])
+    assert seen == {"period": "6mo", "fill_last_close": True}   # 3mo ≈ 63 bars < 64
 
 
 def test_rank_holdings_no_scorable_names_omits_etf():
@@ -206,9 +229,9 @@ def test_rank_holdings_without_benchmark_uses_absolute_scores():
 
 
 def test_format_extra():
-    assert etf_holdings_rs.format_extra(["A", "B"], "stockanalysis") == "1M强: A > B"
-    assert etf_holdings_rs.format_extra(["A"], "stockanalysis-cache:2026-10-27") == "1M强: A"
-    assert etf_holdings_rs.format_extra(["A", "B"], "yf_top10") == "1M强: A > B (前十大)"
+    assert etf_holdings_rs.format_extra(["A", "B"], "stockanalysis") == "3M强: A > B"
+    assert etf_holdings_rs.format_extra(["A"], "stockanalysis-cache:2026-10-27") == "3M强: A"
+    assert etf_holdings_rs.format_extra(["A", "B"], "yf_top10") == "3M强: A > B (前十大)"
 
 
 def test_compute_extras_end_to_end_maps_dot_symbols(tmp_path, monkeypatch):
@@ -219,7 +242,7 @@ def test_compute_extras_end_to_end_maps_dot_symbols(tmp_path, monkeypatch):
                         lambda syms: asked.extend(syms) or {"BRK-B": _kline(5), "JPM": _kline(1)})
     out = etf_holdings_rs.compute_extras(_cfg(), ["XLF"], _kline(0), TODAY, tmp_path)
     assert sorted(asked) == ["BRK-B", "JPM"]
-    assert out == {"XLF": "1M强: BRK.B > JPM"}
+    assert out == {"XLF": "3M强: BRK.B > JPM"}
 
 
 def test_compute_extras_empty_klines_returns_empty(tmp_path, monkeypatch):
@@ -345,5 +368,5 @@ def test_compute_extras_downloads_only_page_marked_us_symbols(tmp_path, monkeypa
     asked = []
     monkeypatch.setattr(etf_holdings_rs, "_fetch_klines",
                         lambda syms: asked.extend(syms) or {"MU": _kline(5)})
-    assert etf_holdings_rs.compute_extras(_cfg(), ["DRAM"], _kline(0), TODAY, tmp_path) == {"DRAM": "1M强: MU"}
+    assert etf_holdings_rs.compute_extras(_cfg(), ["DRAM"], _kline(0), TODAY, tmp_path) == {"DRAM": "3M强: MU"}
     assert asked == ["MU"]

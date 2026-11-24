@@ -28,11 +28,6 @@ logger = logging.getLogger(__name__)
 WEIGHTS_3M: list[tuple[int, float]] = [(1, 0.5), (2, 0.3), (3, 0.2)]
 BARS_PER_MONTH = 21
 
-# 1M weekly ladder, in bars: cumulative 1/2/3/4-week returns (5/10/15/20
-# trading days back from today, overlapping like the IBD 3/6/9/12M ladder)
-# weighted 0.4/0.2/0.2/0.2. Needs 21 rows. Used by the ETF 1M ranking only.
-WEIGHTS_1M_BARS: list[tuple[int, float]] = [(5, 0.4), (10, 0.2), (15, 0.2), (20, 0.2)]
-
 # Cloud-published CSV (written by .github/workflows/update_us_rs_3m.yml).
 # Local pipeline reads from raw.githubusercontent.com instead of computing
 # locally — the home-IP yfinance compute hits Yahoo's IP-cumulative rate
@@ -63,7 +58,7 @@ def _score_from_kline_bars(
     Returns (score, reason); score is None on rejection. Reason ∈
     {"ok", "no_data", "short_history", "zero_last", "zero_past"}.
 
-    Minimum rows = max(bars) + 1 (64 for the 3M ladder, 21 for 1M).
+    Minimum rows = max(bars) + 1 (64 for the 3M ladder).
     """
     if df is None or df.empty:
         return None, "no_data"
@@ -102,8 +97,8 @@ def compute_us_rs_3m_table(
     """Return DataFrame indexed by ticker with columns ``raw_score`` and
     ``rs_percentile`` (0-99).
 
-    ``weights_bars`` defaults to the 3M month ladder (``WEIGHTS_3M``); pass
-    e.g. ``WEIGHTS_1M_BARS`` for another window — same benchmark-relative
+    ``weights_bars`` defaults to the 3M month ladder (``WEIGHTS_3M``); other
+    ``(bars, weight)`` pairs give another window — same benchmark-relative
     score and percentile formula, only the lookbacks change.
     Tickers without enough history (< max lookback + 1 rows; 64 for 3M) are
     excluded. ``raw_score`` is retained alongside the percentile so the US

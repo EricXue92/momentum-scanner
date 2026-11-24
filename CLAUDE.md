@@ -21,7 +21,7 @@ uv run main.py --mode hk-eod         # HK EOD (Shorts + Longs/Leaders/RS)   — 
 uv run main.py --mode morning-gap    # US intraday gap scan; clean-exits outside ET window
 uv run main.py --mode hk-morning-gap # HK intraday gap scan (post-open only)
 uv run main.py --mode report --market {us,hk}  # CANSLIM report (HTML) from today's .txt files; only US is scheduled
-uv run main.py --mode etf-rs         # ETF 3M + 1M ranking files, holdings line, leaders watchlist + prune, trend page (also at the end of us-eod)
+uv run main.py --mode etf-rs         # ETF 3M ranking file, holdings line, leaders watchlist + prune, trend page (also at the end of us-eod)
 uv run main.py --mode rs-line-audit --market {us,hk,both} --dry-run  # audit the master; without --dry-run it prompts to prune
 uv run pytest tests/ -v             # `uv run python -m pytest` works too
 ```

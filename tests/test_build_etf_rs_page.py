@@ -19,7 +19,7 @@ import etf_rs_leaders  # noqa: E402
 @pytest.fixture(autouse=True)
 def _no_leaders_prune_network(monkeypatch):
     monkeypatch.setattr(etf_rs_leaders, "_fetch_daily_bars", lambda tickers: None)
-    monkeypatch.setattr(etf_rs_leaders, "_fetch_rs_1m_table", lambda output_dir, today: None)
+    monkeypatch.setattr(etf_rs_leaders, "_fetch_rs_3m_table", lambda output_dir, today: None)
 
 
 def _walk(seed: int, n: int = 120) -> pd.DataFrame:
@@ -74,7 +74,7 @@ def test_build_runs_the_holdings_step_and_embeds_its_line(tmp_path, monkeypatch)
     monkeypatch.setattr(etf_rs, "_fetch_klines", lambda *a, **k: {
         "AAA": _walk(1), "BBB": _walk(2), "SPY": _walk(9)})
     monkeypatch.setattr(etf_holdings_rs, "compute_extras",
-                        lambda *a, **k: {"AAA": "1M强: X > Y"})
+                        lambda *a, **k: {"AAA": "3M强: X > Y"})
     site = tmp_path / "site"
     assert build_etf_rs_page.build(site, _config(tmp_path, _CFG)) == 0
-    assert '"strong":"1M强: X > Y"' in (site / "index.html").read_text(encoding="utf-8")
+    assert '"strong":"3M强: X > Y"' in (site / "index.html").read_text(encoding="utf-8")

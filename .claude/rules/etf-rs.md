@@ -7,7 +7,7 @@ paths:
   - "tests/test_build_etf_rs_page.py"
 ---
 
-# ETF RS ranking (3M / 1M files, holdings line, leaders watchlist, trend page + Pages)
+# ETF RS ranking (3M file, holdings line, leaders watchlist, trend page + Pages)
 
 Loaded only when working with the files above (moved out of the root
 `CLAUDE.md` on 2026-11-02 to keep it out of unrelated sessions). The root
@@ -20,8 +20,8 @@ file keeps the cross-cutting pieces: the undated-file exceptions under
   algorithm (`compute_us_rs_3m_table`, vs `benchmark` SPY; one yfinance
   batch, no cloud step) and written to `output/TV/US/<date>_ETF_rs_3m.txt`
   as **one `N. TICKER 🟢↑N - 中文名 | 前十大持仓` per line, strongest at the
-  top** — human-readable, NOT a TradingView import (the two ranking files
-  are the only non-comma `.txt` in `TV/US/`). Percentile is **within the
+  top** — human-readable, NOT a TradingView import (the only non-comma
+  `.txt` in `TV/US/`). Percentile is **within the
   ETF set**, not the stock universe. The **rank-change marker** after the
   ticker (`🟢↑N` / `🔴↓N` / `=` / `新`, `rank_delta_marker`) compares
   against the latest `*_ETF_rs_3m.txt` (or legacy `*_ETF_rs.txt`,
@@ -42,25 +42,30 @@ file keeps the cross-cutting pieces: the undated-file exceptions under
   overwrites, no `eod_seen` dedup, no Webull mirror, no Futu/TV sync; the
   report ignores it (unknown group stem). Soft side-step at the end of
   us-eod / eod (also `--mode etf-rs`); `TV/US` 5-day rule.
-- **1M companion file** `<date>_ETF_rs_1m.txt` (`_write_1m_ranking`, soft
-  after the 3M file — a failure never costs the 3M `.txt`): the same klines
-  on the **1M weekly ladder** `WEIGHTS_1M_BARS` (cumulative 1/2/3/4-week
-  returns = 5/10/15/20 bars back, 0.4/0.2/0.2/0.2, 21 bars minimum; same
-  benchmark-relative score + in-set percentile). Same line format, collapse
-  and marker rules, but markers compare only against the previous `_1m`
-  file (`read_previous_ranks(stem=)`; stems matched exactly). Scoring
-  lookbacks are bars, not months: `us_rs_3m._score_from_kline_bars` takes
-  `(bars, weight)` pairs and `compute_us_rs_3m_table(weights_bars=)`
-  selects the ladder; the month-based `_score_from_kline` / `WEIGHTS_3M`
-  API is a thin front (`BARS_PER_MONTH` = 21), unchanged for IPO/cloud
-  (→ decisions 2026-10-15).
+- **No 1M anywhere.** The 1M weekly ladder — `<date>_ETF_rs_1m.txt`, the
+  `1M强:` line, the leaders' 1M source file and 1M entry gate, the trend
+  page's 1M window, the cloud `rs_percentile_1m` column, `WEIGHTS_1M_BARS` —
+  was retired on 2026-11-24 (user decision, → decisions 2026-11-24); do not
+  bring any of it back piecemeal. The `.txt`, the holdings line and the
+  leaders step are **3M only**; the trend page pairs 3M with a **12M**
+  window (below). Leftover `_1m` files
+  age out with the `TV/US` 5-day rule and are never read (stems are matched
+  exactly). The bar-based scoring API stays as the generic mechanism:
+  `us_rs_3m._score_from_kline_bars` takes `(bars, weight)` pairs,
+  `compute_us_rs_3m_table(weights_bars=)` selects a ladder, and the
+  month-based `_score_from_kline` / `WEIGHTS_3M` API is a thin front
+  (`BARS_PER_MONTH` = 21). Ladders in use: 3M everywhere, plus
+  `etf_rs_chart.WEIGHTS_12M_BARS` on the trend page.
 - **Per-ETF strongest-holdings line** (`etf_holdings_rs.py`,
-  `[etf_rs.holdings_rs]`): under every ETF row in BOTH `.txt` files one
-  3-space-indented continuation line `   1M强: A > B > C > D > E` — the
-  ETF's **US-listed** constituents ranked by the same 1M ladder vs SPY
-  (within the ETF only, no percentile), top `top_n` (5), fewer when fewer
-  score, no line when none. Constituent source chain per ETF, first hit
-  wins: today's cache → stockanalysis `/etf/<slug>/holdings/` (SSR table;
+  `[etf_rs.holdings_rs]`): under every ETF row one
+  3-space-indented continuation line `   3M强: A > B > C > D > E`
+  (`etf_holdings_rs.EXTRA_PREFIX`, read back by the leaders step) — the
+  ETF's **US-listed** constituents ranked by the same 3M ladder vs SPY
+  (`_score_from_kline`, within the ETF only, no percentile), top `top_n`
+  (5), fewer when fewer score, no line when none. The ladder needs 64 bars:
+  the constituent batch asks for `6mo` (`3mo` is ~63, one short), and a
+  constituent listed for less than that takes no part. Constituent source
+  chain per ETF, first hit wins: today's cache → stockanalysis `/etf/<slug>/holdings/` (SSR table;
   **free tier = top 25 by weight**) → earlier cache ≤ `cache_max_age_days`
   (7) → yfinance `funds_data.top_holdings` (line gets ` (前十大)`) → nothing.
   Cache `output/state/etf_holdings_<YYYY_MM_DD>.json` holds stockanalysis
@@ -74,15 +79,15 @@ file keeps the cross-cutting pieces: the undated-file exceptions under
   `BRK.B` is requested as `BRK-B`, displayed as `BRK.B`. Live fetch: HTTP
   404 = no page (DXYZ, IBIT), 3 consecutive transient failures = no more
   live requests that run (`_MAX_CONSECUTIVE_FAILURES`); one ETF's exception
-  never costs the others or the cache write. Computed once in `run_etf_rs`
-  **before** either file is written (soft: failure → files without the
+  never costs the others or the cache write. Computed in `run_etf_rs`
+  **before** the file is written (soft: failure → file without the
   line). Full holdings later = add an issuer source function in front of
   the stockanalysis step. Spec:
   `docs/superpowers/specs/2026-10-31-etf-holdings-1m-rs-design.md`.
 - **Leaders watchlist** (`etf_rs_leaders.py`, `[etf_rs.leaders]`): right
-  after the 1M file is written, its first `top_etfs` (10) rows are read
+  after the 3M file is written, its first `top_etfs` (10) rows are read
   back (the **file**, not the in-memory tables, by design) and the symbols
-  of their `1M强:` lines merged in rank order (an ETF without a line
+  of their `3M强:` lines merged in rank order (an ETF without a line
   contributes nothing, no back-fill from rank 11) into
   `output/TV/US/ETF_rs_leaders.txt` — the **master**: undated,
   comma-separated (TradingView import), append-only in order of first
@@ -103,12 +108,12 @@ file keeps the cross-cutting pieces: the undated-file exceptions under
   High too, for ADR%; `1y` since the SMA200 gate) serves two gates. **Entry-only
   gates** (`entry_above_sma` [50, 200], `find_below_sma_drops`, latest close
   strictly above each, a period longer than the history not judged;
-  `entry_min_rs_percentile_1m` 90, `find_rs_1m_drops`, market-wide percentile
-  `rs_percentile_1m` from the cloud US RS table, via `build_3m_table`; no table /
+  `entry_min_rs_percentile_3m` 90, `find_rs_3m_drops`, market-wide percentile
+  `rs_percentile` from the cloud US 3M RS table, via `build_3m_table`; no table /
   no column / absent ticker → not judged, WARNING; `[]` / 0 = off): a NEW name
   must clear them. They are **not retention rules** — a held name leaves only
   through the floors or the first-break prune, do not apply them to the master
-  (→ decisions 2026-11-04). **Floors** (`min_price` 20 /
+  (→ decisions 2026-11-04, 2026-11-24). **Floors** (`min_price` 20 /
   `min_dollar_volume` 100M = 20-session mean of close × volume,
   `find_floor_drops`; `min_adr_percent` 3.5 = 20-session mean of
   (High − Low) / Close × 100, `find_adr_drops`; 0 = off): a candidate under a floor is **not added** today (enters the day it
@@ -133,16 +138,24 @@ file keeps the cross-cutting pieces: the undated-file exceptions under
   `output/Reports/ETF/etf_rs_trend.html` — **undated, overwritten** (it
   carries its own history; no `_RETENTION_RULES` entry matches it, by
   design). History is **recomputed from the run's klines** (`_fetch_klines`
-  pulls `1y`), not read from old `.txt`. Each day's score = `rank_etfs` on
+  pulls `2y` — the 12M ladder needs 253 bars per scored day), not read from
+  old `.txt`. Each day's score = `rank_etfs` on
   klines truncated to that day (tests pin this), with today's ticker list +
   adjusted closes, so a past day may sit a place off that day's `.txt`.
   Y = 0-99 percentile (within the ETF set → RS ≥ 90 is always ~5 of 53) /
-  rank / raw excess return; top `chart_top_n` (20) thick. `write_trend_chart`
-  computes both histories (`score_history(weights_bars=WEIGHTS_1M_BARS)`
-  for 1M) on the 3M calendar and embeds them as `s`/`p` (3M) and `s1`/`p1`
-  (1M) per series; `run_etf_rs` passes the 3M-unscored names too
-  (`missing`, 21-63 bars) so they get a 1M line with null 3M. The holdings
-  line is embedded verbatim as `strong` per series (`extras=`) and rendered
+  rank / raw excess return; top `chart_top_n` (20) thick. **Two windows, 3M + 12M**:
+  `write_trend_chart` computes both histories (`score_history(weights_bars=
+  WEIGHTS_12M_BARS)` for 12M: `0.4·R63 + 0.2·R126 + 0.2·R189 + 0.2·R252`,
+  the quarter weights of `us_rs_12m`, scored like the 3M ladder — weighted
+  return minus SPY's, in-set percentile, **253 bars minimum**, no
+  measured-from-first-bar shortcut) and embeds them as `s`/`p` (3M) and
+  `s12`/`p12` (12M) per series. The page starts on the first 12M-scorable
+  day (~250 days with `2y`), so both windows cover the same span; with no
+  12M history at all it falls back to the whole 3M calendar. An ETF with
+  64-252 bars keeps its 3M line with null 12M; `run_etf_rs` passes the
+  ranked tickers only. The diff view is **12M rank − 3M rank** (positive =
+  3M ahead of 12M = 走强, which also needs a positive 3M excess; else 止跌).
+  The holdings line is embedded verbatim as `strong` per series (`extras=`) and rendered
   under the holdings row of the side list (tooltip untouched). Soft inside
   `run_etf_rs`: a render failure never costs the `.txt`.
 - **GitHub Pages** (https://ericxue92.github.io/momentum-scanner/):

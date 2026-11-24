@@ -170,21 +170,21 @@ Kullamägi 的拋物線衝頂做空 setup。每天重新檢出(不參與任何�
 
 - **打分:** 與個股相同的 3M RS 公式(`0.5·R21 + 0.3·R42 + 0.2·R63`,相對 SPY)。百分位是**在 ETF 名單內部**排的,不是對個股 universe。
 - **何時跑:** 每次 `us-eod` 末尾的 soft 步驟(失敗不影響 EOD);也可用 `--mode etf-rs` 單獨重跑。本地計算——一次 yfinance 批量下載,不走雲端。
-- **輸出:** `output/TV/US/<date>_ETF_rs_3m.txt`,每行一隻 ETF,**最強的在最上面**,格式 `N. TICKER 名次變化 - 中文名 | 前十大持倉`(`N.` 為名次): 另有 `<date>_ETF_rs_1m.txt`,用 1 個月週階梯(`0.4·R5 + 0.2·R10 + 0.2·R15 + 0.2·R20`)對同一名單再排一次,格式相同,名次變化只和自己前一天的檔案比。
+- **輸出:** `output/TV/US/<date>_ETF_rs_3m.txt`,每行一隻 ETF,**最強的在最上面**,格式 `N. TICKER 名次變化 - 中文名 | 前十大持倉`(`N.` 為名次):
 
   ```
   1. IEO = - 油气勘探开采 | COP、VLO、MPC、PSX、DVN
-     1M强: RRC > AR > VG > APA > COP
+     3M强: RRC > AR > VG > APA > COP
   2. IBIT 🟢↑1 - 比特币 | 不适用: 主要资产为比特币
   3. ARKG 🔴↓1 - 基因组革命 | TXG、TWST、TEM、CRSP、PSNL
   ```
 
 - **名次變化:** ticker 後面的標記是和最近一個更早日期的文件相比:`🟢↑N` 上升 N 位、`🔴↓N` 下降 N 位、`=` 不變、`新` 新進名單。同日重跑仍和前一天比;沒有更早的文件時(首次運行,或中斷超過 5 天保留期)不顯示標記。
-- **給人看的,不是 TradingView 導入文件**——這兩個排名檔案是 `TV/US/` 裡僅有的非逗號分隔 `.txt`。帶分數的完整表(排名 / 分數 / 百分位)在 EOD 日誌裡。
+- **給人看的,不是 TradingView 導入文件**——這個排名檔案是 `TV/US/` 裡僅有的非逗號分隔 `.txt`。帶分數的完整表(排名 / 分數 / 百分位)在 EOD 日誌裡。
 - **維護:** 增刪改 `[etf_rs.tickers]`(`TICKER = "中文名"`)即可調整名單。持倉來自靜態、手工維護的 `[etf_rs.holdings]` 表(不走 API 刷新;沒配的票不顯示持倉段)。
-- **最強成分股續行:** 兩個檔案裡每隻 ETF 下面都有一行縮排的 `   1M强: A > B > C > D > E`,是這隻 ETF 的**美股上市**成分股按同一套 1 個月階梯相對 SPY 在 ETF 內部排名的前 `top_n`(5)隻(不足 5 隻就少列,一隻都沒有就不寫)。成分股來自 stockanalysis.com 的持倉頁(免費版只給權重前 25),按天快取在 `output/state/`,抓不到時退到 yfinance 的前十大(行尾標 ` (前十大)`)。沒有股票持倉的 ETF(IBIT)沒有這行。設定 `[etf_rs.holdings_rs]`;soft 步驟,失敗只是少這一行。
-- **龍頭累積名單:** 1 個月排名前 `top_etfs`(10)隻 ETF 的最強成分股按名次合併進一個累積的 TradingView 名單 `output/TV/US/ETF_rs_leaders.txt`——不帶日期、逗號分隔、只增不減、永不清理(刪掉即重置)。主表裡還沒有的名字另寫 `<date>_ETF_rs_new.txt`(沒有新增就不寫;同日重跑只擴主表,保留第一次的新增檔案)。主表每次運行還會**裁剪**(在加完當天新名字之後):收盤連續 ≥ 2 個交易日低於 SMA50,**且**最新收盤低於首次跌破那天的最低價 → 移除,記錄到 `<date>_ETF_rs_pruned.txt`(逗號分隔;沒裁就不寫);中途收回線上重新起算,沒數據、歷史不足、序列陳舊的保留,被裁的名字日後再進某隻前列 ETF 的前 5 會重新加入。另有三道門檻,入池和留池都適用:最新收盤 ≥ $20、近 20 日平均成交額(收盤 × 成交量)≥ $1 億、近 20 日 ADR% ≥ 3.5(不足 20 根不判)——候選不達標當天不加入,已在表裡的不達標就裁掉。設定 `[etf_rs.leaders]`(`top_etfs`、`prune`、`sma_period`、`min_price`、`min_dollar_volume`、`min_adr_percent`);不推 ntfy。
-- **走勢頁:** 同一步還會寫 `output/Reports/ETF/etf_rs_trend.html`(單個自包含檔案,每次覆蓋)。用同一批 K 線重算每個歷史交易日的分數(約 190 天,無狀態檔),不受 `.txt` 5 天保留期限制。Y 軸可在 0–99 RS 評分(預設,標出 RS 90 橫線)、名次、3M 超額收益之間切換;最新一天前 `chart_top_n`(20)名畫粗線,懸停或右側列表顯示每隻 ETF 的前十大持倉,右側列表還帶 `1M强:` 一行。歷史按當前名單和復權價重算,過去某天可能與當時 `.txt` 差一兩位。 頁面同時發佈在 <https://ericxue92.github.io/momentum-scanner/>:GitHub Actions 工作流(`etf_rs_page.yml`)在每個美股收盤後於雲端重建(和本地同一條鏈,含成分股續行)並部署到 GitHub Pages,不依賴本機。
+- **最強成分股續行:** 每隻 ETF 下面都有一行縮排的 `   3M强: A > B > C > D > E`,是這隻 ETF 的**美股上市**成分股按同一套 3M 公式相對 SPY 在 ETF 內部排名的前 `top_n`(5)隻(不足 5 隻就少列,一隻都沒有就不寫;日線不足 64 根的成分股沒有 3M 分數,不參與)。成分股來自 stockanalysis.com 的持倉頁(免費版只給權重前 25),按天快取在 `output/state/`,抓不到時退到 yfinance 的前十大(行尾標 ` (前十大)`)。沒有股票持倉的 ETF(IBIT)沒有這行。設定 `[etf_rs.holdings_rs]`;soft 步驟,失敗只是少這一行。
+- **龍頭累積名單:** 排名前 `top_etfs`(10)隻 ETF 的最強成分股(`3M强:` 那一行)按名次合併進一個累積的 TradingView 名單 `output/TV/US/ETF_rs_leaders.txt`——不帶日期、逗號分隔、只增不減、永不清理(刪掉即重置)。主表裡還沒有的名字另寫 `<date>_ETF_rs_new.txt`(沒有新增就不寫;同日重跑只擴主表,保留第一次的新增檔案)。主表每次運行還會**裁剪**(在加完當天新名字之後):收盤連續 ≥ 2 個交易日低於 SMA50,**且**最新收盤低於首次跌破那天的最低價 → 移除,記錄到 `<date>_ETF_rs_pruned.txt`(逗號分隔;沒裁就不寫);中途收回線上重新起算,沒數據、歷史不足、序列陳舊的保留,被裁的名字日後再進某隻前列 ETF 的前 5 會重新加入。另有三道門檻,入池和留池都適用:最新收盤 ≥ $20、近 20 日平均成交額(收盤 × 成交量)≥ $1 億、近 20 日 ADR% ≥ 3.5(不足 20 根不判)——候選不達標當天不加入,已在表裡的不達標就裁掉。設定 `[etf_rs.leaders]`(`top_etfs`、`prune`、`sma_period`、`min_price`、`min_dollar_volume`、`min_adr_percent`);不推 ntfy。
+- **走勢頁:** 同一步還會寫 `output/Reports/ETF/etf_rs_trend.html`(單個自包含檔案,每次覆蓋)。用同一批 K 線重算每個歷史交易日的分數(拉 2 年,頁面顯示約 250 天,無狀態檔),不受 `.txt` 5 天保留期限制。兩個視窗:**3M**(排名檔案用的那個)和 **12M**(`0.4·R63 + 0.2·R126 + 0.2·R189 + 0.2·R252`,相對 SPY,至少 253 根——上市不滿一年的 ETF 沒有 12M 線),另有「3M vs 12M 名次差」視圖(3M 名次領先 12M = 正在走強)。Y 軸可在 0–99 RS 評分(預設,標出 RS 90 橫線)、名次、超額收益之間切換;最新一天前 `chart_top_n`(20)名畫粗線,懸停或右側列表顯示每隻 ETF 的前十大持倉,右側列表還帶 `3M强:` 一行。歷史按當前名單和復權價重算,過去某天可能與當時 `.txt` 差一兩位。 頁面同時發佈在 <https://ericxue92.github.io/momentum-scanner/>:GitHub Actions 工作流(`etf_rs_page.yml`)在每個美股收盤後於雲端重建(和本地同一條鏈,含成分股續行)並部署到 GitHub Pages,不依賴本機。
 - **同名即同一品種:** 中文名完全相同的 ticker 只顯示最強的一隻(曾經的 GDXU / NUGT 即是一例;當前表裡已無同名對,規則保留);被隱藏的會列在日誌裡。
 - 僅為排名快照:同日重跑直接覆蓋;不去重、不鏡像 Webull、不同步 Futu/TV。
 
@@ -308,7 +308,7 @@ output/
 ├── TV/                        # 逗號分隔,用於 TradingView "Import list..."
 │   ├── US/<date>_{TheSetup,EarningsGap,HighVolume,GapUp,NewHigh52W,TopGainers,Leaders,RS,Shorts,IPO,Repeat}.txt
 │   ├── US/<date>_{MorningGapPre{20,10,5},MorningGap{5..30}}.txt
-│   ├── US/<date>_ETF_rs_3m.txt   # ETF 強度排名(另有 _1m.txt)——給人看的,不是導入列表
+│   ├── US/<date>_ETF_rs_3m.txt   # ETF 強度排名——給人看的,不是導入列表
 │   ├── US/ETF_rs_leaders.txt     # 龍頭累積名單(不帶日期的主表,逗號分隔);<date>_ETF_rs_new.txt 為當天新增
 │   ├── US/<date>_SMA50Pruned.txt   # 當天被 SMA50 自動裁剪移出 master 的票
 │   ├── US/rs_us_<date>.txt    # 每日 RS 最強 Top 10 (美股)

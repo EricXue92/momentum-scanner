@@ -1,16 +1,19 @@
-"""Per-ETF "strongest holdings this month" line for the ETF RS snapshots.
+"""Per-ETF "strongest holdings over 3 months" line for the ETF RS snapshot.
 
 For every ETF in ``[etf_rs.tickers]`` the us-eod ETF step appends one
-indented continuation line under the ETF's row in both
-``<date>_ETF_rs_3m.txt`` and ``<date>_ETF_rs_1m.txt``::
+indented continuation line under the ETF's row in
+``<date>_ETF_rs_3m.txt``::
 
     9. OIH 新 - 油服 | SLB、BKR、...
-       1M强: SEI > RIG > NE > SLB > HAL
+       3M强: SEI > RIG > NE > SLB > HAL
 
-— the ETF's **US-listed** constituents ranked by the same 1M weekly ladder
-the ``_1m`` file uses (``us_rs_3m.WEIGHTS_1M_BARS``, benchmark-relative to
-SPY), strongest first, top ``top_n`` (5). Ranking is *within* the ETF's own
-constituents (no percentile — a dozen names is not a distribution).
+— the ETF's **US-listed** constituents ranked by the same 3M ladder the
+file itself uses (``us_rs_3m.WEIGHTS_3M``, benchmark-relative to SPY, 64
+bars minimum — a constituent listed for less than ~3 months takes no part),
+strongest first, top ``top_n`` (5). Ranking is *within* the ETF's own
+constituents (no percentile — a dozen names is not a distribution). Until
+2026-11-24 this line was ``1M强:`` on a 1M weekly ladder (→ decisions
+2026-11-24).
 
 Constituent source chain, per ETF, first hit wins (``fetch_constituents``):
 
@@ -158,10 +161,13 @@ HOLDINGS_URL = "https://stockanalysis.com/etf/{slug}/holdings/"
 _UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
        "(KHTML, like Gecko) Chrome/130.0 Safari/537.36")
 _SRC_SA = "stockanalysis"
+#: Label of the continuation line; ``etf_rs_leaders.parse_extra`` reads it back.
+EXTRA_PREFIX = "3M强:"
+_KLINE_PERIOD = "6mo"
 _SRC_YF = "yf_top10"
 #: After this many consecutive transient stockanalysis failures (timeout,
 #: 403/429 block, 5xx) the run stops going online: politeness under a block,
-#: and a hung host must not push the 3M/1M files towards the EOD watchdog.
+#: and a hung host must not push the ranking file towards the EOD watchdog.
 _MAX_CONSECUTIVE_FAILURES = 3
 
 
@@ -312,7 +318,7 @@ def fetch_constituents(
             result[etf] = Constituents(list(top), _SRC_YF)
             logger.info(f"[{_LABEL}] {etf}: {len(top)} symbols (yfinance top-10 fallback)")
             continue
-        logger.warning(f"[{_LABEL}] {etf}: no constituents from any source; no 1M line today")
+        logger.warning(f"[{_LABEL}] {etf}: no constituents from any source; no 3M line today")
     save_cache(output_dir, today, {**today_cache, **result})
     return result
 
@@ -320,14 +326,15 @@ def fetch_constituents(
 # --- scoring ---------------------------------------------------------------
 
 def _fetch_klines(symbols: list[str]) -> dict[str, pd.DataFrame]:
-    """3mo daily closes for the constituents (the 1M ladder needs 21 bars;
-    3mo leaves slack for holidays / fresh listings). Same retrying batch
-    fetcher and NaN-Close fill as the ETF ranking. Monkeypatched in tests."""
-    return us_rs_3m.fetch_us_klines_yf(symbols, period="3mo", fill_last_close=True)
+    """6mo daily closes for the constituents (the 3M ladder needs 64 bars —
+    a 3mo request is ~63, one short; 6mo leaves slack for holidays). Same
+    retrying batch fetcher and NaN-Close fill as the ETF ranking.
+    Monkeypatched in tests."""
+    return us_rs_3m.fetch_us_klines_yf(symbols, period=_KLINE_PERIOD, fill_last_close=True)
 
 
-def _score_1m(df: pd.DataFrame | None) -> float | None:
-    score, reason = us_rs_3m._score_from_kline_bars(df, us_rs_3m.WEIGHTS_1M_BARS)
+def _score_3m(df: pd.DataFrame | None) -> float | None:
+    score, reason = us_rs_3m._score_from_kline(df)
     return score if reason == "ok" else None
 
 
@@ -338,17 +345,17 @@ def rank_holdings(
     top_n: int,
 ) -> dict[str, list[str]]:
     """``{etf: [top_n display symbols]}`` — each ETF's US-listed constituents
-    ordered by 1M excess score (constituent − benchmark) descending; names
-    without klines / < 21 bars / foreign codes do not take part; an ETF
+    ordered by 3M excess score (constituent − benchmark) descending; names
+    without klines / < 64 bars / foreign codes do not take part; an ETF
     with nothing scorable is omitted. ``klines`` is keyed by *display*
     symbol."""
-    bench = _score_1m(benchmark_kline) if benchmark_kline is not None else None
+    bench = _score_3m(benchmark_kline) if benchmark_kline is not None else None
     if bench is None:
-        logger.warning(f"[{_LABEL}] no benchmark 1M score; ranking holdings on absolute scores")
+        logger.warning(f"[{_LABEL}] no benchmark 3M score; ranking holdings on absolute scores")
         bench = 0.0
     scores: dict[str, float] = {}
     for sym, df in klines.items():
-        sc = _score_1m(df)
+        sc = _score_3m(df)
         if sc is not None:
             scores[sym] = sc - bench
     out: dict[str, list[str]] = {}
@@ -366,7 +373,7 @@ def rank_holdings(
 
 
 def format_extra(top: list[str], source: str) -> str:
-    line = "1M强: " + " > ".join(top)
+    line = EXTRA_PREFIX + " " + " > ".join(top)
     return line + " (前十大)" if source == _SRC_YF else line
 
 
@@ -388,19 +395,19 @@ def compute_extras(
     top_n = int(cfg.get("top_n", 5))
     cons = fetch_constituents(etfs, today, output_dir, cfg)
     if not cons:
-        logger.warning(f"[{_LABEL}] no constituents for any ETF; no 1M lines today")
+        logger.warning(f"[{_LABEL}] no constituents for any ETF; no 3M lines today")
         return {}
     us_symbols = sorted({s for c in cons.values()
                          for s in (c.symbols if c.us is None else c.us) if is_us_symbol(s)})
     if not us_symbols:
-        logger.warning(f"[{_LABEL}] no US-listed constituents; no 1M lines today")
+        logger.warning(f"[{_LABEL}] no US-listed constituents; no 3M lines today")
         return {}
-    logger.info(f"[{_LABEL}] fetching 3mo closes for {len(us_symbols)} constituents "
+    logger.info(f"[{_LABEL}] fetching {_KLINE_PERIOD} closes for {len(us_symbols)} constituents "
                 f"of {len(cons)} ETFs...")
     raw = _fetch_klines([to_yf_symbol(s) for s in us_symbols]) or {}
     klines = {from_yf_symbol(k): v for k, v in raw.items()}
     if not klines:
-        logger.warning(f"[{_LABEL}] yfinance returned nothing for the constituents; no 1M lines today")
+        logger.warning(f"[{_LABEL}] yfinance returned nothing for the constituents; no 3M lines today")
         return {}
     logger.info(f"[{_LABEL}] K 线覆盖 {len(klines)}/{len(us_symbols)}")
     ranked = rank_holdings(cons, klines, benchmark_kline, top_n)

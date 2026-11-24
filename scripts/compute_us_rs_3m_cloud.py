@@ -3,7 +3,7 @@
 
 One ~18-month yfinance download of the nasdaqtrader universe feeds both
 tables:
-  data/us_rs_3m/<today>.csv   3M (+1M, RS-line) — scored on the last 6 months
+  data/us_rs_3m/<today>.csv   3M (+RS-line) — scored on the last 6 months
   data/us_rs_12m/<today>.csv  12M IBD-style (us_rs_12m.compute_us_rs_12m_table)
 
 Exits 1, publishing NOTHING, on:
@@ -46,7 +46,6 @@ from us_rs_12m import (  # noqa: E402
     kline_last_date,
 )
 from us_rs_3m import (  # noqa: E402
-    WEIGHTS_1M_BARS,
     _fetch_spy_kline,
     compute_us_rs_3m_table,
     fetch_us_klines_yf,
@@ -63,7 +62,7 @@ _COVERAGE_THRESHOLD = 0.5
 # 252 sessions for the 12M ladder + slack; a relative period, so the request
 # has no `end` (yf.download's `end` is exclusive: end=today drops today's bar).
 _PERIOD = "18mo"
-# The 3M / 1M / RS-line columns keep their pre-12M input: the last 6 months.
+# The 3M / RS-line columns keep their pre-12M input: the last 6 months.
 _MONTHS_3M = 6
 
 # SPY behind the expected session: Yahoo has not posted the bar yet.
@@ -228,15 +227,6 @@ def main() -> int:
     klines_3m = {t: _tail_months(k, session, _MONTHS_3M) for t, k in klines.items()}
     spy_for_compute = _tail_months(spy_kline, session, _MONTHS_3M)
     table = compute_us_rs_3m_table(klines_3m, spy_for_compute)
-
-    # Market-wide 1M percentile for the ETF leaders entry gate, scored on the
-    # same klines. Best-effort: a failure must NOT cost the 3M table.
-    try:
-        table_1m = compute_us_rs_3m_table(klines_3m, spy_for_compute, weights_bars=WEIGHTS_1M_BARS)
-        if not table_1m.empty:
-            table = table.join(table_1m["rs_percentile"].rename("rs_percentile_1m"), how="left")
-    except Exception as exc:
-        logger.warning(f"[Cloud RS] 1M percentile failed ({exc}); column omitted")
 
     # RS-line-vs-MA features (TraderLion-style) merged as extra columns —
     # best-effort/annotation-only: a config read failure must NOT fail the run.

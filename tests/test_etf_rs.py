@@ -10,17 +10,17 @@ import pandas as pd
 
 import etf_rs
 import etf_holdings_rs
+import etf_rs_leaders
 import pytest
 
 
 @pytest.fixture(autouse=True)
 def _no_holdings_rs_network(monkeypatch):
-    """run_etf_rs now runs the holdings 1M step, whose default path goes
+    """run_etf_rs now runs the holdings 3M step, whose default path goes
     online; stub it to "nothing" unless a test installs its own fake."""
     monkeypatch.setattr(etf_holdings_rs, "compute_extras", lambda *a, **k: {})
-    import etf_rs_leaders
     monkeypatch.setattr(etf_rs_leaders, "_fetch_daily_bars", lambda tickers: None)
-    monkeypatch.setattr(etf_rs_leaders, "_fetch_rs_1m_table", lambda output_dir, today: None)
+    monkeypatch.setattr(etf_rs_leaders, "_fetch_rs_3m_table", lambda output_dir, today: None)
 
 
 def _kline(total_return_pct: float, n: int = 90) -> pd.DataFrame:
@@ -294,69 +294,34 @@ def test_align_to_benchmark_days_keeps_unaliased_and_missing_benchmark():
     assert same["X"] is crypto
 
 
-# --- 1M (weekly-ladder) ranking alongside the 3M file ---
+# --- 3M is the only window (the 1M companion was retired 2026-11-24) ---
 
 
-def _kline_two_phase(early_pct: float, late_pct: float, n: int = 90) -> pd.DataFrame:
-    """Flat 100 for the first n-21 bars, then flat at 100·(1+early) for 16
-    bars, then flat at 100·(1+early)·(1+late) for the last 5 bars. The 1M
-    weekly ladder sees only the last 21 bars; the 3M window sees both legs."""
-    first = 100.0 * (1 + early_pct / 100)
-    last = first * (1 + late_pct / 100)
-    closes = [100.0] * (n - 21) + [first] * 16 + [last] * 5
-    return pd.DataFrame({"time_key": pd.bdate_range(end="2026-09-11", periods=n), "close": closes})
-
-
-def test_run_writes_1m_file_next_to_3m_file(tmp_path, monkeypatch):
-    # AAA: big 3M, flat last week; BBB: small 3M, strong last week → 3M says
-    # AAA first, 1M says BBB first.
+def test_run_writes_no_1m_file(tmp_path, monkeypatch):
     monkeypatch.setattr(etf_rs, "_fetch_klines", lambda *a, **k: {
-        "AAA": _kline_two_phase(40, 0), "BBB": _kline_two_phase(2, 8),
-        "CCC": _kline_two_phase(0, -5), "SPY": _kline_two_phase(5, 1)})
+        "AAA": _kline(5), "BBB": _kline(20), "CCC": _kline(-3), "SPY": _kline(10)})
     out = etf_rs.run_etf_rs(_cfg(), tmp_path, date(2026, 9, 15))
     assert out == tmp_path / "TV" / "US" / "2026_09_15_ETF_rs_3m.txt"
-    assert out.read_text() == "1. AAA - 甲\n2. BBB - 乙\n3. CCC - 丙\n"
-    one = tmp_path / "TV" / "US" / "2026_09_15_ETF_rs_1m.txt"
-    assert one.read_text() == "1. BBB - 乙\n2. AAA - 甲\n3. CCC - 丙\n"
+    assert sorted(p.name for p in (tmp_path / "TV" / "US").iterdir()) == ["2026_09_15_ETF_rs_3m.txt"]
 
 
-def test_1m_markers_compare_only_against_previous_1m_file(tmp_path, monkeypatch):
-    d = tmp_path / "TV" / "US"
-    d.mkdir(parents=True)
-    (d / "2026_09_14_ETF_rs_3m.txt").write_text("1. CCC - 丙\n2. BBB - 乙\n3. AAA - 甲\n")
-    (d / "2026_09_14_ETF_rs_1m.txt").write_text("1. AAA - 甲\n2. BBB - 乙\n")
-    monkeypatch.setattr(etf_rs, "_fetch_klines", lambda *a, **k: {
-        "AAA": _kline_two_phase(40, 0), "BBB": _kline_two_phase(2, 8),
-        "CCC": _kline_two_phase(0, -5), "SPY": _kline_two_phase(5, 1)})
-    etf_rs.run_etf_rs(_cfg(), tmp_path, date(2026, 9, 15))
-    assert (d / "2026_09_15_ETF_rs_3m.txt").read_text() == \
-        "1. AAA 🟢↑2 - 甲\n2. BBB = - 乙\n3. CCC 🔴↓2 - 丙\n"
-    assert (d / "2026_09_15_ETF_rs_1m.txt").read_text() == \
-        "1. BBB 🟢↑1 - 乙\n2. AAA 🔴↓1 - 甲\n3. CCC 新 - 丙\n"
-
-
-def test_read_previous_ranks_3m_ignores_1m_files(tmp_path):
+def test_read_previous_ranks_ignores_leftover_1m_files(tmp_path):
+    # _1m files written before the retirement sit in TV/US until the 5-day
+    # rule ages them out; they must never serve as the previous 3M snapshot.
     d = tmp_path / "TV" / "US"
     d.mkdir(parents=True)
     (d / "2026_09_14_ETF_rs_1m.txt").write_text("1. BBB - 乙\n2. AAA - 甲\n")
     assert etf_rs.read_previous_ranks(tmp_path, date(2026, 9, 15)) is None
-    assert etf_rs.read_previous_ranks(tmp_path, date(2026, 9, 15), stem=etf_rs._STEM_1M) == {"BBB": 1, "AAA": 2}
 
 
-def test_1m_failure_does_not_cost_3m_file(tmp_path, monkeypatch):
+def test_run_hands_the_ranking_file_to_the_leaders_step(tmp_path, monkeypatch):
     monkeypatch.setattr(etf_rs, "_fetch_klines", lambda *a, **k: {
-        "AAA": _kline(5), "BBB": _kline(20), "CCC": _kline(-3), "SPY": _kline(10)})
-    real = etf_rs.rank_etfs
-
-    def boom(klines, tickers, benchmark, weights_bars=None):
-        if weights_bars is not None:
-            raise RuntimeError("1m exploded")
-        return real(klines, tickers, benchmark, weights_bars)
-
-    monkeypatch.setattr(etf_rs, "rank_etfs", boom)
+        "AAA": _kline(5), "BBB": _kline(20), "SPY": _kline(10)})
+    seen = {}
+    monkeypatch.setattr(etf_rs_leaders, "run_leaders",
+                        lambda cfg, output_dir, today, path: seen.update(path=path))
     out = etf_rs.run_etf_rs(_cfg(), tmp_path, date(2026, 9, 15))
-    assert out is not None and out.exists()
-    assert not (tmp_path / "TV" / "US" / "2026_09_15_ETF_rs_1m.txt").exists()
+    assert seen["path"] == out and out.name == "2026_09_15_ETF_rs_3m.txt"
 
 
 def test_read_previous_ranks_3m_falls_back_to_legacy_stem(tmp_path):
@@ -382,17 +347,17 @@ def test_fetch_klines_fills_nan_last_close(monkeypatch):
 
     monkeypatch.setattr(etf_rs.us_rs_3m, "fetch_us_klines_yf", fake_fetch)
     etf_rs._fetch_klines(["AAA", "SPY"])
-    assert seen.get("fill_last_close") is True and seen.get("period") == "1y"
+    assert seen.get("fill_last_close") is True and seen.get("period") == "2y"   # 12M ladder: 253 bars
 
 
-# --- holdings 1M continuation line (etf_holdings_rs) ---
+# --- holdings 3M continuation line (etf_holdings_rs) ---
 
 
 def test_write_ranking_appends_indented_extra_line(tmp_path):
     table = pd.DataFrame({"raw_score": [0.2, 0.1], "rs_percentile": [99, 50]}, index=["AAA", "BBB"])
     out = etf_rs.write_ranking(table, {"AAA": "甲", "BBB": "乙"}, {"AAA": "X、Y"}, tmp_path,
-                               date(2026, 10, 31), extras={"AAA": "1M强: X > Y"})
-    assert out.read_text() == "1. AAA - 甲 | X、Y\n   1M强: X > Y\n2. BBB - 乙\n"
+                               date(2026, 10, 31), extras={"AAA": "3M强: X > Y"})
+    assert out.read_text() == "1. AAA - 甲 | X、Y\n   3M强: X > Y\n2. BBB - 乙\n"
 
 
 def test_write_ranking_without_extras_is_unchanged(tmp_path):
@@ -405,11 +370,11 @@ def test_read_previous_ranks_ignores_indented_continuation_lines(tmp_path):
     d = tmp_path / "TV" / "US"
     d.mkdir(parents=True)
     (d / "2026_10_30_ETF_rs_3m.txt").write_text(
-        "1. AAA - 甲\n   1M强: X > Y\n2. BBB - 乙\n   1M强: Z\n")
+        "1. AAA - 甲\n   3M强: X > Y\n2. BBB - 乙\n   1M强: Z\n")
     assert etf_rs.read_previous_ranks(tmp_path, date(2026, 10, 31)) == {"AAA": 1, "BBB": 2}
 
 
-def test_run_passes_extras_to_both_files(tmp_path, monkeypatch):
+def test_run_passes_extras_to_the_ranking_file(tmp_path, monkeypatch):
     monkeypatch.setattr(etf_rs, "_fetch_klines", lambda *a, **k: {
         "AAA": _kline(5), "BBB": _kline(1), "SPY": _kline(0)})
     seen = {}
@@ -417,12 +382,11 @@ def test_run_passes_extras_to_both_files(tmp_path, monkeypatch):
     def fake(cfg, etfs, bench, today, out):
         seen["etfs"] = list(etfs)
         seen["bench_rows"] = len(bench)
-        return {"AAA": "1M强: X > Y"}
+        return {"AAA": "3M强: X > Y"}
     monkeypatch.setattr(etf_holdings_rs, "compute_extras", fake)
     etf_rs.run_etf_rs(_cfg(tickers={"AAA": "甲", "BBB": "乙"}), tmp_path, date(2026, 10, 31))
-    for stem in ("ETF_rs_3m", "ETF_rs_1m"):
-        txt = (tmp_path / "TV" / "US" / f"2026_10_31_{stem}.txt").read_text()
-        assert "\n   1M强: X > Y\n" in txt, stem
+    txt = (tmp_path / "TV" / "US" / "2026_10_31_ETF_rs_3m.txt").read_text()
+    assert "\n   3M强: X > Y\n" in txt
     assert seen["etfs"] == ["AAA", "BBB"] and seen["bench_rows"] == 90
 
 
@@ -434,7 +398,7 @@ def test_run_writes_files_without_extras_when_step_raises(tmp_path, monkeypatch)
     monkeypatch.setattr(etf_holdings_rs, "compute_extras", boom)
     assert etf_rs.run_etf_rs(_cfg(tickers={"AAA": "甲"}), tmp_path, date(2026, 10, 31)) is not None
     txt = (tmp_path / "TV" / "US" / "2026_10_31_ETF_rs_3m.txt").read_text()
-    assert "1M强" not in txt and txt.startswith("1. AAA")
+    assert "强:" not in txt and txt.startswith("1. AAA")
 
 
 def test_run_holdings_rs_false_skips_step(tmp_path, monkeypatch):

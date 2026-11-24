@@ -168,41 +168,15 @@ def test_csv_has_rs_line_columns(tmp_path, monkeypatch, session):
     assert int(out.loc["AAA", "rs_below_ma"]) == 0   # rising line above MA
 
 
-def test_csv_has_a_market_wide_1m_percentile_column(tmp_path, monkeypatch, session):
-    """The 1M weekly ladder is scored on the same klines, no extra download."""
-    n = 150
-    idx = pd.bdate_range("2026-01-01", periods=n)
-    session(idx[-1].date())
-    def _kl(last_pct):
-        closes = [100.0] * (n - 6) + [100.0 * (1 + last_pct / 100)] * 6
-        return pd.DataFrame({"time_key": idx, "close": closes})
-    klines = {"STRONG": _kl(40), "MID": _kl(10), "WEAK": _kl(-20)}
-    spy = pd.DataFrame({"time_key": idx, "close": [100.0] * n})
-    fetches = []
-    def fake_klines(*a, **k):
-        fetches.append(a)
-        return klines
-
-    monkeypatch.setattr(cloud, "fetch_universe", lambda *a, **kw: ["STRONG", "MID", "WEAK"])
-    monkeypatch.setattr(cloud, "_fetch_spy_kline", lambda **k: spy)
-    monkeypatch.setattr(cloud, "fetch_us_klines_yf", fake_klines)
-    monkeypatch.setattr(cloud, "_DATA_DIR", tmp_path)
-    monkeypatch.setattr(cloud, "_today", lambda: date(2026, 11, 4))
-
-    assert cloud.main() == 0
-    out = pd.read_csv(tmp_path / "2026-11-04.csv", index_col="ticker")
-    assert out.loc["STRONG", "rs_percentile_1m"] == 99
-    assert out.loc["STRONG", "rs_percentile_1m"] > out.loc["MID", "rs_percentile_1m"] > out.loc["WEAK", "rs_percentile_1m"]
-    assert len(fetches) == 1
-
-
-def test_a_1m_scoring_failure_does_not_cost_the_3m_table(tmp_path, monkeypatch):
+def test_csv_carries_no_1m_percentile_column(tmp_path, monkeypatch):
+    """The market-wide 1M percentile (ETF leaders entry gate until
+    2026-11-24) is no longer scored: one table computation, no column."""
     real = cloud.compute_us_rs_3m_table
-    def fail_on_1m(klines, spy, weights_bars=None):
-        if weights_bars is not None:
-            raise ValueError("boom")
+    calls = []
+    def counting(klines, spy, weights_bars=None):
+        calls.append(weights_bars)
         return real(klines, spy)
-    monkeypatch.setattr(cloud, "compute_us_rs_3m_table", fail_on_1m)
+    monkeypatch.setattr(cloud, "compute_us_rs_3m_table", counting)
     monkeypatch.setattr(cloud, "fetch_universe", lambda *a, **kw: ["AAA"])
     monkeypatch.setattr(cloud, "_fetch_spy_kline", lambda **k: _flat_then_jump(400.0, 0))
     monkeypatch.setattr(cloud, "fetch_us_klines_yf", lambda t, **k: {"AAA": _flat_then_jump(100.0, 5)})
@@ -213,6 +187,7 @@ def test_a_1m_scoring_failure_does_not_cost_the_3m_table(tmp_path, monkeypatch):
     out = pd.read_csv(tmp_path / "2026-11-04.csv", index_col="ticker")
     assert "rs_percentile" in out.columns
     assert "rs_percentile_1m" not in out.columns
+    assert calls == [None]
 
 
 def test_spy_failure_publishes_nothing(monkeypatch, tmp_path):

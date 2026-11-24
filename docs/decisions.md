@@ -421,3 +421,26 @@ August, ~09:30 in September, 10:00–11:20 in October, and 11:17 / 12:08 / 11:47
 on a late-table day. The pmset repeat wake moved to 11:59 Tue-Sat. The
 us-rs-3m trigger stays at 08:45: the 3M table is scored on yfinance closes, so
 an early run is correct and is published well before 12:00. — Scheduling section.
+
+### 2026-11-24 — ETF 1M ladder retired, 3M is the only window
+User decision: the 1M strength ranking is no longer wanted, and the per-ETF
+constituent line must rank on 3M too. Everything on the 1M weekly ladder went
+in one change: `<date>_ETF_rs_1m.txt` is no longer written; the holdings line
+is `3M强:` on the 3M ladder (`WEIGHTS_3M`, 64 bars — the constituent batch
+moved from `3mo` to `6mo`, since `3mo` is ~63 bars); the leaders watchlist
+reads the top `top_etfs` rows of the 3M file and its entry gate is the
+market-wide **3M** percentile (`entry_min_rs_percentile_3m` 90, the cloud
+table's `rs_percentile`; was `entry_min_rs_percentile_1m` / `rs_percentile_1m`);
+the cloud job stopped publishing `rs_percentile_1m`; `WEIGHTS_1M_BARS` is
+gone (the bar-ladder API stays). On the trend page (second request, same
+day) the 1M window became a **12M** window: `etf_rs_chart.WEIGHTS_12M_BARS`
+= `0.4·R63 + 0.2·R126 + 0.2·R189 + 0.2·R252` (the quarter weights of
+`us_rs_12m`), scored like the 3M ladder and needing 253 bars — stricter than
+the cloud 12M table, which measures a short history from its first bar; the
+rank-diff view is now 12M rank − 3M rank (3M ahead = gaining), and the ETF
+kline fetch went from `1y` to `2y` so ~250 days carry both windows. Supersedes 2026-10-15 "ETF 1M companion file" and the
+1M parts of 2026-10-31 / 2026-11-04. Consequences: a constituent listed for
+less than 64 sessions cannot appear in a `3M强:` line or enter the leaders
+master through it; the leaders master itself was not reset (names added under
+the 1M rule stay until the floors / first-break prune remove them). — ETF
+section.
