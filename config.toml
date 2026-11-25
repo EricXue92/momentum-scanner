@@ -205,6 +205,9 @@ XME  = "金属采矿"
 IHI  = "医疗器械"
 OIH  = "油服"
 KOID = "人形机器人"
+# --- 2026-11-25 加入 ---
+XRT  = "零售"
+IBB  = "生物科技 (市值加权)"   # 名字必须和 XBI 的 "生物科技" 不同, 否则同名只显示较强的一只
 # --- 宽基 / 原材料 (2026-09-26 加入; QQQ/IWM/RSP 2026-10-14 移除) ---
 XLB  = "原材料"
 # 2026-10-14 移除: QQQ IWM RSP USO GLD SLV EWJ EWY BTCUSD ETHUSD (不参与计算也不展示)
@@ -275,6 +278,9 @@ XME  = "RS、MTRN、STLD、FCX、CLF、NUE、CMC、RGLD、NEM、MP (近似等权
 IHI  = "ABT、ISRG、MDT、IDXX、DXCM、EW、SYK、BDX、RMD、BSX"
 OIH  = "SLB、BKR、FTI、HAL、TS、SEI、RIG、WFRD、NOV、NE"
 KOID = "ALNT、HEXA.B(海克斯康)、000150(斗山)、TER、NVDA、APH、TEL、277810(Rainbow Robotics)、6861(基恩士)、MG(麦格纳)"
+# --- 2026-11-25 加入 (stockanalysis holdings 页, 整理日 2026-11-25) ---
+XRT  = "UPBD、GME、ASO、AEO、VSXY、VVV、REAL、OLLI、WMT、CART (近似等权, 各约 1.5-2%)"
+IBB  = "GILD、AMGN、VRTX、REGN、MRNA、ARGX、NTRA、BIIB、ONC、RVMD"
 # --- 宽基 / 原材料 ---
 XLB  = "LIN、NEM、FCX、ECL、SHW、VMC、MLM、APD、CRH、STLD"
 

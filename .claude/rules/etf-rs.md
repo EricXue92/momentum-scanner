@@ -16,7 +16,7 @@ file keeps the cross-cutting pieces: the undated-file exceptions under
 
 
 - **3M ranking file** (`etf_rs.py`, `[etf_rs]`): the fixed `[etf_rs.tickers]`
-  table (ticker = 中文名, 53 entries) is scored **locally** with the same 3M
+  table (ticker = 中文名, 55 entries) is scored **locally** with the same 3M
   algorithm (`compute_us_rs_3m_table`, vs `benchmark` SPY; one yfinance
   batch, no cloud step) and written to `output/TV/US/<date>_ETF_rs_3m.txt`
   as **one `N. TICKER 🟢↑N - 中文名 | 前十大持仓` per line, strongest at the
@@ -142,7 +142,7 @@ file keeps the cross-cutting pieces: the undated-file exceptions under
   old `.txt`. Each day's score = `rank_etfs` on
   klines truncated to that day (tests pin this), with today's ticker list +
   adjusted closes, so a past day may sit a place off that day's `.txt`.
-  Y = 0-99 percentile (within the ETF set → RS ≥ 90 is always ~5 of 53) /
+  Y = 0-99 percentile (within the ETF set → RS ≥ 90 is always ~5 of 55) /
   rank / raw excess return; top `chart_top_n` (20) thick. **Two windows, 3M + 12M**:
   `write_trend_chart` computes both histories (`score_history(weights_bars=
   WEIGHTS_12M_BARS)` for 12M: `0.4·R63 + 0.2·R126 + 0.2·R189 + 0.2·R252`,
