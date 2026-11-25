@@ -17,7 +17,7 @@
 - [去重与裁剪](#去重与裁剪)
 - [输出文件](#输出文件)
 - [同步与通知](#同步与通知)
-  - [Futu 同步](#futu-同步) · [TradingView 同步](#tradingview-同步) · [ntfy 推送](#ntfy-推送)
+  - [Futu 同步](#futu-同步) · [TradingView 同步](#tradingview-同步) · [TradingView 指标](#tradingview-指标) · [ntfy 推送](#ntfy-推送)
 - [LLM 报告](#llm-报告)
   - [CANSLIM 报告](#canslim-报告) · [盘前 catalyst 报告](#盘前-catalyst-报告)
 - [自动化](#自动化)
@@ -74,9 +74,9 @@ Finviz 选股之后,基于 yfinance 日线套用。阈值在 `[settings]`。
 | 闸门          | 阈值                                                            | 适用范围                                     |
 | ------------- | --------------------------------------------------------------- | -------------------------------------------- |
 | Dollar Volume | 价 × 20 日均量 ≥ $100M(Shorts 为 ≥ $50M)                        | Longs、Leaders、RS、Shorts、IPO、Morning Gap |
-| ADR%          | 最近 20 根完整 bar 的 mean(`(High − Low) / Close`) × 100 ≥ 4.0% | 同上                                         |
+| ADR%          | 最近 20 根完整 bar 的 mean(`(High − Low) / Close`) × 100 ≥ 4.0% | 同上,Morning Gap 除外(门槛 3.0%)             |
 
-ADR%(Kullamägi 式)衡量一只股票**当下**的波动幅度;它取代了过去的 Finviz `beta > 1.5` 过滤——后者容易误杀正活跃的中大盘票。
+ADR%(Kullamägi 式)衡量一只股票**当下**的波动幅度;它取代了过去的 Finviz `beta > 1.5` 过滤——后者容易误杀正活跃的中大盘票。Morning Gap 把门槛覆盖为 3.0%(`[morning_gap].min_adr_percent`);EOD 各组仍是 4.0%。
 
 **大 gap 旁路(仅 TheSetup / EarningsGap):**当日开盘 gap ≥ 10% 时,ADR% 门槛放宽到 3.0%——否则低波动大盘股的财报跳空(CRM 2026-08-27:gap +11.9%,ADR% 3.74)永远扫不出来。TheSetup 的入选条件本身就是 gap ≥ 10%,所以该组的 ADR% 门槛实际是 3.0%。在 `[[longs]]` 对应组内用 `adr_bypass_gap_percent` / `adr_bypass_min_percent` 配置;删掉即关闭。
 
@@ -118,7 +118,9 @@ Oliver Kell 的动量/突破 setup。6 组互斥——靠前的组优先,每只 
 
 | 4 周   | 13 周  | 26 周   | YTD     | 52 周   |
 | ------ | ------ | ------- | ------- | ------- |
-| ≥ +30% | ≥ +50% | ≥ +100% | ≥ +100% | ≥ +150% |
+| ≥ +30% | ≥ +50% | ≥ +100% | ≥ +100% | ≥ +100% |
+
+52 周窗口原为 +150%;Finviz 2026-10-20 改版后这个值不再是预设(对应的 filter code 被静默忽略,返回全市场),所以改用最接近的预设 +100%。港股 Leaders 的窗口在本地计算,仍是 +150%。
 
 ### 条件 RS 组
 
@@ -166,25 +168,26 @@ Kullamägi 的抛物线冲顶做空 setup。每天重新检出(不参与任何�
 
 ### ETF 强度排名
 
-每天一份行业 / 主题轮动视图:一份约 50 只的固定 ETF 名单(美股行业与主题、商品、杠杆产品),按 3 个月相对强度排名。
+每天一份行业 / 主题轮动视图:一份 55 只的固定 ETF 名单(美股行业与主题),按 3 个月相对强度排名。
 
 - **打分:** 与个股相同的 3M RS 公式(`0.5·R21 + 0.3·R42 + 0.2·R63`,相对 SPY)。百分位是**在 ETF 名单内部**排的,不是对个股 universe。
 - **何时跑:** 每次 `us-eod` 末尾的 soft 步骤(失败不影响 EOD);也可用 `--mode etf-rs` 单独重跑。本地计算——一次 yfinance 批量下载,不走云端。
 - **输出:** `output/TV/US/<date>_ETF_rs_3m.txt`,每行一只 ETF,**最强的在最上面**,格式 `N. TICKER 名次变化 - 中文名 | 前十大持仓`(`N.` 为名次):
 
   ```
-  1. IEO = - 油气勘探开采 | COP、VLO、MPC、PSX、DVN
-     3M强: RRC > AR > VG > APA > COP
-  2. IBIT 🟢↑1 - 比特币 | 不适用: 主要资产为比特币
-  3. ARKG 🔴↓1 - 基因组革命 | TXG、TWST、TEM、CRSP、PSNL
+  1. XLP = - 必需消费 | WMT、COST、PG、KO、PM、TGT、MO、CL、PEP、MDLZ
+     3M强: DLTR > WMT > COST > TGT > PG
+  2. XLV 🟢↑3 - 医疗保健 | LLY、JNJ、ABBV、MRK、UNH、TMO、AMGN、GILD、ABT、PFE
+     3M强: REGN > MRNA > CAH > GILD > MCK
+  3. IBIT 🔴↓1 - 比特币 | 不适用: 主要资产为比特币
   ```
 
 - **名次变化:** ticker 后面的标记是和最近一个更早日期的文件相比:`🟢↑N` 上升 N 位、`🔴↓N` 下降 N 位、`=` 不变、`新` 新进名单。同日重跑仍和前一天比;没有更早的文件时(首次运行,或中断超过 5 天保留期)不显示标记。
 - **给人看的,不是 TradingView 导入文件**——这个排名文件是 `TV/US/` 里仅有的非逗号分隔 `.txt`。带分数的完整表(排名 / 分数 / 百分位)在 EOD 日志里。
 - **维护:** 增删改 `[etf_rs.tickers]`(`TICKER = "中文名"`)即可调整名单。持仓来自静态、手工维护的 `[etf_rs.holdings]` 表(不走 API 刷新;没配的票不显示持仓段)。
 - **最强成分股续行:** 每只 ETF 下面都有一行缩进的 `   3M强: A > B > C > D > E`,是这只 ETF 的**美股上市**成分股按同一套 3M 公式相对 SPY 在 ETF 内部排名的前 `top_n`(5)只(够不上 5 只就少列,一只都没有就不写;日线不足 64 根的成分股没有 3M 分数,不参与)。成分股来自 stockanalysis.com 的持仓页(免费版只给权重前 25),按天缓存在 `output/state/`,抓不到时退到 yfinance 的前十大(行尾标 ` (前十大)`)。没有股票持仓的 ETF(IBIT)没有这行。配置 `[etf_rs.holdings_rs]`;soft 步骤,失败只是少这一行。
-- **龙头累积名单:** 排名前 `top_etfs`(10)只 ETF 的最强成分股(`3M强:` 那一行)按名次合并进一个累积的 TradingView 名单 `output/TV/US/ETF_rs_leaders.txt`——不带日期、逗号分隔、只增不减、永不清理(删掉即重置)。主表里还没有的名字另写 `<date>_ETF_rs_new.txt`(没有新增就不写;同日重跑只扩主表,保留第一次的新增文件)。主表每次运行还会**裁剪**(在加完当天新名字之后):收盘连续 ≥ 2 个交易日低于 SMA50,**且**最新收盘低于首次跌破那天的最低价 → 移除,记录到 `<date>_ETF_rs_pruned.txt`(逗号分隔;没裁就不写);中途收回线上重新起算,没数据、历史不足、序列陈旧的保留,被裁的名字日后再进某只前列 ETF 的前 5 会重新加入。另有三道门槛,入池和留池都适用:最新收盘 ≥ $20、近 20 日平均成交额(收盘 × 成交量)≥ $1 亿、近 20 日 ADR% ≥ 3.5(不足 20 根不判)——候选不达标当天不加入,已在表里的不达标就裁掉。配置 `[etf_rs.leaders]`(`top_etfs`、`prune`、`sma_period`、`min_price`、`min_dollar_volume`、`min_adr_percent`);不推 ntfy。
-- **走势页:** 同一步还会写 `output/Reports/ETF/etf_rs_trend.html`(单个自包含文件,每次覆盖)。用同一批 K 线重算每个历史交易日的分数(拉 2 年,页面显示约 250 天,无状态文件),不受 `.txt` 5 天保留期限制。两个窗口:**3M**(排名文件用的那个)和 **12M**(`0.4·R63 + 0.2·R126 + 0.2·R189 + 0.2·R252`,相对 SPY,至少 253 根——上市不满一年的 ETF 没有 12M 线),另有「3M vs 12M 名次差」视图(3M 名次领先 12M = 正在走强)。Y 轴可在 0–99 RS 评分(默认,标出 RS 90 横线)、名次、超额收益之间切换;最新一天前 `chart_top_n`(20)名画粗线,悬停或右侧列表显示每只 ETF 的前十大持仓,右侧列表还带 `3M强:` 一行。历史按当前名单和复权价重算,过去某天可能与当时 `.txt` 差一两位。 页面同时发布在 <https://ericxue92.github.io/momentum-scanner/>:GitHub Actions 工作流(`etf_rs_page.yml`)在每个美股收盘后于云端重建(和本地同一条链,含成分股续行)并部署到 GitHub Pages,不依赖本机。
+- **龙头累积名单:** 排名前 `top_etfs`(10)只 ETF 的最强成分股(`3M强:` 那一行)按名次合并进一个累积的 TradingView 名单 `output/TV/US/ETF_rs_leaders.txt`——不带日期、逗号分隔、逐日累积、永不清理(删掉即重置)。主表里还没有的名字另写 `<date>_ETF_rs_new.txt`(没有新增就不写;同日重跑只扩主表,保留第一次的新增文件)。**只卡新进名字的入池闸:** 收盘价须严格高于 SMA50 与 SMA200(`entry_above_sma`),且在云端美股 3M 表里的全市场 3M RS 百分位 ≥ 90(`entry_min_rs_percentile_3m`;表里查不到的 ticker 不判)——这两条从不移除已在表里的名字。**与 EOD master 去重:** 已在 `eod_seen_US.txt` 里的名字不加入,已在主表的名字一旦出现在其中当天就移出(只记日志,不写进 pruned 文件)。主表每次运行还会**裁剪**(在加完当天新名字之后):收盘连续 ≥ 2 个交易日低于 SMA50,**且**最新收盘低于首次跌破那天的最低价 → 移除,记录到 `<date>_ETF_rs_pruned.txt`(逗号分隔;没裁就不写;同日重跑会合并进去);中途收回线上重新起算,没数据、历史不足、序列陈旧的保留,被裁的名字日后再进某只前列 ETF 的前 5、并通过入池闸和门槛后会重新加入。另有三道门槛,入池和留池都适用:最新收盘 ≥ $20、近 20 日平均成交额(收盘 × 成交量)≥ $1 亿、近 20 日 ADR% ≥ 3.5(不足 20 根不判)——候选不达标当天不加入,已在表里的不达标就裁掉。配置 `[etf_rs.leaders]`(`top_etfs`、`prune`、`sma_period`、`min_price`、`min_dollar_volume`、`min_adr_percent`、`entry_above_sma`、`entry_min_rs_percentile_3m`);不推 ntfy。
+- **走势页:** 同一步还会写 `output/Reports/ETF/etf_rs_trend.html`(单个自包含文件,每次覆盖)。用同一批 K 线重算每个历史交易日的分数(拉 2 年,页面显示约 250 天,无状态文件),不受 `.txt` 5 天保留期限制。两个窗口:**3M**(排名文件用的那个)和 **12M**(`0.4·R63 + 0.2·R126 + 0.2·R189 + 0.2·R252`,相对 SPY,至少 253 根——上市不满一年的 ETF 没有 12M 线),另有「3M vs 12M 名次差」视图(3M 名次领先 12M = 正在走强)。Y 轴可在 0–99 RS 评分(默认,标出 RS 90 横线)、名次、超额收益之间切换;最新一天前 `chart_top_n`(20)名画粗线,悬停或右侧列表显示每只 ETF 的前十大持仓,右侧列表还带 `3M强:` 一行。历史按当前名单和复权价重算,过去某天可能与当时 `.txt` 差一两位。页面同时发布在 <https://ericxue92.github.io/momentum-scanner/>:GitHub Actions 工作流(`etf_rs_page.yml`)在每个美股收盘后于云端重建(和本地同一条链,含成分股续行)并部署到 GitHub Pages,不依赖本机。
 - **同名即同一品种:** 中文名完全相同的 ticker 只显示最强的一只(曾经的 GDXU / NUGT 即是一例;当前表里已无同名对,规则保留);被隐藏的会列在日志里。
 - 仅为排名快照:同日重跑直接覆盖;不去重、不镜像 Webull、不同步 Futu/TV。
 
@@ -205,13 +208,13 @@ Kullamägi 的抛物线冲顶做空 setup。每天重新检出(不参与任何�
 | 过滤                | 阈值                                                                 | 盘前 | 盘后 |
 | ------------------- | -------------------------------------------------------------------- | ---- | ---- |
 | 20 日均量           | ≥ 500K 股/天                                                         | ✓    | ✓    |
-| 盘前成交量          | Futu `pre_volume` ≥ 5% × 20 日均量——剔除只靠几百股撑出来的薄盘假 gap | ✓    | —    |
+| 盘前成交量          | Futu `pre_volume` ≥ 5% × 20 日均量(gap ≥ 10% 时为 2%)——剔除薄盘假 gap | ✓    | —    |
 | Dollar Volume       | ≥ $100M                                                              | ✓    | ✓    |
-| ADR%                | ≥ 4.0%;gap ≥ 10% 时放宽到 3.0%                                       | ✓    | ✓    |
+| ADR%                | ≥ 3.0%(Morning Gap 专用覆盖;EOD 仍是 4.0%)                           | ✓    | ✓    |
 | SMA50 / SMA200 趋势 | **实时价**站上两条均线;gap ≥ 10% 只豁免 SMA50——SMA200 永不豁免       | ✓    | ✓    |
 | 盘中累计量          | 09:30 ET 起的累计成交量 ≥ 20 日均量(机构买入的特征)                  | —    | ✓    |
 
-均线本身始终用已完成的日线计算;只有比较基准用实时价。所有旋钮都在 `[morning_gap]`(`min_pre_volume_ratio`、`sma_use_live_price`、`sma_bypass_gap_percent`、`adr_bypass_*`),只影响 Morning Gap。需要 FutuOpenD 在线并有美股 Lv1 行情——没有 Finviz 兜底。
+均线本身始终用已完成的日线计算;只有比较基准用实时价。已完成日线只有 50–199 根的新股还没有 SMA200:只按 SMA50 过闸,此时 gap 豁免对它无效;不足 50 根直接丢弃。所有旋钮都在 `[morning_gap]`(`min_pre_volume_ratio`、`pre_volume_bypass_*`、`min_adr_percent`、`sma_use_live_price`、`sma_bypass_gap_percent`、`adr_bypass_*`),只影响 Morning Gap。`adr_bypass_*`(gap ≥ 10% 时 ADR% 门槛放宽到 3.0%)目前等于不生效,因为基础门槛已经是 3.0%。需要 FutuOpenD 在线并有美股 Lv1 行情——没有 Finviz 兜底。
 
 ## 港股筛选器
 
@@ -245,7 +248,7 @@ Kullamägi 的抛物线冲顶做空 setup。每天重新检出(不参与任何�
 
 - **数据:** metrics frame 与 RS 表从云端拉取(`data/hk_metrics/`、`data/hk_rs/`);云端取不到时回退到本地 yfinance 抓取。
 - **数据日规则:** 只有 20:00 这一档用当天收盘;更早的运行会裁掉当天未走完的 bar,并跳过 HSI 触发的 RS 组。周末补跑映射到上周五。
-- **OpenD:** 市值和 HSI 触发来自 Futu。OpenD 不在线时流程照常跑完,但市值闸会把所有票筛掉。此时会推一条高优先级 ntfy 告警(每天一次)。
+- **OpenD:** 市值和 HSI 触发来自 Futu。快照批次失败会重试一次;仍拿不到市值(OpenD 不在线)时,通过价格和 dollar volume 门槛的票改用 yfinance 取市值(较慢,最多 400 只)。两个来源都拿不到市值时,市值闸会把所有票筛掉,日志会明确写出。OpenD 不在线时会推一条高优先级 ntfy 告警(每天一次)。
 
 ### 港股 Shorts
 
@@ -266,12 +269,12 @@ Kullamägi 的抛物线冲顶做空 setup。每天重新检出(不参与任何�
 | 表       | 公式                                               | 基准 | 发布位置                                                                            |
 | -------- | -------------------------------------------------- | ---- | ----------------------------------------------------------------------------------- |
 | 美股 12M | `0.4·P3 + 0.2·P6 + 0.2·P9 + 0.2·P12`               | SPY  | `data/us_rs_12m/<date>.csv`(GitHub Actions,与 3M 同一任务)                         |
-| 美股 3M  | `0.5·R21 + 0.3·R42 + 0.2·R63`,universe 约 5,900 只 | SPY  | `data/us_rs_3m/<date>.csv`(GitHub Actions)                                          |
+| 美股 3M  | `0.5·R21 + 0.3·R42 + 0.2·R63`,universe 约 5,800 只 | SPY  | `data/us_rs_3m/<date>.csv`(GitHub Actions)                                          |
 | 港股     | 两条公式都算,在港股主板内部排名                    | HSI  | `data/hk_rs/<date>.csv`(GitHub Actions)                                             |
 
 本地流水线只拉取这些 CSV(缓存在 `output/state/`,拉不到就回退最多 3 天)。GitHub 自带的 cron 不可靠,所以由 launchd 在每次 EOD 之前主动触发 workflow——见[自动化](#自动化)。
 
-**美股 12M 表。** 与 3M 表由同一个云端任务计算,只下载一次约 18 个月的日线(`us_rs_12m.py`;2026-11-14 之前取自 Fred6725/rs-log,公式沿用)。文件按*运行*日期命名,另有 `Session` 列记录收盘价所属的交易日。只有当 SPY 的最新 K 线是最近一个已收盘交易日、且重拉一次后缺这根 K 线的股票不超过 10% 时才发布;否则两张表都不发布,`us-eod` 回退到前一份文件。本地读到 `Session` 落后于最近已收盘交易日的表时,每 5 分钟重拉一次、最多 60 分钟,之后带 WARNING 用旧表过闸(之后手动重跑会拿到新表)。只有 Longs 事件组使用 12M 表,所以旧表只影响 RS 90 线附近的票。
+**美股 12M 表。** 与 3M 表由同一个云端任务计算,只下载一次约 18 个月的日线(`us_rs_12m.py`;2026-11-14 之前取自 Fred6725/rs-log,公式沿用)。文件按*运行*日期命名,另有 `Session` 列记录收盘价所属的交易日。只有当 SPY 的最新 K 线是最近一个已收盘交易日、且重拉一次后缺这根 K 线的股票不超过 10% 时才发布;否则两张表都不发布,`us-eod` 回退到前一份文件。本地读到 `Session` 落后于最近已收盘交易日的表时,每 5 分钟重拉一次、最多 120 分钟,之后带 WARNING 用旧表过闸(之后手动重跑会拿到新表)。只有 Longs 事件组使用 12M 表,所以旧表只影响 RS 90 线附近的票。
 
 ### RS-line 标注
 
@@ -294,8 +297,10 @@ Kullamägi 的抛物线冲顶做空 setup。每天重新检出(不参与任何�
 
 有两个裁剪器会缩减美股 master,让走弱的票日后可以重新入选;两者都会先备份:
 
-- **SMA50 自动裁剪**——每次 `us-eod` 一开始:收盘价连续 2 个已完成交易日低于 SMA50,**且**最新收盘低于前一日收盘(仍在下跌;线下反弹的票保留)→ 移除。软失败:yfinance 整体失败就跳过裁剪;数据缺失/历史太短的票保留。当天被移除的票写入 `output/TV/US/<date>_SMA50Pruned.txt`(逗号分隔;没有裁剪就不写;同日重跑会合并进去)。配置:`[sma50_prune]`。
+- **SMA50 自动裁剪**——每次 `us-eod` 一开始:收盘价连续 2 个已完成交易日低于 SMA50,**且**最新收盘低于前一日收盘(仍在下跌;线下反弹的票保留)→ 移除。软失败:yfinance 整体失败就跳过裁剪;数据缺失、历史太短、序列陈旧(停牌)的票保留。唯一的例外是确认退市——日线连续 ≥ 10 个交易日没有新 bar(`delisted_after_sessions`),且单独重新下载一次确认——会被移除,只记日志。当天被移除的票写入 `output/TV/US/<date>_SMA50Pruned.txt`(逗号分隔;没有裁剪就不写;同日重跑会合并进去)。配置:`[sma50_prune]`。
 - **RS-line 审计**——手动,见[上文](#rs-line-审计与每日-top-10)。
+
+**EMA20 首次跌破名单(美股,只读):** 每次 `us-eod` 在 SMA50 裁剪之前,还会把 master 里今天首次收在 EMA20 下方的票(最新收盘 < EMA20,且前一日收盘 ≥ 前一日 EMA20)写入 `output/TV/US/<date>_EMA20Break.txt`(逗号分隔;没有命中就不写;同日重跑直接覆盖;只保留最新 3 份)。它从不改动 master。配置:`[ema20_break]`。
 
 **master 的行序(美股与港股):** `eod_seen_US.txt` 和 `eod_seen_HK.txt` 在每次 `us-eod` / `hk-eod` 末尾(最后一个分组写入 master 之后)按 **3M RS 从强到弱**重排,所以文件最上面就是已入选票里最强的。没有 3M 分数的票排在最后,按字母序。美股按 3M 原始分排;港股云端表只发布百分位,所以同一百分位的港股保持字母序。行序只是为了好看——去重把文件当集合读,裁剪器也保留行序。3M 表拉不到时文件保持原样。IPO / HKIPO 的 master 保持字母序。
 
@@ -309,8 +314,9 @@ output/
 │   ├── US/<date>_{TheSetup,EarningsGap,HighVolume,GapUp,NewHigh52W,TopGainers,Leaders,RS,Shorts,IPO,Repeat}.txt
 │   ├── US/<date>_{MorningGapPre{20,10,5},MorningGap{5..30}}.txt
 │   ├── US/<date>_ETF_rs_3m.txt   # ETF 强度排名——给人看的,不是导入列表
-│   ├── US/ETF_rs_leaders.txt     # 龙头累积名单(不带日期的主表,逗号分隔);<date>_ETF_rs_new.txt 为当天新增
+│   ├── US/ETF_rs_leaders.txt     # 龙头累积名单(不带日期的主表,逗号分隔);<date>_ETF_rs_new.txt / <date>_ETF_rs_pruned.txt 为当天新增 / 移除
 │   ├── US/<date>_SMA50Pruned.txt   # 当天被 SMA50 自动裁剪移出 master 的票
+│   ├── US/<date>_EMA20Break.txt    # master 里今天首次收在 EMA20 下方的票
 │   ├── US/rs_us_<date>.txt    # 每日 RS 最强 Top 10 (美股)
 │   └── HK/<date>_{EarningsGap,HighVolume,GapUp,Leaders,RS,Shorts,IPO,HKMorningGap{10..60}}.txt
 ├── Webull/{US,HK}/<date>_*.txt   # 换行分隔的镜像,用于 Webull "Upload as File"
@@ -325,7 +331,7 @@ output/
 - **Ticker 格式**——美股:`NASDAQ:AAPL` / `NYSE:WMT` / `AMEX:GLD`。港股:`HKEX:NNN`,**不带前导零**(`HKEX:700`、`HKEX:9988`)——TradingView 会静默拒绝 `HKEX:0700`。
 - **Webull** 必须换行分隔;它的上传功能会静默截断逗号列表。
 - **导入**——TradingView:Watchlist → "Import list..." → 选 `output/TV/` 下的文件。Webull:Watchlist → "Upload as File" → 选 `output/Webull/` 下的对应文件。
-- **保留期**(自动清理,软失败):TV / Webull 5 天 · rs-audit 5 天 · RS Top 10 快照 4 天 · Reports 7 天(ETF 走势页除外,它每次原地覆盖、不清理;不带日期的 `ETF_rs_leaders.txt` 主表同样不清理) · state 缓存 2–4 天。master(`eod_seen_*`)、`ntfy_last_seen.txt`、`edgar_cache/` 和日志永远不会被清理。
+- **保留期**(自动清理,软失败):TV / Webull 5 天(EMA20Break 名单只保留最新 3 份) · rs-audit 5 天 · RS Top 10 快照 4 天 · Reports 7 天(ETF 走势页除外,它每次原地覆盖、不清理;不带日期的 `ETF_rs_leaders.txt` 主表同样不清理) · state 缓存 2–8 天。master(`eod_seen_*`)、`ntfy_last_seen.txt`、`edgar_cache/` 和日志永远不会被清理。
 
 ## 同步与通知
 
@@ -344,18 +350,35 @@ output/
 
 可选,**默认关闭**(`[tv_sync]`)。走 TradingView 的非官方 REST API,用你的 `sessionid` cookie 认证:环境变量 `TV_SESSIONID` / `TV_SESSIONID_SIGN`,或 `~/.config/momentum-scanner/tv_cookie.json`。19 个列表要先手动建好(名字区分大小写、一字不差:18 个 Futu 分组名,外加一个独立的 `MorningGap`);找不到的名字会告警并跳过。软失败约定同 Futu。
 
+### TradingView 指标
+
+逐个查看导入的 watchlist 时配套使用的图表指标,代码和说明见 [`docs/tradingview/adaptive_ma_pack_alerts.md`](docs/tradingview/adaptive_ma_pack_alerts.md)(Pine Script v6,叠加在 K 线上)。把代码块粘贴到 TradingView 的 Pine Editor 并添加到图表即可。
+
+- **自适应均线组**——EMA 5 / 10 / 20 和 SMA 50 / 200 跟随图表周期(日 / 周 / 月);15m / 30m / 65m 图上额外画真实的 65 分钟 EMA 20。
+- **收盘确认提醒**(30m / 65m 图)——K 线收盘从下往上站回日线 EMA20、前日低点、前周低点或前日高点(含影线跌破后收回);每条线每天最多提醒一次。
+- **实时提醒**(任意日内周期)——价格盘中从下往上穿过前日低点 / 前周低点 / 前日高点 / 昨日的日线 EMA20,不等收盘。
+- **价位线**——前日低点 / 高点和前周低点延伸到右侧并标注价格;所有提醒可选"只在 Gap Down 当天触发"。
+- **RVOL(t)**——开盘以来的累计成交量 ÷ 过去 20 天同一分钟的平均累计量,显示在右下角。
+
+建一条 "Any alert() function call" 提醒即可覆盖全部 8 个条件;想分开建的话,文件里的表格列出了每个条件对应的频率设置。
+
 ### ntfy 推送
 
-配置 `[notify]`,并在 [ntfy](https://ntfy.sh) app 里订阅该 topic;Mac 上另有一个常驻 launchd 订阅器把同一 topic 桥接到 macOS 通知中心。
+启用 `[notify]`,把 topic 写进 `.env`(`NTFY_TOPIC=<一长串随机字符>`),并在 [ntfy](https://ntfy.sh) app 里订阅它;Mac 上另有一个常驻 launchd 订阅器把同一 topic 桥接到 macOS 通知中心。
 
-| 通知                       | 触发时机                                                            |
-| -------------------------- | ------------------------------------------------------------------- |
-| 新 gapper                  | Morning Gap 扫描发现当天同阶段更早扫描里没出现过的票                |
-| **PROMOTED**(高优先级)     | 盘前 gapper 首次通过盘后累计量闸                                    |
-| **SKIPPED**(高优先级)      | 计划内的扫描因网络始终没起来而退出                                  |
-| RS workflow 失败           | launchd 触发云端 RS workflow 失败                                   |
-| **OpenD 不在线**(高优先级) | EOD 或窗口内的 Morning Gap 扫描开始时连不上 Futu OpenD;每天只推一次 |
-| Catalyst Report Ready      | 盘前 catalyst 报告写完(仅当该报告启用时)                            |
+> **topic 不进 git。** 本仓库是公开的,而 topic 名是 ntfy.sh 唯一的"密码"——知道它的人既能读到告警,也能推假消息。`config.toml` 里保持 `ntfy_topic = ""`;Python 侧依次取非空的 config 值、环境变量 `NTFY_TOPIC`、`.env`,两个 shell 脚本(`trigger_rs_workflow.sh`、`run_ntfy_subscriber.sh`)读的是同一行 `.env`。改了 topic 之后要重启订阅器:`launchctl kickstart -k gui/$(id -u)/com.xue.finviz-to-tv.ntfy-subscriber`。
+
+| 通知                       | 触发时机                                                                                               |
+| -------------------------- | ------------------------------------------------------------------------------------------------------ |
+| 新 gapper                  | Morning Gap 扫描发现当天同阶段更早扫描里没出现过的票(推送成功才算"出现过",所以推送失败的票下一次扫描会重推) |
+| **PROMOTED**(高优先级)     | 盘前 gapper 首次通过盘后累计量闸                                                                       |
+| **SKIPPED**(高优先级)      | 计划内的扫描因网络始终没起来而退出                                                                     |
+| RS workflow 失败           | launchd 触发云端 RS workflow 失败,或它触发的那次云端运行失败 / 被取消                                  |
+| **OpenD 不在线**(高优先级) | EOD 或窗口内的 Morning Gap 扫描开始时连不上 Futu OpenD;每天只推一次                                    |
+| **电量低**(高优先级)       | 计划内的运行开始时用电池供电且电量低于 20%(开着盖子单纯用电池跑没问题,不推);每天只推一次            |
+| 扫描延迟                   | 一次运行被系统睡眠冻结 ≥ 3 分钟——用电池且合盖时,所有计划内扫描都会停住,直到开盖                      |
+| **Finviz 异常**(高优先级)  | 美股 EOD 的 Finviz 筛选全部返回 0 行,或某个 filter code 被拒绝;每天只推一次                           |
+| Catalyst Report Ready      | 盘前 catalyst 报告写完(仅当该报告启用时)                                                               |
 
 ## LLM 报告
 
@@ -397,10 +420,11 @@ macOS launchd + pmset;时间均为 HKT。plist 放在 `~/Library/LaunchAgents/`(
 | ntfy 订阅器      | 常驻(KeepAlive)                       | ntfy → 通知中心                 | `ntfy-subscriber.plist`         |
 | 唤醒重排         | 周日 18:00(root LaunchDaemon)         | `schedule_morning_gap_wakes.py` | `schedule-wakes.plist`          |
 
-- 每个 EOD wrapper 先跑 EOD 扫描(watchdog:美股 90 分钟——要覆盖 12M 表最长 60 分钟的新鲜度等待加一次完整运行——/ 港股 45 分钟),再以 soft 步骤跑 `--dry-run` rs-line 审计;退出码只反映 EOD 扫描。
+- 每个 EOD wrapper 先跑 EOD 扫描(watchdog:美股 150 分钟——要覆盖 12M 表最长 120 分钟的新鲜度等待加一次完整运行——/ 港股 45 分钟;watchdog 杀进程时会写一行 `[ERROR] [watchdog]` 日志),再以 soft 步骤跑 `--dry-run` rs-line 审计;退出码只反映 EOD 扫描。
 - Morning Gap **每次触发都自检时间窗口,窗口外干净退出**,所以多触发或漏唤醒都无害。
-- RS 触发器在每次 EOD 之前(美股 08:45、港股 18:45)主动触发云端 workflow,因为 GitHub 的定时 cron 可能晚几小时甚至直接不跑;workflow 的 commit 步骤幂等,重复触发无害。
-- 10:00 落在美股收盘(EDT 与 EST 都覆盖)之后,也晚于 08:45 发布两张美股 RS 表的云端任务(约 10 分钟);20:00 距港股收盘留了 4 小时让数据稳定。
+- 运行开始前有一道网络闸,等待(最多 300 秒)该模式实际要用的主机:morning-gap 只探测 Yahoo,`hk-eod` 探测 GitHub raw + Yahoo,`us-eod` 再加 finviz.com——Finviz 抖一下不会再连累港股运行或缺口扫描窗口。
+- RS 触发器在每次 EOD 之前(美股 08:45、港股 18:45)主动触发云端 workflow,因为 GitHub 的定时 cron 可能晚几小时甚至直接不跑;workflow 的 commit 步骤幂等,重复触发无害。运行失败会推 ntfy 告警,EOD 回退到前一天的表。
+- 10:00 落在美股收盘(EDT 与 EST 都覆盖)之后,也晚于 08:45 发布两张美股 RS 表的云端任务(约 10 分钟,见[云端 RS 表](#云端-rs-表));20:00 距港股收盘留了 4 小时让数据稳定。
 
 ```bash
 sudo pmset repeat wakeorpoweron TWRFS 09:59:00       # 为美股槽唤醒 (macOS 26+ 关键字是 "wakeorpoweron")
@@ -412,7 +436,7 @@ sudo uv run scripts/schedule_morning_gap_wakes.py    # 一次性排 Morning Gap 
 
 ## 配置
 
-所有过滤条件、阈值、分组映射和 ETF 名单都在 [`config.toml`](config.toml);API key 放在 `.env`。架构说明与不变量:[`CLAUDE.md`](CLAUDE.md)。
+所有过滤条件、阈值、分组映射和 ETF 名单都在 [`config.toml`](config.toml);API key 和 ntfy topic(`NTFY_TOPIC`)放在 `.env`(已 gitignore,参见 `.env.example`)。架构说明与不变量:[`CLAUDE.md`](CLAUDE.md)。
 
 ## 依赖
 

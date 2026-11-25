@@ -74,9 +74,9 @@ Applied after Finviz discovery, on yfinance daily bars. Thresholds live in `[set
 | Gate          | Threshold                                                        | Applies to                                   |
 | ------------- | ---------------------------------------------------------------- | -------------------------------------------- |
 | Dollar Volume | price × 20-day avg volume ≥ $100M (Shorts: ≥ $50M)               | Longs, Leaders, RS, Shorts, IPO, Morning Gap |
-| ADR%          | mean(`(High − Low) / Close`) × 100 over 20 completed bars ≥ 4.0% | same                                         |
+| ADR%          | mean(`(High − Low) / Close`) × 100 over 20 completed bars ≥ 4.0% | same, except Morning Gap (3.0% floor)        |
 
-ADR% (Kullamägi-style) measures how much a stock moves _now_; it replaced the old Finviz `beta > 1.5` filter, which penalised in-play mid/large caps.
+ADR% (Kullamägi-style) measures how much a stock moves _now_; it replaced the old Finviz `beta > 1.5` filter, which penalised in-play mid/large caps. Morning Gap overrides the floor to 3.0% (`[morning_gap].min_adr_percent`); every EOD group stays at 4.0%.
 
 **Big-gap bypass (TheSetup / EarningsGap only):** when the day's opening gap is ≥ 10%, the ADR% floor relaxes to 3.0% — a low-volatility large cap's earnings gap (CRM 2026-08-27: gap +11.9%, ADR% 3.74) would otherwise never surface. TheSetup itself requires a gap ≥ 10%, so its effective ADR% floor is 3.0%. Per-group keys `adr_bypass_gap_percent` / `adr_bypass_min_percent` in `[[longs]]`; remove them to disable.
 
@@ -118,7 +118,9 @@ Long-term trend leaders: Small Cap+, Avg Vol ≥ 500K, Price > $20, above SMA50 
 
 | 4 weeks | 13 weeks | 26 weeks | YTD     | 52 weeks |
 | ------- | -------- | -------- | ------- | -------- |
-| ≥ +30%  | ≥ +50%   | ≥ +100%  | ≥ +100% | ≥ +150%  |
+| ≥ +30%  | ≥ +50%   | ≥ +100%  | ≥ +100% | ≥ +100%  |
+
+The 52-week window was +150% until Finviz's 2026-10-20 redesign: that value is no longer a preset (the code was silently ignored and returned the whole market), so it now uses the nearest preset, +100%. HK Leaders compute the window locally and keep +150%.
 
 ### Conditional RS
 
@@ -166,24 +168,25 @@ Names already in the cross-day master that **re-fire an event group today** (The
 
 ### ETF Strength Ranking
 
-A daily sector / theme rotation view: a fixed list of ~50 ETFs (US sectors and themes, commodities, leveraged products) ranked by 3-month relative strength.
+A daily sector / theme rotation view: a fixed list of 55 ETFs (US sectors and themes) ranked by 3-month relative strength.
 
 - **Scoring:** the same 3M RS formula as stocks (`0.5·R21 + 0.3·R42 + 0.2·R63`, relative to SPY). The percentile is **within the ETF list**, not the stock universe.
 - **When:** a soft step at the end of every `us-eod` run (a failure never affects EOD); rerun alone with `--mode etf-rs`. Computed locally — one yfinance batch, no cloud step.
 - **Output:** `output/TV/US/<date>_ETF_rs_3m.txt`, one ETF per line, **strongest first**, as `N. TICKER rank-change - name | top-10 holdings` (`N.` = rank):
 
   ```
-  1. IEO = - 油气勘探开采 | COP、VLO、MPC、PSX、DVN
-     3M强: RRC > AR > VG > APA > COP
-  2. IBIT 🟢↑1 - 比特币 | 不适用: 主要资产为比特币
-  3. ARKG 🔴↓1 - 基因组革命 | TXG、TWST、TEM、CRSP、PSNL
+  1. XLP = - 必需消费 | WMT、COST、PG、KO、PM、TGT、MO、CL、PEP、MDLZ
+     3M强: DLTR > WMT > COST > TGT > PG
+  2. XLV 🟢↑3 - 医疗保健 | LLY、JNJ、ABBV、MRK、UNH、TMO、AMGN、GILD、ABT、PFE
+     3M强: REGN > MRNA > CAH > GILD > MCK
+  3. IBIT 🔴↓1 - 比特币 | 不适用: 主要资产为比特币
   ```
 
 - **Rank change:** the marker after the ticker compares with the most recent earlier day's file: `🟢↑N` up N places, `🔴↓N` down N, `=` unchanged, `新` new to the list. A same-day rerun still compares with the previous day; with no earlier file (first run, or a gap longer than the 5-day retention) the marker is omitted.
 - **Human-readable, not a TradingView import** — this ranking file is the only non-comma `.txt` in `TV/US/`. The full scored table (rank / score / percentile) goes to the EOD log.
 - **Maintenance:** edit `[etf_rs.tickers]` (`TICKER = "name"`) to change the list. Holdings come from the static, hand-maintained `[etf_rs.holdings]` table (no API refresh; missing entry → segment omitted).
 - **Strongest holdings line:** under every ETF row, an indented `   3M强: A > B > C > D > E` lists the ETF's **US-listed** constituents ranked by the same 3M formula vs SPY (within the ETF, top `top_n` = 5; fewer when fewer score, no line when none; a constituent with fewer than 64 daily bars has no 3M score and takes no part). Constituents come from stockanalysis.com's holdings page (free tier = top 25 by weight), cached per day under `output/state/`, with yfinance's top-10 as fallback (line marked ` (前十大)`). ETFs without stock holdings (IBIT) have no line. Config `[etf_rs.holdings_rs]`; soft — a failure writes the files without the line.
-- **Leaders watchlist:** the strongest constituents (the `3M强:` lines) of the top `top_etfs` (10) ETFs of the ranking are merged, in rank order, into a cumulative TradingView list `output/TV/US/ETF_rs_leaders.txt` — undated, comma-separated, append-only, never aged out (delete it to reset). Names it did not have yet are also written to `<date>_ETF_rs_new.txt` (absent when nothing is new; a same-day rerun grows the master but keeps the first run's file). The master is also **pruned** every run (after the day's additions): a name whose close has sat below SMA50 for ≥ 2 consecutive sessions **and** whose latest close is below the low of the first session under the line is removed and recorded in `<date>_ETF_rs_pruned.txt` (comma-separated; absent when nothing was pruned); a close back above the line restarts the count, missing / short / stale data keeps the name, and a pruned name returns the next day it is in a top ETF's top 5 again. Three floors apply at entry and to the existing list: latest close ≥ $20, 20-day average dollar volume (close × volume) ≥ $100M, and 20-day ADR% ≥ 3.5 (fewer than 20 bars is not judged) — a candidate under any is not added that day, an existing name under any is pruned. Config `[etf_rs.leaders]` (`top_etfs`, `prune`, `sma_period`, `min_price`, `min_dollar_volume`, `min_adr_percent`); no ntfy.
+- **Leaders watchlist:** the strongest constituents (the `3M强:` lines) of the top `top_etfs` (10) ETFs of the ranking are merged, in rank order, into a cumulative TradingView list `output/TV/US/ETF_rs_leaders.txt` — undated, comma-separated, cumulative, never aged out (delete it to reset). Names it did not have yet are also written to `<date>_ETF_rs_new.txt` (absent when nothing is new; a same-day rerun grows the master but keeps the first run's file). **Entry-only gates:** a new name must close strictly above SMA50 and SMA200 (`entry_above_sma`) and have a market-wide 3M RS percentile ≥ 90 in the cloud US 3M table (`entry_min_rs_percentile_3m`; a ticker missing from the table is not judged) — these never remove a name already on the list. **Deduped against the EOD master:** a name in `eod_seen_US.txt` is not added, and a listed name leaves the day it appears there (logged only, not written to the pruned file). The master is also **pruned** every run (after the day's additions): a name whose close has sat below SMA50 for ≥ 2 consecutive sessions **and** whose latest close is below the low of the first session under the line is removed and recorded in `<date>_ETF_rs_pruned.txt` (comma-separated; absent when nothing was pruned; a same-day rerun merges into it); a close back above the line restarts the count, missing / short / stale data keeps the name, and a pruned name returns the next day it is in a top ETF's top 5 again and clears the entry gates and floors. Three floors apply at entry and to the existing list: latest close ≥ $20, 20-day average dollar volume (close × volume) ≥ $100M, and 20-day ADR% ≥ 3.5 (fewer than 20 bars is not judged) — a candidate under any is not added that day, an existing name under any is pruned. Config `[etf_rs.leaders]` (`top_etfs`, `prune`, `sma_period`, `min_price`, `min_dollar_volume`, `min_adr_percent`, `entry_above_sma`, `entry_min_rs_percentile_3m`); no ntfy.
 - **Trend page:** the same step also writes `output/Reports/ETF/etf_rs_trend.html` (one self-contained file, overwritten every run). It recomputes each past trading day's score from the same klines (2 years fetched, ~250 days shown, no state file), so it is not limited by the 5-day `.txt` retention. Two windows: **3M** (the ranking's own) and **12M** (`0.4·R63 + 0.2·R126 + 0.2·R189 + 0.2·R252` vs SPY, 253 bars minimum — an ETF listed for less than a year has no 12M line), plus a "3M vs 12M rank difference" view (3M ahead of 12M = gaining). Y axis switches between the 0–99 RS percentile (default, RS 90 line marked), rank, and the raw excess return; the latest top `chart_top_n` (20) are drawn thick, and hovering / the side list shows each ETF's top-10 holdings; the side list also carries the `3M强:` line. History uses today's ticker list and adjusted closes, so a past day can sit a place or two off that day's `.txt`. The page is also published at <https://ericxue92.github.io/momentum-scanner/>: a GitHub Actions workflow (`etf_rs_page.yml`) rebuilds it in the cloud after each US close (same chain as locally, holdings line included) and deploys it to GitHub Pages, independent of the local machine.
 - **Same name = same instrument:** tickers with an identical name collapse to the strongest one (e.g. the former GDXU / NUGT pair; the current table has no duplicate names, the rule stays in place); the log lists what was hidden.
 - Ranking snapshot only: a same-day rerun overwrites; no dedup, no Webull mirror, no Futu/TV sync.
@@ -205,13 +208,13 @@ Nine scans per day: **pre-market** at −20/−10/−5 min → `MorningGapPre{20
 | Filter               | Threshold                                                                                         | Pre | Post |
 | -------------------- | ------------------------------------------------------------------------------------------------- | --- | ---- |
 | 20-day avg volume    | ≥ 500K shares/day                                                                                 | ✓   | ✓    |
-| Pre-market volume    | Futu `pre_volume` ≥ 5% × 20-day avg volume — drops thin-tape gaps printed on a few hundred shares | ✓   | —    |
+| Pre-market volume    | Futu `pre_volume` ≥ 5% × 20-day avg volume (2% when gap ≥ 10%) — drops thin-tape gaps             | ✓   | —    |
 | Dollar Volume        | ≥ $100M                                                                                           | ✓   | ✓    |
-| ADR%                 | ≥ 4.0%; relaxed to 3.0% when gap ≥ 10%                                                            | ✓   | ✓    |
+| ADR%                 | ≥ 3.0% (morning-gap override; EOD stays at 4.0%)                                                  | ✓   | ✓    |
 | SMA50 / SMA200 trend | **live price** above both; gap ≥ 10% waives SMA50 only — SMA200 is never waived                   | ✓   | ✓    |
 | Intraday volume      | cumulative volume since 09:30 ET ≥ 20-day avg daily volume (the institutional-buying signature)   | —   | ✓    |
 
-The averages always come from completed daily bars; only the comparison uses the live price. All knobs are in `[morning_gap]` (`min_pre_volume_ratio`, `sma_use_live_price`, `sma_bypass_gap_percent`, `adr_bypass_*`) and affect morning-gap only. Requires FutuOpenD with US Lv1 quotes — there is no Finviz fallback.
+The averages always come from completed daily bars; only the comparison uses the live price. A recent IPO with 50–199 completed bars has no SMA200 yet: it is gated on SMA50 alone, which the gap waiver then cannot lift; under 50 bars it is dropped. All knobs are in `[morning_gap]` (`min_pre_volume_ratio`, `pre_volume_bypass_*`, `min_adr_percent`, `sma_use_live_price`, `sma_bypass_gap_percent`, `adr_bypass_*`) and affect morning-gap only. The `adr_bypass_*` pair (gap ≥ 10% → ADR% floor 3.0%) is currently a no-op, because the base floor is already 3.0%. Requires FutuOpenD with US Lv1 quotes — there is no Finviz fallback.
 
 ## HK Screeners
 
@@ -266,12 +269,12 @@ Post-open only (Futu has no HK pre-market data): 6 scans at +10…+60 min after 
 | Table  | Formula                                                 | Benchmark | Published to                                                                           |
 | ------ | ------------------------------------------------------- | --------- | -------------------------------------------------------------------------------------- |
 | US 12M | `0.4·P3 + 0.2·P6 + 0.2·P9 + 0.2·P12`                    | SPY       | `data/us_rs_12m/<date>.csv` (GitHub Actions, same job as 3M)                           |
-| US 3M  | `0.5·R21 + 0.3·R42 + 0.2·R63`, universe ≈ 5,900 tickers | SPY       | `data/us_rs_3m/<date>.csv` (GitHub Actions)                                            |
+| US 3M  | `0.5·R21 + 0.3·R42 + 0.2·R63`, universe ≈ 5,800 tickers | SPY       | `data/us_rs_3m/<date>.csv` (GitHub Actions)                                            |
 | HK     | both formulas, ranked within the HK main board          | HSI       | `data/hk_rs/<date>.csv` (GitHub Actions)                                               |
 
 The local pipeline only fetches these CSVs (cached in `output/state/`, walking back ≤ 3 days on a miss). Because GitHub's own cron is unreliable, launchd dispatches the workflows ahead of each EOD — see [Automation](#automation).
 
-**US 12M table.** Computed by the same cloud job as the 3M table from one ~18-month download (`us_rs_12m.py`; until 2026-11-14 it came from Fred6725/rs-log, whose formula it keeps). The file is named by its *run* date and carries a `Session` column with the trading day its closes belong to. The job publishes nothing — neither table — unless SPY's latest bar is the last completed session and at most 10% of the universe still lacks that bar after one re-fetch; `us-eod` then walks back to the previous file. Locally, a table whose `Session` is behind the latest completed session is re-fetched every 5 minutes for up to 60 minutes, after which the run gates on the stale table with a WARNING (a manual rerun later picks up the fresh one). Only the Longs event groups use the 12M table, so a stale day shifts names near the RS 90 line and nothing else.
+**US 12M table.** Computed by the same cloud job as the 3M table from one ~18-month download (`us_rs_12m.py`; until 2026-11-14 it came from Fred6725/rs-log, whose formula it keeps). The file is named by its *run* date and carries a `Session` column with the trading day its closes belong to. The job publishes nothing — neither table — unless SPY's latest bar is the last completed session and at most 10% of the universe still lacks that bar after one re-fetch; `us-eod` then walks back to the previous file. Locally, a table whose `Session` is behind the latest completed session is re-fetched every 5 minutes for up to 120 minutes, after which the run gates on the stale table with a WARNING (a manual rerun later picks up the fresh one). Only the Longs event groups use the 12M table, so a stale day shifts names near the RS 90 line and nothing else.
 
 ### RS-Line Annotation
 
@@ -294,8 +297,10 @@ The cloud CSVs also carry `rs_below_ma` / `rs_days_below_ma` / `rs_frac_below_ma
 
 Two pruners can shrink the US master so weakened names may re-qualify later; both back it up first:
 
-- **SMA50 auto-prune** — at the top of every `us-eod`: a close below SMA50 for 2 consecutive completed days **and** a latest close below the prior close (still declining; a rebound under the line is kept) → removed. Soft-fail: a yfinance outage skips the prune; missing/short-history tickers are kept. The day's removed names are written to `output/TV/US/<date>_SMA50Pruned.txt` (comma-separated; no file when nothing was pruned; a same-day rerun merges into it). Config: `[sma50_prune]`.
+- **SMA50 auto-prune** — at the top of every `us-eod`: a close below SMA50 for 2 consecutive completed days **and** a latest close below the prior close (still declining; a rebound under the line is kept) → removed. Soft-fail: a yfinance outage skips the prune; missing, short-history and stale (halted) tickers are kept. The one exception is a confirmed delisting — no new daily bar for ≥ 10 sessions (`delisted_after_sessions`), re-checked with a separate download — which is removed and only logged. The day's removed names are written to `output/TV/US/<date>_SMA50Pruned.txt` (comma-separated; no file when nothing was pruned; a same-day rerun merges into it). Config: `[sma50_prune]`.
 - **RS-line audit** — manual, see [above](#rs-line-audit-and-daily-top-10).
+
+**EMA20 first-break list (US, read-only):** right before the SMA50 prune, every `us-eod` also lists the master names that closed below EMA20 for the first time today (latest close < EMA20, prior close ≥ prior EMA20) in `output/TV/US/<date>_EMA20Break.txt` (comma-separated; no file when empty; a same-day rerun overwrites; only the newest 3 files are kept). It never changes the master. Config: `[ema20_break]`.
 
 **Master line order (US and HK):** `eod_seen_US.txt` and `eod_seen_HK.txt` are re-sorted by **3M RS, strongest first**, on every `us-eod` / `hk-eod` (after the last group writes to the master), so the top of the file is the strongest of the names already surfaced. Tickers without a 3M score go last, alphabetically. US ranks by the raw 3M score; the HK cloud table publishes percentiles only, so HK names with the same percentile stay in alphabetical order. Order is cosmetic — dedup reads the file as a set, and the pruners preserve line order. If the 3M table is unavailable the file is left as is. The IPO / HKIPO masters stay alphabetical.
 
@@ -309,8 +314,9 @@ output/
 │   ├── US/<date>_{TheSetup,EarningsGap,HighVolume,GapUp,NewHigh52W,TopGainers,Leaders,RS,Shorts,IPO,Repeat}.txt
 │   ├── US/<date>_{MorningGapPre{20,10,5},MorningGap{5..30}}.txt
 │   ├── US/<date>_ETF_rs_3m.txt   # ETF strength ranking — human-readable, NOT an import list
-│   ├── US/ETF_rs_leaders.txt     # cumulative leaders watchlist (undated master, comma-sep); <date>_ETF_rs_new.txt = the day's additions
+│   ├── US/ETF_rs_leaders.txt     # cumulative leaders watchlist (undated master, comma-sep); <date>_ETF_rs_new.txt / <date>_ETF_rs_pruned.txt = the day's additions / removals
 │   ├── US/<date>_SMA50Pruned.txt   # names the SMA50 auto-prune removed from the master today
+│   ├── US/<date>_EMA20Break.txt    # master names that closed below EMA20 for the first time today
 │   ├── US/rs_us_<date>.txt    # daily strongest-RS top 10 (US)
 │   └── HK/<date>_{EarningsGap,HighVolume,GapUp,Leaders,RS,Shorts,IPO,HKMorningGap{10..60}}.txt
 ├── Webull/{US,HK}/<date>_*.txt   # newline-separated mirror, for Webull "Upload as File"
@@ -325,7 +331,7 @@ output/
 - **Ticker format** — US: `NASDAQ:AAPL` / `NYSE:WMT` / `AMEX:GLD`. HK: `HKEX:NNN` **without leading zeros** (`HKEX:700`, `HKEX:9988`) — TradingView silently rejects `HKEX:0700`.
 - **Webull** must be newline-separated; its upload silently truncates comma lists.
 - **Importing** — TradingView: Watchlist → "Import list..." → a file from `output/TV/`. Webull: Watchlist → "Upload as File" → the matching file from `output/Webull/`.
-- **Retention** (auto-cleanup, soft-fail): TV / Webull 5 days · rs-audit 5 days · RS top-10 snapshots 4 days · Reports 7 days (the ETF trend page is overwritten in place, never aged out; the undated `ETF_rs_leaders.txt` master is never aged out either) · state caches 2–4 days. Masters (`eod_seen_*`), `ntfy_last_seen.txt`, `edgar_cache/` and logs are never touched.
+- **Retention** (auto-cleanup, soft-fail): TV / Webull 5 days (EMA20Break lists: newest 3 files) · rs-audit 5 days · RS top-10 snapshots 4 days · Reports 7 days (the ETF trend page is overwritten in place, never aged out; the undated `ETF_rs_leaders.txt` master is never aged out either) · state caches 2–8 days. Masters (`eod_seen_*`), `ntfy_last_seen.txt`, `edgar_cache/` and logs are never touched.
 
 ## Sync and Notifications
 
@@ -348,20 +354,13 @@ Optional, **off by default** (`[tv_sync]`). Uses TradingView's unofficial REST A
 
 The companion chart indicator used when working through the imported watchlists lives in [`docs/tradingview/adaptive_ma_pack_alerts.md`](docs/tradingview/adaptive_ma_pack_alerts.md) (Pine Script v6, overlay). Paste the code block into TradingView's Pine Editor and add it to the chart.
 
-配套的 TradingView 图表指标,用于逐个查看导入的 watchlist:代码和说明见 [`docs/tradingview/adaptive_ma_pack_alerts.md`](docs/tradingview/adaptive_ma_pack_alerts.md)(Pine Script v6,叠加在 K 线上)。把代码块粘贴到 Pine Editor 并添加到图表即可。
-
 - **Adaptive MA pack** — EMA 5 / 10 / 20 and SMA 50 / 200 follow the chart's timeframe (daily, weekly or monthly); 15m / 30m / 65m charts also draw a true 65-minute EMA 20.
-  **自适应均线组** — EMA 5 / 10 / 20 和 SMA 50 / 200 跟随图表周期(日 / 周 / 月);15m / 30m / 65m 图上额外画真实的 65 分钟 EMA 20。
 - **Close-confirmed alerts** (30m / 65m charts) — bar close reclaims the Daily EMA20, previous-day low, previous-week low or previous-day high from below (wick-break-and-recover included); at most one alert per level per day.
-  **收盘确认提醒**(30m / 65m 图)— K 线收盘从下往上站回日线 EMA20、前日低点、前周低点或前日高点(含影线跌破后收回);每条线每天最多提醒一次。
-- **Live alerts** (any intraday chart) — price crosses the previous-day low / previous-week low / previous-day high without waiting for the bar to close.
-  **实时提醒**(任意日内周期)— 价格盘中穿越前日低点 / 前周低点 / 前日高点,不等收盘。
+- **Live alerts** (any intraday chart) — price crosses up through the previous-day low / previous-week low / previous-day high / prior day's Daily EMA20 without waiting for the bar to close.
 - **Level lines** — previous-day low / high and previous-week low extended to the right with price labels; optional "gap-down day only" filter for every alert.
-  **价位线** — 前日低点 / 高点和前周低点延伸到右侧并标注价格;所有提醒可选"只在 Gap Down 当天触发"。
+- **RVOL(t)** — cumulative volume since the open ÷ the average cumulative volume at the same minute over the past 20 days, shown in the bottom-right corner.
 
-One "Any alert() function call" alert covers all seven conditions; the file's table lists the per-condition frequency if you prefer separate alerts.
-
-建一条 "Any alert() function call" 提醒即可覆盖全部 7 个条件;想分开建的话,文件里的表格列出了每个条件对应的频率设置。
+One "Any alert() function call" alert covers all eight conditions; the file's table lists the per-condition frequency if you prefer separate alerts. The file itself is written in Chinese.
 
 ### ntfy Notifications
 
