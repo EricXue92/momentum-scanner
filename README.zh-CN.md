@@ -483,6 +483,7 @@ Python ≥ 3.12 — [finviz](https://github.com/mariostoev/finviz)、[yfinance](
 - [How To Pyramid Into Stocks (21 Stock Setup Examples + PDF File)](https://youtu.be/11h6iSQkzuA)(TA Plot)
 - [Sitting Tight for the Right Low Risk Entry](https://youtu.be/Mt3iZ_Orv0g)(TA Plot)
 - [How Do You Know It's Time to Get In a Stock? Analyzing Recent Trades.](https://youtu.be/hfwQUpEflEg)(TA Plot)
+- [Trading Lessons from 60+ Years in the Market | Exclusive with Stan Weinstein](https://youtu.be/PRRNI5SrUWY?si=h-ozI_7T9rIThOI4)(TraderLion)
 
 **Podcast:**
 
