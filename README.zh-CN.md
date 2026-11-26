@@ -105,8 +105,8 @@ Oliver Kell 的动量/突破 setup。6 组互斥——靠前的组优先,每只 
 
 | 优先级 | 分组          | 额外过滤                                                                                           |
 | ------ | ------------- | -------------------------------------------------------------------------------------------------- |
-| 0      | `TheSetup`    | Price > $20、Gap Up 10%+、Rel Vol ≥ 3× 20 日均量(yfinance)。**不过 RS 闸**——放量大缺口本身就是信号 |
-| 1      | `EarningsGap` | Price > $20、Earnings Today、Rel Vol > 1.5、Gap Up 5%+                                             |
+| 0      | `TheSetup`    | Price > $20、Gap Up 10%+、Rel Vol ≥ 2× 20 日均量(yfinance)。**不过 RS 闸**——放量大缺口本身就是信号 |
+| 1      | `EarningsGap` | Price > $20、财报日为今天或昨天盘后(两次 screen 取并集)、Rel Vol > 1.5、Gap Up 5%+                  |
 | 2      | `HighVolume`  | Price > $20、Day Up、Rel Vol ≥ 3× 20 日均量(yfinance)                                              |
 | 3      | `GapUp`       | Price > $20、Gap Up 3%+                                                                            |
 | 4      | `NewHigh52W`  | Price > $20、52 周新高                                                                             |

@@ -28,6 +28,12 @@ the "every Screener call goes through `run_screener`" rule.
   **silently ignores** unknown codes (Leaders 52W is the preset `+100%`;
   `ta_perf` has no custom range). `ind_stocksonly` is implied by the path
   and whitelisted. `finviz.get_stock` (market check) still uses the library.
+  An `a|b` OR inside one filter is ignored the same way (the screen comes
+  back unfiltered) — a `[[longs]]` group that needs "either" lists the
+  codes in `filters_any`, and `_longs_group_screen` runs one screen per code
+  and unions them (EarningsGap: `earningsdate_today` +
+  `earningsdate_yesterdayafter`; → decisions 2026-11-26). Keep such a code
+  out of `filters`, where it would AND with the alternative.
   **Guard:** `run_screener` counts into `_finviz_tally` (reset at us-eod
   start); after the RS section `_alert_if_finviz_broken` logs ERROR + ntfys
   (once/day, `state/finviz_broken_alerted_<date>.txt`, 2-day cleanup) when

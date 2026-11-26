@@ -605,6 +605,53 @@ def _longs_rs_threshold(screener_cfg: dict, default: float) -> float:
     return default if v is None else float(v)
 
 
+def _longs_group_screen(
+    screener_cfg: dict,
+    capture_caps: dict[str, float] | None,
+    delay: float = 0.0,
+) -> list[str]:
+    """Tickers of one `[[longs]]` group's Finviz screen(s).
+
+    With `filters_any`, each code in it gets its own screen (`filters` + that
+    code) and the results are unioned in order. Finviz silently ignores an
+    `a|b` OR inside one filter, so this is the only way to say "either":
+    EarningsGap needs `earningsdate_today` (reported before today's open) or
+    `earningsdate_yesterdayafter` (reported after yesterday's close — the
+    gap is today's too; → decisions 2026-11-26).
+
+    A failed alternative costs only its own tickers; the group fails (the
+    error propagates to the Longs loop) only when every alternative did.
+    """
+    filters = screener_cfg["filters"]
+    signal = screener_cfg.get("signal")
+    alternatives = screener_cfg.get("filters_any") or []
+    if not alternatives:
+        return run_screener(filters, signal, capture_caps=capture_caps)
+
+    tickers: list[str] = []
+    seen: set[str] = set()
+    succeeded = 0
+    last_error: Exception | None = None
+    for j, code in enumerate(alternatives):
+        if j and delay:
+            time.sleep(delay)
+        try:
+            found = run_screener([*filters, code], signal, capture_caps=capture_caps)
+        except Exception as e:
+            logger.warning(f"  {code}: screen failed: {e}")
+            last_error = e
+            continue
+        succeeded += 1
+        logger.info(f"  {code}: {len(found)} tickers")
+        for t in found:
+            if t not in seen:
+                seen.add(t)
+                tickers.append(t)
+    if not succeeded and last_error is not None:
+        raise last_error
+    return tickers
+
+
 def _repeat_hits(label: str, sorted_tickers: list[str], seen: set[str]) -> list[str]:
     """The subset of `sorted_tickers` already in the cross-day master `seen`.
 
@@ -2721,11 +2768,7 @@ def main() -> int:
             key = screener_cfg["key"]
             _log_section(f"[Longs/{key}] Running: {name}")
             try:
-                tickers = run_screener(
-                    screener_cfg["filters"],
-                    screener_cfg.get("signal"),
-                    capture_caps=ipo_finviz_caps,
-                )
+                tickers = _longs_group_screen(screener_cfg, ipo_finviz_caps, delay)
                 logger.info(f"  Found {len(tickers)} tickers")
                 group_rs_min = _longs_rs_threshold(screener_cfg, min_rs_percentile_longs)
                 if group_rs_min > 0 and tickers:

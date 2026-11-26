@@ -38,8 +38,9 @@ def test_the_setup_filters_gap_up_10_and_price_over_20(the_setup):
             "ta_sma50_pa", "ta_sma200_pa"} <= filters
 
 
-def test_the_setup_heavy_volume_is_local_rvol_3x_20d(the_setup):
-    assert the_setup["min_relative_volume"] == 3
+def test_the_setup_heavy_volume_is_local_rvol_2x_20d(the_setup):
+    # 3x until 2026-11-26 (→ decisions 2026-11-26).
+    assert the_setup["min_relative_volume"] == 2
     assert the_setup.get("relative_volume_days", 20) == 20
 
 

@@ -301,7 +301,7 @@ XLB  = "LIN、NEM、FCX、ECL、SHW、VMC、MLM、APD、CRH、STLD"
 # 优先级 (高→低): TheSetup > EarningsGap > HighVolume > GapUp > NewHigh52W > TopGainers。
 # 并集再参与 Longs > Leaders 的跨组去重。
 #
-# TheSetup: 放量 + 大缺口 (gap ≥ 10% + 本地 RVol ≥ 3× 20 日均量), 最高优先级。
+# TheSetup: 放量 + 大缺口 (gap ≥ 10% + 本地 RVol ≥ 2× 20 日均量; 2026-11-26 前为 3×), 最高优先级。
 # 价格门槛与其他组一致 ($20, Finviz sh_price_o20; 2026-10-03 前为 $10); avgvol/$vol/ADR%/RS 12M/SMA50+200 与其他组一致。
 # Longs 6 组日均量 ≥ 500K (Finviz sh_avgvol_o500; 2026-10-03 → 10-10 为 1M)。
 # 与其他事件组一样过跨日 master 去重 (只出新票, 老票复燃进 Repeat.txt)。
@@ -310,7 +310,7 @@ XLB  = "LIN、NEM、FCX、ECL、SHW、VMC、MLM、APD、CRH、STLD"
 key = "the_setup"
 name = "The Setup (Heavy Volume + Gap Up 10%)"
 filters = ["ind_stocksonly","cap_smallover","sh_avgvol_o500","sh_price_o20","ta_gap_u10","ta_sma50_pa","ta_sma200_pa"]
-min_relative_volume = 3
+min_relative_volume = 2
 relative_volume_days = 20
 min_rs_percentile = 0
 # 大 gap ADR% 旁路 (同 [morning_gap]): 当日开盘 gap ≥ adr_bypass_gap_percent 时,
@@ -321,10 +321,15 @@ min_rs_percentile = 0
 adr_bypass_gap_percent = 10.0
 adr_bypass_min_percent = 3.0
 
+# EarningsGap: 财报日用 filters_any —— 其中每个代码各跑一次 screen (filters + 该代码), 结果取并集。
+# earningsdate_today 只匹配"今天"发财报的票 (盘前发 → 今天跳空); 昨天盘后发、今天跳空的票
+# 在 Finviz 上是 earningsdate_yesterdayafter, 两者不重叠 (2026-11-26 实测: DELL/HPQ/WDAY 只在后者)。
+# Finviz 会静默忽略单个过滤器里的 `a|b`, 所以只能分两次跑。财报日代码只放 filters_any, 不要留在 filters 里。
 [[longs]]
 key = "earnings_gap"
 name = "Earnings Gap"
-filters = ["ind_stocksonly","cap_smallover","earningsdate_today","sh_avgvol_o500","sh_price_o20","sh_relvol_o1.5","ta_gap_u5","ta_sma50_pa","ta_sma200_pa"]
+filters = ["ind_stocksonly","cap_smallover","sh_avgvol_o500","sh_price_o20","sh_relvol_o1.5","ta_gap_u5","ta_sma50_pa","ta_sma200_pa"]
+filters_any = ["earningsdate_today","earningsdate_yesterdayafter"]
 adr_bypass_gap_percent = 10.0   # 大 gap ADR% 旁路, 说明见 TheSetup
 adr_bypass_min_percent = 3.0
 

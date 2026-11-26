@@ -444,3 +444,27 @@ less than 64 sessions cannot appear in a `3M强:` line or enter the leaders
 master through it; the leaders master itself was not reset (names added under
 the 1M rule stay until the floors / first-break prune remove them). — ETF
 section.
+
+### 2026-11-26 — EarningsGap missed every after-close reporter; TheSetup 3× → 2×
+Started from "why was GEN never scanned" (reported 10-28 after the close,
+gapped +10.5% on 10-29). `earnings_gap` screened on `earningsdate_today`,
+which only matches a company reporting *today*; one that reported yesterday
+after the close — whose gap is today as well — is `earningsdate_yesterdayafter`
+on Finviz. Probed at 22:38 ET on 11-25: `today` = 8 names (DE, LI, …),
+`yesterdayafter` = 12 (DELL, HPQ, WDAY, ADSK, NTNX, …), no overlap; an
+`earningsdate_a|b` OR inside one filter is silently ignored (the screen came
+back unfiltered, 3355 rows). So the group had only ever seen pre-open
+reporters. Fix: a `[[longs]]` group may carry `filters_any` — one screen per
+code (`filters` + that code), results unioned (`main._longs_group_screen`); a
+failed alternative costs only its own tickers. `earnings_gap` now runs
+`earningsdate_today` + `earningsdate_yesterdayafter`; `today` was kept rather
+than narrowed to `todaybefore` so a row without a before/after marker is not
+lost. Same day's check with the full filter set: old screen 0, new one HPQ.
+Not verified: what `yesterdayafter` means on a Monday session (a Friday
+after-close reporter may be missed), and Finviz's day rollover — the screens
+must run before midnight ET, which the 10:00 HKT slot plus the 120-min
+freshness wait only just holds in summer (22:00 EDT + 2h).
+Same request (user decision): `the_setup` `min_relative_volume` 3 → 2.
+Neither change would have caught GEN itself: its gap-day volume was 1.40× the
+20-day average (1.36× the 3-month one, below `sh_relvol_o1.5`) and its 12M
+RS was under 90. — `config.toml` `[[longs]]`, Finviz rule file.

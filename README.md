@@ -105,8 +105,8 @@ Oliver Kell's momentum/breakout setups. Six mutually exclusive groups — the ea
 
 | Priority | Group         | Additional filters                                                                                                |
 | -------- | ------------- | ----------------------------------------------------------------------------------------------------------------- |
-| 0        | `TheSetup`    | Price > $20, Gap Up 10%+, Rel Vol ≥ 3× 20-day avg (yfinance). **No RS gate** — the heavy-volume gap is the signal |
-| 1        | `EarningsGap` | Price > $20, Earnings Today, Rel Vol > 1.5, Gap Up 5%+                                                            |
+| 0        | `TheSetup`    | Price > $20, Gap Up 10%+, Rel Vol ≥ 2× 20-day avg (yfinance). **No RS gate** — the heavy-volume gap is the signal |
+| 1        | `EarningsGap` | Price > $20, Earnings today or yesterday after the close (two screens, unioned), Rel Vol > 1.5, Gap Up 5%+        |
 | 2        | `HighVolume`  | Price > $20, Day Up, Rel Vol ≥ 3× 20-day avg (yfinance)                                                           |
 | 3        | `GapUp`       | Price > $20, Gap Up 3%+                                                                                           |
 | 4        | `NewHigh52W`  | Price > $20, New 52-week High                                                                                     |
