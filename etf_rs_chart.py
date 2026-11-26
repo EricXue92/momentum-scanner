@@ -386,7 +386,7 @@ svg.dim .lab:not(.is-hover) { opacity: 0.4; }
     <div class="fg">
       <div class="lbl">RS 计算周期</div>
       <span class="seg" id="win"></span>
-      <div class="fh">评分回看多长时间:3 个月 = 0.5·R21 + 0.3·R42 + 0.2·R63;12 个月 = 0.4·R63 + 0.2·R126 + 0.2·R189 + 0.2·R252,看长期趋势</div>
+      <div class="fh">评分回看多长时间:3 个月 = 0.4·R21 + 0.3·R42 + 0.3·R63;12 个月 = 0.4·R63 + 0.2·R126 + 0.2·R189 + 0.2·R252,看长期趋势</div>
     </div>
     <div class="fg">
       <div class="lbl">图表显示跨度</div>
@@ -977,7 +977,7 @@ svg.dim .lab:not(.is-hover) { opacity: 0.4; }
 
   // ---------- boot ----------
   $('sub').textContent = '数据截至 ' + dates[n - 1] + ' · 相对 ' + D.benchmark + ' · ' + N + ' 只 ETF · '
-    + n + ' 个交易日 · RS 评分为名单内百分位(非全市场)· 3 个月 RS = 0.5·R21 + 0.3·R42 + 0.2·R63,'
+    + n + ' 个交易日 · RS 评分为名单内百分位(非全市场)· 3 个月 RS = 0.4·R21 + 0.3·R42 + 0.3·R63,'
     + '12 个月 RS = 0.4·R63 + 0.2·R126 + 0.2·R189 + 0.2·R252(看长期趋势)· 生成于 ' + D.generated;
   $('hint').textContent = HINT;
   segmented($('win'), WINS, 'win');

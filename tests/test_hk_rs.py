@@ -65,11 +65,35 @@ def test_score_from_kline_default_weights_unchanged():
 
 def test_score_from_kline_3m_weights_short_history_ok():
     # 70 行平盘 + 末尾跳 +10% → 3M 算法仅需 max(3)*21 + 1 = 64 行
-    # 分数 = 0.5·0.1 + 0.3·0.1 + 0.2·0.1 = 0.10
+    # 分数 = 0.4·0.1 + 0.3·0.1 + 0.3·0.1 = 0.10
     df = _flat_then_jump(100.0, jump_pct=10, n=70)
     score, reason = _score_from_kline(df, weights=WEIGHTS_3M)
     assert reason == "ok"
     assert abs(score - 0.10) < 1e-9
+
+
+def test_score_from_kline_3m_weights_each_lookback_0_4_0_3_0_3():
+    # R21 / R42 / R63 各不相同, 才能把三个权重分开:
+    # RS_3M = 0.4·R21 + 0.3·R42 + 0.3·R63 (2026-11-26 起; 之前 0.5 / 0.3 / 0.2)
+    closes = [90.0] * 70
+    closes[-64] = 80.0    # R63 = 50%
+    closes[-43] = 100.0   # R42 = 20%
+    closes[-22] = 110.0   # R21 = 120/110 - 1
+    closes[-1] = 120.0
+    df = pd.DataFrame({
+        "time_key": pd.date_range(end="2026-05-05", periods=70, freq="B"),
+        "close": closes,
+    })
+    score, reason = _score_from_kline(df, weights=WEIGHTS_3M)
+    assert reason == "ok"
+    expected = 0.4 * (120 / 110 - 1) + 0.3 * 0.20 + 0.3 * 0.50
+    assert abs(score - expected) < 1e-12
+
+
+def test_3m_weights_are_the_same_ladder_in_both_markets():
+    # US (us_rs_3m, 也是 ETF / IPO 用的那一份) 与 HK 各有一个常量, 必须一起改
+    import us_rs_3m
+    assert WEIGHTS_3M == us_rs_3m.WEIGHTS_3M
 
 
 def test_score_from_kline_3m_weights_reject_when_below_min_rows():

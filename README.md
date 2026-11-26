@@ -170,7 +170,7 @@ Names already in the cross-day master that **re-fire an event group today** (The
 
 A daily sector / theme rotation view: a fixed list of 55 ETFs (US sectors and themes) ranked by 3-month relative strength.
 
-- **Scoring:** the same 3M RS formula as stocks (`0.5·R21 + 0.3·R42 + 0.2·R63`, relative to SPY). The percentile is **within the ETF list**, not the stock universe.
+- **Scoring:** the same 3M RS formula as stocks (`0.4·R21 + 0.3·R42 + 0.3·R63`, relative to SPY). The percentile is **within the ETF list**, not the stock universe.
 - **When:** a soft step at the end of every `us-eod` run (a failure never affects EOD); rerun alone with `--mode etf-rs`. Computed locally — one yfinance batch, no cloud step.
 - **Output:** `output/TV/US/<date>_ETF_rs_3m.txt`, one ETF per line, **strongest first**, as `N. TICKER rank-change - name | top-10 holdings` (`N.` = rank):
 
@@ -269,7 +269,7 @@ Post-open only (Futu has no HK pre-market data): 6 scans at +10…+60 min after 
 | Table  | Formula                                                 | Benchmark | Published to                                                                           |
 | ------ | ------------------------------------------------------- | --------- | -------------------------------------------------------------------------------------- |
 | US 12M | `0.4·P3 + 0.2·P6 + 0.2·P9 + 0.2·P12`                    | SPY       | `data/us_rs_12m/<date>.csv` (GitHub Actions, same job as 3M)                           |
-| US 3M  | `0.5·R21 + 0.3·R42 + 0.2·R63`, universe ≈ 5,800 tickers | SPY       | `data/us_rs_3m/<date>.csv` (GitHub Actions)                                            |
+| US 3M  | `0.4·R21 + 0.3·R42 + 0.3·R63`, universe ≈ 5,800 tickers | SPY       | `data/us_rs_3m/<date>.csv` (GitHub Actions)                                            |
 | HK     | both formulas, ranked within the HK main board          | HSI       | `data/hk_rs/<date>.csv` (GitHub Actions)                                               |
 
 The local pipeline only fetches these CSVs (cached in `output/state/`, walking back ≤ 3 days on a miss). Because GitHub's own cron is unreliable, launchd dispatches the workflows ahead of each EOD — see [Automation](#automation).

@@ -16,7 +16,7 @@ One combined CSV per weekday, named `<YYYY-MM-DD>.csv` (ISO date, dashes).
 |--------|------|---------|
 | `code` | string (index) | Futu-format HK code, e.g. `HK.00700` |
 | `rs_percentile_12m` | int (0-99), may be blank | `WEIGHTS_12M = [(3,0.4),(6,0.2),(9,0.2),(12,0.2)]` vs HSI; blank when the ticker lacks ≥253 rows |
-| `rs_percentile_3m` | int (0-99), may be blank | `WEIGHTS_3M = [(1,0.5),(2,0.3),(3,0.2)]` vs HSI; blank when the ticker lacks ≥64 rows |
+| `rs_percentile_3m` | int (0-99), may be blank | `WEIGHTS_3M = [(1,0.4),(2,0.3),(3,0.3)]` vs HSI; blank when the ticker lacks ≥64 rows |
 | `rs_below_ma` | int (0/1) | RS line (price/HSI) below its own EMA21 on the latest bar |
 | `rs_days_below_ma` | int | trailing consecutive sessions the RS line stayed below its MA |
 | `rs_frac_below_ma` | float 0-1 | fraction of the last 20 sessions the RS line was below its MA |

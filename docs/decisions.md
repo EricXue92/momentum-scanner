@@ -468,3 +468,21 @@ Same request (user decision): `the_setup` `min_relative_volume` 3 → 2.
 Neither change would have caught GEN itself: its gap-day volume was 1.40× the
 20-day average (1.36× the 3-month one, below `sh_relvol_o1.5`) and its 12M
 RS was under 90. — `config.toml` `[[longs]]`, Finviz rule file.
+
+### 2026-11-26 — 3M RS weights 0.5 / 0.3 / 0.2 → 0.4 / 0.3 / 0.3
+User decision: `RS_3M = 0.4·R21 + 0.3·R42 + 0.3·R63` (was
+`0.5·R21 + 0.3·R42 + 0.2·R63`) — less weight on the last month, more on the
+full quarter. Lookbacks, the 64-row minimum, benchmarks and every threshold
+(3M ≥ 90) are unchanged; only the two constants moved
+(`us_rs_3m.WEIGHTS_3M`, `hk_rs.WEIGHTS_3M`, a test keeps them equal).
+Everything on the 3M ladder follows: the US and HK cloud tables, the US IPO
+ladder's local score, the ETF ranking file, the `3M强:` holdings line, the
+leaders entry gate and the trend page's 3M window (history is recomputed
+from klines, so the whole 3M line moves at once). The cloud jobs run the
+repo's code, so the published tables switch on the first run after the push;
+`data/us_rs_3m/` / `data/hk_rs/` files up to 2026-11-26 are on the old
+weights and were not regenerated. Until that first new table, a US IPO's
+locally computed score (new weights) is ranked against an old-weight
+`raw_score` distribution — a one-run mismatch, accepted. The first ETF
+`.txt` after the change shows rank-change markers that mix the formula
+change with real movement. — RS gating, ETF section.

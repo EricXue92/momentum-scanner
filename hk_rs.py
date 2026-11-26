@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 # Weight tuples: (months, weight). months 决定回看偏移 (months * 21 个交易日)；
 # weight 按 IBD 风格压在最短窗口上，重叠窗口产生隐式时间衰减。
 WEIGHTS_12M: list[tuple[int, float]] = [(3, 0.4), (6, 0.2), (9, 0.2), (12, 0.2)]
-WEIGHTS_3M:  list[tuple[int, float]] = [(1, 0.5), (2, 0.3), (3, 0.2)]
+WEIGHTS_3M:  list[tuple[int, float]] = [(1, 0.4), (2, 0.3), (3, 0.3)]
 
 # Cloud-published combined CSV (written by .github/workflows/update_hk_rs.yml).
 # Local pipeline reads from raw.githubusercontent.com instead of computing

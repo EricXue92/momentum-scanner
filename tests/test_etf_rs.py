@@ -25,7 +25,7 @@ def _no_holdings_rs_network(monkeypatch):
 
 def _kline(total_return_pct: float, n: int = 90) -> pd.DataFrame:
     """Flat series that jumps by ``total_return_pct`` on the last bar, so the
-    3M score is exactly (0.5+0.3+0.2) * return."""
+    3M score is exactly (0.4+0.3+0.3) * return."""
     closes = [100.0] * (n - 1) + [100.0 * (1 + total_return_pct / 100)]
     return pd.DataFrame({
         "time_key": pd.bdate_range(end="2026-09-11", periods=n),

@@ -99,7 +99,7 @@ consecutive_days = 2
 delisted_after_sessions = 10
 
 # ETF 3M RS 排名: 每天 us-eod 末尾对下面固定 ETF 名单跑一遍 3M RS 算法
-# (0.5·R1M + 0.3·R2M + 0.2·R3M, 减去 benchmark 同期得分, 名单内 0-99 百分位),
+# (0.4·R1M + 0.3·R2M + 0.3·R3M, 减去 benchmark 同期得分, 名单内 0-99 百分位),
 # 写 output/TV/US/<date>_ETF_rs_3m.txt: 每行一只 `TICKER - 中文名`, 最强在最上面。
 # 排名快照: 同日重跑覆盖, 不进 eod_seen 去重, 不镜像 Webull, 不同步 Futu/TV。
 # 带分数的完整表在 EOD 日志里。手动重跑: `uv run main.py --mode etf-rs`。
@@ -121,7 +121,7 @@ chart_top_n = 20          # 走势页里画粗线的名次数 (按最新一天�
 # → ≤ cache_max_age_days 天内旧缓存 → yfinance 前十大 (行尾标 "(前十大)") → 放弃 (不写该行)。
 # 只算美股上市的成分股: 以页面 Symbol 单元格链到 /stocks/<sym>/ 为准 (海外 / 现金 / 期货行跳过),
 # 兜底来源没有这个标记时退回正则 (1-5 个大写字母, 可带 .B 类后缀; 5 字母以 X 结尾的基金代码排除)。
-# 3M 算法与上面的排名文件相同 (0.5·R1M + 0.3·R2M + 0.2·R3M, 对 SPY 超额), 只在该 ETF 内部排序;
+# 3M 算法与上面的排名文件相同 (0.4·R1M + 0.3·R2M + 0.3·R3M, 对 SPY 超额), 只在该 ETF 内部排序;
 # 上市不足 64 根日线的成分股没有 3M 分数, 不参与。
 # 连续 3 次在线抓取失败 (超时 / 403 / 5xx; 404 不算) 后本次不再上网, 只走缓存 / 前十大。
 # 缓存 output/state/etf_holdings_<date>.json (只存 stockanalysis 结果, 8 天清理); 同日重跑读缓存不上网。

@@ -25,7 +25,7 @@ import pandas as pd
 
 logger = logging.getLogger(__name__)
 
-WEIGHTS_3M: list[tuple[int, float]] = [(1, 0.5), (2, 0.3), (3, 0.2)]
+WEIGHTS_3M: list[tuple[int, float]] = [(1, 0.4), (2, 0.3), (3, 0.3)]
 BARS_PER_MONTH = 21
 
 # Cloud-published CSV (written by .github/workflows/update_us_rs_3m.yml).

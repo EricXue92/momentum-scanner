@@ -167,7 +167,7 @@ def test_sleep_between_live_requests_only(tmp_path):
 
 def _kline(ret_pct: float, n: int = 90) -> pd.DataFrame:
     """Flat series that jumps by ``ret_pct`` on the last bar, so the 3M score
-    is exactly (0.5+0.3+0.2) * return (same trick as tests/test_etf_rs.py)."""
+    is exactly (0.4+0.3+0.3) * return (same trick as tests/test_etf_rs.py)."""
     closes = [100.0] * (n - 1) + [100.0 * (1 + ret_pct / 100)]
     return pd.DataFrame({
         "time_key": pd.bdate_range(end="2026-10-30", periods=n),
@@ -200,7 +200,7 @@ def test_rank_holdings_short_history_and_missing_klines_excluded():
 
 def test_rank_holdings_uses_the_3m_ladder_not_the_last_month():
     # OLD: +40% two months ago, flat since. HOT: +8% in the last week only.
-    # 3M ladder (R21/R42/R63): OLD = 0.5·0 + 0.3·40% + 0.2·40% = 20% > HOT = 8%.
+    # 3M ladder (R21/R42/R63): OLD = 0.4·0 + 0.3·40% + 0.3·40% = 24% > HOT = 8%.
     # The retired 1M weekly ladder (R5..R20) scored OLD 0 and put HOT first.
     days = pd.bdate_range(end="2026-10-30", periods=90)
     old = pd.DataFrame({"time_key": days, "close": [100.0] * 55 + [140.0] * 35})
