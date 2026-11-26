@@ -7,7 +7,11 @@ delay_between_requests = 8.0
 output_format = "comma"          # "comma" = AAPL,MSFT  |  "newline" = 一行一个
 
 # 美股全局过滤
-min_dollar_volume = 100_000_000  # Longs: price × 20日均量 ≥ $100M
+## dollar volume 的开关 
+
+# min_dollar_volume = 100_000_000  # Longs: price × 20日均量 ≥ $100M
+min_dollar_volume = 50_000_000  # Longs: price × 20日均量 ≥ $50M
+
 # ADR% = mean((High-Low)/Close) over last `adr_days` bars × 100。捕捉
 # catalyst 波动、过滤无波动的票。套用 Longs/Leaders/RS/Shorts/Morning Gap。设 0 关闭。
 min_adr_percent = 4.0
@@ -143,7 +147,12 @@ top_etfs = 10
 prune = true
 sma_period = 50
 min_price = 20.0
-min_dollar_volume = 100_000_000
+
+
+#### dollar volume 的开关 
+#### min_dollar_volume = 100_000_000
+
+min_dollar_volume = 50_000_000
 min_adr_percent = 3.5
 # 只卡新进名字 (已在名单里的仍只走上面的下限 + SMA50 首破): 收盘价严格高于这些均线,
 # 且全美股 3M RS 百分位 >= 阈值 (云端 data/us_rs_3m 的 rs_percentile)。[] / 0 = 关。
@@ -353,7 +362,7 @@ file_stem = "Repeat"
 
 # Leaders: 强势 + 站上 SMA50/SMA200，5 个 perf 窗口合并去重，输出 Leaders.txt。
 # 共同条件: cap ≥ small、avg vol ≥ 500K (2026-10-03 → 10-10 为 1M)、price > $20。
-# 全局 min_dollar_volume ($100M) 和 min_adr_percent (≥4.0%) 自动套用。
+# 全局 min_dollar_volume ($50M) 和 min_adr_percent (≥4.0%) 自动套用。
 [[leaders]]
 name = "Leaders 4W +30%"
 filters = ["ind_stocksonly","cap_smallover","sh_avgvol_o500","sh_price_o20","ta_perf_4w30o","ta_sma200_pa","ta_sma50_pa"]
@@ -381,7 +390,7 @@ filters = ["ind_stocksonly","cap_smallover","sh_avgvol_o500","sh_price_o20","ta_
 [shorts]
 name = "Short Candidates"
 filters = ["ind_stocksonly", "ta_sma20_pa20", "ta_sma50_pa", "sh_avgvol_o500", "sh_price_o5", "cap_microover"]
-min_dollar_volume = 50_000_000   # Shorts 专用: 比全局 $100M 宽松 (2026-09-23)
+min_dollar_volume = 50_000_000   # Shorts 专用键 (2026-09-23 起 $50M); 全局 2026-11-26 也降到 $50M, 目前两者相同
 min_consecutive_up_days = 3
 # 按市值分级的月涨幅阈值 (%)
 perf_large_cap = 50     # ≥ $10B
@@ -419,7 +428,10 @@ min_pre_volume_ratio = 0.05
 # gap_percent 设 0 关闭旁路; ratio 设 0 = gap 够大即完全豁免。
 pre_volume_bypass_gap_percent = 10.0
 pre_volume_bypass_ratio = 0.02
-min_dollar_volume = 100_000_000
+
+## dollar volume 的开关 
+######## min_dollar_volume = 100_000_000
+min_dollar_volume = 50_000_000
 scan_offsets = [-20, -10, -5, 5, 10, 15, 20, 25, 30]
 offset_tolerance_minutes = 2
 # 趋势闸 (SMA50/SMA200) 的比较基准: true = 盘前/实时价, false = 昨收 (旧行为)。
@@ -448,7 +460,7 @@ adr_bypass_min_percent = 3.0
 # EarningsGap 用形态 (gap + RVol) 替代财报日历。
 [hk_settings]
 min_market_cap          = 300_000_000     # HKD
-min_dollar_volume       = 100_000_000     # HKD; 价 × 20日均量, 对齐美股 $100M
+min_dollar_volume       = 100_000_000     # HKD; 价 × 20日均量 (美股 2026-11-26 降到 $50M, 港股不变)
 min_avg_volume          = 1_000_000       # 5 个长线组统一日均量, 与 Shorts 一致 (2026-10-03 前 500K)
 # ADR% 调低至 3.0 (US 用 4.0)。HK 蓝筹波动率结构性偏低 — 在"放过百强股"
 # 和"还能筛掉静态低波动股"之间取折中。

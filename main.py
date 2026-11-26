@@ -2531,7 +2531,7 @@ def main() -> int:
     delay = settings.get("delay_between_requests", 3.0)
     fmt = settings.get("output_format", "comma")
 
-    # Global dollar volume threshold ($100M) — shared by Longs and RS
+    # Global dollar volume threshold ([settings].min_dollar_volume, $50M) — shared by Longs and RS
     min_dollar_volume = settings.get("min_dollar_volume", 0)
     # Global ADR% threshold — applied to Longs / Leaders / RS / Shorts / HK Shorts /
     # Morning Gap. Replaces the dropped Finviz beta filter for capturing
@@ -2881,7 +2881,7 @@ def main() -> int:
                     perf_large_cap=shorts_cfg.get("perf_large_cap", 50),
                     perf_mid_cap=shorts_cfg.get("perf_mid_cap", 200),
                     perf_small_cap=shorts_cfg.get("perf_small_cap", 300),
-                    min_dollar_volume=shorts_cfg.get("min_dollar_volume", 100_000_000),
+                    min_dollar_volume=shorts_cfg.get("min_dollar_volume", 50_000_000),
                     min_consecutive_up_days=shorts_cfg.get("min_consecutive_up_days", 3),
                     min_adr_percent=shorts_cfg.get("min_adr_percent", min_adr_percent),
                     adr_days=shorts_cfg.get("adr_days", adr_days),

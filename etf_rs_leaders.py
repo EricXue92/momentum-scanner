@@ -28,7 +28,7 @@ into TradingView as they are:
   today (comma-separated; absent when none; a same-day rerun merges, since
   the rerun no longer sees the names the first run removed). Same 5-day rule.
 
-**Floors** (``min_price`` 20 / ``min_dollar_volume`` 100M /
+**Floors** (``min_price`` 20 / ``min_dollar_volume`` 50M /
 ``min_adr_percent`` 3.5, 0 = off): latest close, the 20-session average of
 close × volume, and ADR% = 20-session mean of (High − Low) / Close × 100 (same
 formula as ``main._filter_adr_percent``, but < 20 usable bars → not judged,
@@ -92,7 +92,7 @@ PRUNED_STEM = "ETF_rs_pruned"
 DEFAULT_TOP_ETFS = 10
 DEFAULT_SMA_PERIOD = 50
 DEFAULT_MIN_PRICE = 20.0
-DEFAULT_MIN_DOLLAR_VOLUME = 100_000_000.0
+DEFAULT_MIN_DOLLAR_VOLUME = 50_000_000.0
 DOLLAR_VOLUME_WINDOW = 20
 DEFAULT_MIN_ADR_PERCENT = 3.5
 ADR_WINDOW = 20

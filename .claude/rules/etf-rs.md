@@ -114,7 +114,7 @@ file keeps the cross-cutting pieces: the undated-file exceptions under
   must clear them. They are **not retention rules** — a held name leaves only
   through the floors or the first-break prune, do not apply them to the master
   (→ decisions 2026-11-04, 2026-11-24). **Floors** (`min_price` 20 /
-  `min_dollar_volume` 100M = 20-session mean of close × volume,
+  `min_dollar_volume` 50M = 20-session mean of close × volume,
   `find_floor_drops`; `min_adr_percent` 3.5 = 20-session mean of
   (High − Low) / Close × 100, `find_adr_drops`; 0 = off): a candidate under a floor is **not added** today (enters the day it
   qualifies; no bars → added, pass-through), and an existing name under a
